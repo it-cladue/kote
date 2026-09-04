@@ -29,9 +29,26 @@ from slack_sdk.errors import SlackApiError
 import bridge
 import commands
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def load_dotenv(path):
+    """Yanındaki .env dosyasından SLACK_BOT_TOKEN / SLACK_APP_TOKEN okur (ortam değişkeni varsa ona dokunmaz)."""
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+load_dotenv(os.path.join(HERE, ".env"))
 BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
 APP_TOKEN = os.environ.get("SLACK_APP_TOKEN")
-CONFIG_PATH = os.environ.get("BRIDGE_CONFIG") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+CONFIG_PATH = os.environ.get("BRIDGE_CONFIG") or os.path.join(HERE, "config.json")
 RESOLVE_TTL = 15 * 60   # grup/kişi ID'leri: yeni grup en geç 15 dk'da görülür
 MEMBERS_TTL = 5 * 60    # grup üye listesi: üye değişikliği en geç 5 dk'da görülür
 
@@ -42,7 +59,8 @@ logging.basicConfig(
 log = logging.getLogger("bridge")
 
 if not BOT_TOKEN or not APP_TOKEN:
-    print("SLACK_BOT_TOKEN (xoxb-...) ve SLACK_APP_TOKEN (xapp-...) ortam değişkenleri gerekli.", file=sys.stderr)
+    print("SLACK_BOT_TOKEN (xoxb-...) ve SLACK_APP_TOKEN (xapp-...) gerekli: ortam değişkeni olarak ver ya da "
+          "app.py'nin yanına .env dosyası koy (satır satır SLACK_BOT_TOKEN=... / SLACK_APP_TOKEN=...).", file=sys.stderr)
     sys.exit(1)
 
 app = App(token=BOT_TOKEN, logger=logging.getLogger("bolt"), token_verification_enabled=False)  # auth_test'i main() yapar

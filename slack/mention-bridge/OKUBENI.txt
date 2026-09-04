@@ -1,0 +1,50 @@
+ETİKET KÖPRÜSÜ  (Slack Connect kanalında yazılan @petra -> grup üyelerine bildirim)
+=================================================================================
+
+Bu klasör @petra'nın olduğu workspace'e (yeni zone) kurulur. Eski zone'da hiçbir şey yapılmaz.
+
+1) Slack app'i oluştur (yeni zone'da Owner/Admin ile)
+   - https://api.slack.com/apps > Create New App > From a manifest > workspace: yeni zone
+   - JSON sekmesine manifest.json içeriğini yapıştır > Create
+   - Install to Workspace > Allow
+   - OAuth & Permissions > "Bot User OAuth Token" (xoxb-...) kopyala
+   - Basic Information > App-Level Tokens > Generate (ad: socket, scope: connections:write) > xapp-... kopyala
+   - Kendi kullanıcı ID'n: Slack'te profilin > ... > Copy member ID  (U ile başlar)
+
+2) Bu klasörü sürekli açık bir makineye kopyala (Python 3.9+ kurulu olsun) ve PowerShell'de:
+       cd <bu klasör>
+       .\start.ps1
+   İlk çalıştırma config.json oluşturur ve Notepad'de açar:
+       admins   -> kendi ID'n ya da e-postan
+       keywords -> "petra": ["petra"]  gibi
+   Kaydet, kapat, tekrar .\start.ps1  -> token'ları sorar, .env'e yazar, botu başlatır.
+   "running scripts is disabled" hatası:  powershell -ExecutionPolicy Bypass -File .\start.ps1
+
+   start.ps1 kullanmadan, elle:
+       py -3 -m pip install -r requirements.txt
+       notepad .env      (içine iki satır:  SLACK_BOT_TOKEN=xoxb-...   SLACK_APP_TOKEN=xapp-...)
+       py -3 app.py
+
+3) Botu kanala ekle: paylaşımlı kanalda   /invite @Etiket Köprüsü
+   Bot yalnızca eklendiği kanallarda çalışır; başka kanal için oraya da ekle.
+
+4) Test: eski zone'dan biri kanala "@petra test" yazsın. Kanalda hiçbir şey görünmez,
+   grup üyelerine bottan DM gelir (kanal, yazan, mesaj, "Mesaja git" linki).
+
+5) Yönetim: Slack'te Apps > Etiket Köprüsü'ne DM yaz (sadece admins listesindekiler):
+       yardım | durum | kanallar | liste
+       ekle <etiket> [hedef...]        çıkar <etiket> [hedef...]
+       grup oluştur <handle> [ad]      grup ekle <handle> @kişi ...     grup çıkar <handle> @kişi ...
+       kanal ekle #kanal | kanal çıkar #kanal | kanal temizle
+       mod dm|thread|channel           emoji bell | emoji kapat
+       yetkili ekle @kişi | yetkili çıkar @kişi | yetkili liste
+
+6) Kalıcı servis (Windows, NSSM: https://nssm.cc):
+       nssm install EtiketKoprusu "C:\Python312\python.exe" "C:\kote\mention-bridge\app.py"
+       nssm set EtiketKoprusu AppDirectory "C:\kote\mention-bridge"
+       nssm set EtiketKoprusu AppStdout "C:\kote\logs\bridge.log"
+       nssm set EtiketKoprusu AppStderr "C:\kote\logs\bridge.log"
+       nssm start EtiketKoprusu
+   (.env dosyası klasörde olduğu için token vermek gerekmez. Python yolu: (Get-Command python).Source)
+
+Ayrıntılı anlatım ve sorun giderme: https://github.com/it-cladue/kote  (README, "slack/mention-bridge")

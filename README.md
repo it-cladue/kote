@@ -181,7 +181,10 @@ döner; ayarı genişlet ya da grubu elle aç.
    (`xoxb-…`) kopyala.
 5. **App-level token al.** *Basic Information* > *App-Level Tokens* > *Generate Token and Scopes* > ad `socket`,
    scope `connections:write` > *Generate* > `xapp-…` kopyala.
-6. **Botu kur.** Sürekli açık bir makinede Python 3.9+ olsun. Repo'yu alıp:
+6. **Botu kur.** Sürekli açık bir makinede Python 3.9+ olsun. Windows'ta en kısa yol `start.ps1`: Python'ı bulur,
+   bağımlılığı kurar, ilk çalıştırmada `config.json` oluşturup Notepad'de açar, ikinci çalıştırmada token'ları
+   sorup `.env` dosyasına yazar ve botu başlatır (`.\start.ps1 -Test` testleri koşar, `-Reset` token'ları
+   yeniden sorar). Elle kurmak istersen:
    ```powershell
    cd .\slack\mention-bridge
    pip install -r requirements.txt
@@ -189,7 +192,8 @@ döner; ayarı genişlet ya da grubu elle aç.
    ```
    `admins` alanına kendi e-postanı ya da kullanıcı ID'ni yaz (Slack'te profilin > `⋯` > *Copy member ID*).
    Yetkiyi sonradan DM'den `yetkili ekle @kişi` ile genişletebilirsin.
-7. **Çalıştır ve doğrula.**
+7. **Çalıştır ve doğrula.** Token'ları ortam değişkeni olarak ver ya da `app.py`'nin yanına `.env` dosyası koy
+   (`SLACK_BOT_TOKEN=xoxb-...` ve `SLACK_APP_TOKEN=xapp-...` satırları; dosya git'e girmez):
    ```powershell
    $env:SLACK_BOT_TOKEN = "xoxb-..."
    $env:SLACK_APP_TOKEN = "xapp-..."
@@ -205,7 +209,7 @@ döner; ayarı genişlet ya da grubu elle aç.
    ```powershell
    nssm install EtiketKoprusu "C:\Python312\python.exe" "C:\kote\slack\mention-bridge\app.py"
    nssm set EtiketKoprusu AppDirectory "C:\kote\slack\mention-bridge"
-   nssm set EtiketKoprusu AppEnvironmentExtra SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-...
+   nssm set EtiketKoprusu AppEnvironmentExtra SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-...   # .env varsa gerekmez
    nssm set EtiketKoprusu AppStdout "C:\kote\logs\bridge.log"
    nssm set EtiketKoprusu AppStderr "C:\kote\logs\bridge.log"
    nssm start EtiketKoprusu
