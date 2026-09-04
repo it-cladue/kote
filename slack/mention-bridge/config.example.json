@@ -1,0 +1,19 @@
+{
+  "_aciklama": [
+    "keywords: kanalda düz metin olarak yazılan @etiket -> kime bildirim gidecek.",
+    "Her keyword için hedef listesi: 'petra' gibi bir user group handle'ı, 'ali@firma.com' gibi bir e-posta,",
+    "ya da 'U0123ABCD' gibi bir Slack kullanıcı ID'si. Karışık ve birden fazla olabilir.",
+    "Tek hedef varsa liste yerine düz string de yazılabilir.",
+    "Dosya kaydedilince bot yeniden başlatmadan yeni ayarı alır."
+  ],
+  "keywords": {
+    "petra":  ["petra"],
+    "kote":   ["kote", "mehmet@firma.com"],
+    "fransa": ["ali@firma.com", "ayse@firma.com"],
+    "paris":  "paris"
+  },
+  "channels": [],
+  "reply_mode": "thread",
+  "require_at": true,
+  "reply_template": "{mentions} {author} sizi etiketledi."
+}

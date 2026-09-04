@@ -80,3 +80,97 @@ Notlar:
   `admin.usergroups.addTeams` ise IDP (SCIM) grupları içindir, normal user group'a uygulanmaz.
 - Guest hesaplar user group'a alınamaz.
 - Hangi workspace'te kimin user group açabileceği: *Workspace Settings > Permissions > User Groups*.
+
+## slack/mention-bridge (Etiket Köprüsü)
+
+Bağımsız iki workspace arasında, Slack Connect kanalında düz metin olarak yazılan `@petra` gibi bir etiketi
+**gerçek** user group / kişi mention'ına çeviren küçük bir bot. `@petra`'nın olduğu workspace'e (yeni zone)
+kurulur; eski zone'da hiçbir kurulum ve yetki gerekmez. Socket Mode kullanır, dışa açık endpoint istemez.
+
+Akış: eski zone'dan biri paylaşımlı kanala `@petra sunucu düştü` yazar → grup o workspace'te olmadığı için
+düz metin kalır → bot mesajı görür, aynı thread'e `@petra <yazan kişi> sizi etiketledi.` yazar → bu kez
+mention gerçek olduğu için Çözüm ekibi normal etiket bildirimi alır. Thread'lerde de çalışır.
+
+### Etiketler ve kime gideceği: `config.json`
+
+Bir keyword birden fazla hedefe gidebilir, hedefler karışık olabilir; istediğin kadar keyword tanımlanır.
+
+```json
+{
+  "keywords": {
+    "petra":  ["petra"],
+    "kote":   ["kote", "mehmet@firma.com"],
+    "fransa": ["ali@firma.com", "ayse@firma.com"],
+    "paris":  "paris"
+  },
+  "channels": [],
+  "reply_mode": "thread",
+  "require_at": true,
+  "reply_template": "{mentions} {author} sizi etiketledi."
+}
+```
+
+| Alan | Anlamı |
+|---|---|
+| `keywords` | Kanalda yazılan `@kelime` → hedef listesi. Hedef: user group handle'ı (`petra` ya da `@petra`), e-posta (`ali@firma.com`) ya da Slack kullanıcı ID'si (`U0123ABCD`). Tek hedefse düz string yazılabilir. |
+| `channels` | Boşsa botun eklendiği her kanalda çalışır. Sadece belirli kanallar istenirse kanal ID'leri (`C…`) yazılır. |
+| `reply_mode` | `thread` (varsayılan): mesajın thread'ine yazar, kanal kirlenmez. `channel`: kanala ayrı mesaj atar. |
+| `require_at` | `true`: yalnızca `@petra` tetikler. `false`: düz `petra` kelimesi de tetikler (yanlış pozitif riski). |
+| `reply_template` | `{mentions}` zorunlu, `{author}` isteğe bağlı. |
+
+`config.json` kaydedilince bot yeniden başlatılmadan yeni ayarı alır. Yeni açılan user group / kişi en geç
+15 dakikada görülür. Gerçek mention (`<!subteam^…>`) içeren mesajlar tetiklemez, ekip iki kez bildirim almaz.
+
+### Kurulum, adım adım
+
+1. **App'i oluştur.** [api.slack.com/apps](https://api.slack.com/apps) > *Create New App* > *From a manifest* >
+   workspace olarak **`@petra`'nın olduğu workspace'i** seç > JSON sekmesine `slack/mention-bridge/manifest.json`
+   içeriğini yapıştır > *Create*. Scope'lar, event'ler ve Socket Mode manifestten gelir.
+2. **Workspace'e kur.** *Install to Workspace* > izinleri onayla. *OAuth & Permissions* > **Bot User OAuth Token**
+   (`xoxb-…`) kopyala.
+3. **App-level token al.** *Basic Information* > *App-Level Tokens* > *Generate Token and Scopes* > ad `socket`,
+   scope `connections:write` > *Generate* > `xapp-…` kopyala.
+4. **Botu kur.** Sürekli açık bir makinede Node.js 20+ olsun. Repo'yu alıp:
+   ```powershell
+   cd .\slack\mention-bridge
+   npm install
+   Copy-Item config.example.json config.json    # sonra keywords bölümünü düzenle
+   ```
+5. **Çalıştır ve doğrula.**
+   ```powershell
+   $env:SLACK_BOT_TOKEN = "xoxb-..."
+   $env:SLACK_APP_TOKEN = "xapp-..."
+   npm start
+   ```
+   Çıktıda `Workspace: … bot: …`, `config yüklendi: @petra, …` ve `Hedefler çözüldü: N user group, M kişi`
+   görünmeli. `@x diye bir user group yok` uyarısı varsa handle'ı düzelt.
+6. **Botu paylaşımlı kanala ekle.** Kanalda `/invite @Etiket Köprüsü` yaz (ya da kanal adı > *Integrations* >
+   *Add apps*). Slack Connect kanalında bunu **yeni zone tarafından** biri yapmalı. Bot yalnızca eklendiği
+   kanalları görür.
+7. **Test et.** Eski zone'dan biri kanala `@petra test` yazsın. Thread'e bot yanıtı gelmeli, Çözüm ekibi
+   bildirim almalı. Gelmiyorsa aşağıdaki *Sorun giderme*.
+8. **Servis yap.** Windows'ta [NSSM](https://nssm.cc) ile:
+   ```powershell
+   nssm install EtiketKoprusu "C:\Program Files\nodejs\node.exe" "C:\kote\slack\mention-bridge\app.js"
+   nssm set EtiketKoprusu AppDirectory "C:\kote\slack\mention-bridge"
+   nssm set EtiketKoprusu AppEnvironmentExtra SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-...
+   nssm set EtiketKoprusu AppStdout "C:\kote\logs\bridge.log"
+   nssm set EtiketKoprusu AppStderr "C:\kote\logs\bridge.log"
+   nssm start EtiketKoprusu
+   ```
+   Linux'ta `pm2 start app.js --name etiket-koprusu` ya da bir systemd unit yeterli.
+
+Geliştirme: `npm test` (Slack'e bağlanmadan eşleştirme ve config mantığını test eder), `BRIDGE_DEBUG=1` ile
+ayrıntılı log, `BRIDGE_CONFIG=<yol>` ile farklı config dosyası.
+
+### Sorun giderme
+
+| Belirti | Sebep / çözüm |
+|---|---|
+| Bot hiç yanıt vermiyor | Bot kanala eklenmemiş (`/invite`). `channels` listesi doluysa kanal ID'si orada mı? `BRIDGE_DEBUG=1` ile event geliyor mu bak. Karşı org Slack Connect kanallarında app kısıtlamış olabilir. |
+| `not_in_channel` | Bot kanala eklenmemiş. |
+| `@petra diye bir user group bu workspace'te yok` | Handle yanlış, grup devre dışı ya da token başka workspace'e ait (`Get-SlackUserGroupVisibility.ps1` ile bak). |
+| `x@firma.com bulunamadı` | Kişi bu workspace'te yok ya da `users:read.email` scope'u eksik (manifestten kurulduysa var). |
+| Yanıt geliyor ama ekip bildirim almıyor | User group mention'ı yalnızca **kanalda olan** üyelere gider; ekibin tamamı kanala eklensin. Kişisel bildirim ayarlarında grup mention'ları kapalı olabilir. |
+| `invalid_auth` / `not_allowed_token_type` | `xoxb` ile `xapp` yer değişmiş ya da token başka app/workspace'e ait. |
+| Aynı mesaja iki yanıt | Botun iki kopyası çalışıyor (servis + elle başlatılan). |
