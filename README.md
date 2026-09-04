@@ -106,6 +106,7 @@ Bir keyword birden fazla hedefe gidebilir, hedefler karışık olabilir; istedi�
 
 ```json
 {
+  "admins": ["yonetici@firma.com"],
   "keywords": {
     "petra":  ["petra"],
     "kote":   ["kote", "mehmet@firma.com"],
@@ -121,24 +122,58 @@ Bir keyword birden fazla hedefe gidebilir, hedefler karışık olabilir; istedi�
 
 | Alan | Anlamı |
 |---|---|
+| `admins` | Bota DM'den komut yazabilecek hesaplar (kullanıcı ID'si `U…` ya da e-posta). Boşsa komutlar kapalı. |
 | `keywords` | Kanalda yazılan `@kelime` → hedef listesi. Hedef: user group handle'ı (`petra` ya da `@petra`), e-posta (`ali@firma.com`) ya da Slack kullanıcı ID'si (`U0123ABCD`). Tek hedefse düz string yazılabilir. |
-| `channels` | Boşsa botun eklendiği her kanalda çalışır. Sadece belirli kanallar istenirse kanal ID'leri (`C…`) yazılır. |
+| `channels` | **Boşsa (varsayılan) bot eklendiği her kanalda çalışır**; bir kanalda çalışsın istiyorsan botu o kanala ekle, istemiyorsan kanaldan çıkar (`/remove @Etiket Köprüsü`). Sadece belirli kanallarla sınırlamak istersen kanal ID'leri (`C…`) yazılır ya da DM'den `kanal ekle #kanal`. |
 | `notify_mode` | `dm` (varsayılan): kanala hiçbir şey yazılmaz, üyelere DM. `thread`: mesajın thread'ine gerçek `@petra` mention'ı yazar. `channel`: kanala ayrı mesaj atar. |
 | `require_at` | `true`: yalnızca `@petra` tetikler. `false`: düz `petra` kelimesi de tetikler (yanlış pozitif riski). |
 | `ack_reaction` | Boş: iz yok. `bell` gibi bir emoji adı: orijinal mesaja o emoji konur. |
 | `dm_template` | İsteğe bağlı. `{channel}` `{author}` `{keyword}` `{quote}` `{link}` alanları; `{link}` zorunlu. |
 
-`config.json` kaydedilince bot yeniden başlatılmadan yeni ayarı alır. Yeni açılan grup en geç 15 dakikada,
-gruba eklenen/çıkarılan üye en geç 5 dakikada görülür. Yazan kişi grubun üyesiyse kendine DM gitmez. Gerçek
+`config.json` kaydedilince (elle ya da DM komutuyla) bot yeniden başlatılmadan yeni ayarı alır. Yeni açılan
+grup en geç 15 dakikada, gruba eklenen/çıkarılan üye en geç 5 dakikada görülür. Yazan kişi grubun üyesiyse kendine DM gitmez. Gerçek
 mention (`<!subteam^…>`) içeren mesajlar tetiklemez, ekip iki kez bildirim almaz.
+
+### Yönetim: bota DM'den komut
+
+`config.json` içindeki `admins` listesindeki hesaplar, Slack'te botun DM'ine (sol menü > Apps > Etiket Köprüsü,
+ya da arama kutusuna "Etiket Köprüsü") yazarak her şeyi yönetir; dosyaya elle dokunmak gerekmez. Başka herkes
+"Bu botu yönetme yetkin yok." yanıtı alır. Kişi ve kanal verirken Slack'in otomatik tamamlamasını kullan
+(`@Ali`, `#kanal`); e-posta düz yazılabilir. Komut kelimeleri Türkçe karakter ve büyük/küçük harf duyarsızdır.
+
+| Komut | Ne yapar |
+|---|---|
+| `yardım` | komut listesi |
+| `liste` | tanımlı etiketler ve hedefleri |
+| `ekle <etiket> [hedef…]` | etikete hedef ekler, etiket yoksa açar. Hedef: user group handle'ı, e-posta ya da `@kişi`. Hedef verilmezse etiketle aynı adlı grup. Örn. `ekle fransa ali@firma.com @Ayşe` |
+| `çıkar <etiket> [hedef…]` | hedef çıkarır; hedef verilmezse etiketi siler |
+| `grup liste [handle]` | Slack user group'ları / bir grubun üyeleri |
+| `grup oluştur <handle> [ad]` | **Slack'te gerçek user group açar** ve aynı adla etiket tanımlar. Örn. `grup oluştur paris Paris Ekibi` |
+| `grup ekle <handle> <kişi…>` | Slack user group'una üye ekler. Örn. `grup ekle paris @Ali ayse@firma.com` |
+| `grup çıkar <handle> <kişi…>` | Slack user group'undan üye çıkarır (son üye çıkarılamaz, Slack izin vermez) |
+| `kanallar` | botun içinde olduğu kanallar ve filtre |
+| `kanal ekle #kanal` / `kanal çıkar #kanal` / `kanal temizle` | filtre; boşken bot eklendiği her kanalda çalışır |
+| `mod dm` / `mod thread` / `mod channel` | bildirim biçimi |
+| `emoji bell` / `emoji kapat` | orijinal mesaja konacak emoji |
+| `yetkili liste` / `yetkili ekle @kişi` / `yetkili çıkar @kişi` | komut kullanabilecekler (kendini ve son yetkiliyi çıkaramazsın) |
+| `durum` | workspace, mod, etiketler, çözülen gruplar, yetkililer, Slack'te olmayan gruplar |
+
+Tipik akış, yeni bir ekip için: `grup oluştur paris Paris Ekibi` → `grup ekle paris @Ali @Ayşe` → bitti; artık
+kanalda `@paris` yazılınca Ali ve Ayşe bildirim alır. Sadece kişilere gidecek, gerçek grup istemeyen bir etiket
+için: `ekle fransa ali@firma.com @Ayşe`.
+
+Not: `grup …` komutları Slack'in kendi user group yetkisine tabidir. Workspace ayarı user group yönetimini
+sadece Owner/Admin'e veriyorsa (`Workspace Settings > Permissions > User Groups`) Slack `permission_denied`
+döner; ayarı genişlet ya da grubu elle aç.
 
 ### Adım adım: yeni zone'da (Çözüm ekibi, `@petra`'nın olduğu workspace)
 
 1. **`@petra` hazır olsun.** *More > People & user groups > User groups* içinde `@petra` var ve üyeleri tam.
    Bot bildirimi bu üye listesine göre gönderir.
-2. **Paylaşımlı kanalı aç.** Yeni zone'da `#cozum-talepleri` kanalı oluştur (public). Kanal adına tıkla >
-   *Share channel* (Slack Connect) > eski zone'dan bir yetkilinin e-postasını yaz ya da davet linkini kopyala.
-   Çözüm ekibinin tamamını kanala ekle (DM'deki link bu kanala gider).
+2. **Kanal.** Hâlihazırda iki zone arasında paylaşılan bir Slack Connect kanalı varsa **onu kullan**, yeni
+   kanal gerekmez; tek yapılacak 8. adımda botu o kanala eklemek. Yoksa: yeni zone'da bir kanal aç, kanal
+   adına tıkla > *Share channel* (Slack Connect) > eski zone'dan bir yetkilinin e-postasını yaz ya da davet
+   linkini kopyala. Çözüm ekibinin tamamı kanalda olsun (DM'deki link bu kanala gider).
 3. **App'i oluştur.** [api.slack.com/apps](https://api.slack.com/apps) > *Create New App* > *From a manifest* >
    workspace olarak **yeni zone'u** seç > JSON sekmesine `slack/mention-bridge/manifest.json` içeriğini yapıştır >
    *Create*. Scope'lar, event'ler ve Socket Mode manifestten gelir.
@@ -150,8 +185,10 @@ mention (`<!subteam^…>`) içeren mesajlar tetiklemez, ekip iki kez bildirim al
    ```powershell
    cd .\slack\mention-bridge
    pip install -r requirements.txt
-   Copy-Item config.example.json config.json    # sonra keywords bölümünü düzenle
+   Copy-Item config.example.json config.json    # sonra admins ve keywords bölümlerini düzenle
    ```
+   `admins` alanına kendi e-postanı ya da kullanıcı ID'ni yaz (Slack'te profilin > `⋯` > *Copy member ID*).
+   Yetkiyi sonradan DM'den `yetkili ekle @kişi` ile genişletebilirsin.
 7. **Çalıştır ve doğrula.**
    ```powershell
    $env:SLACK_BOT_TOKEN = "xoxb-..."
@@ -160,8 +197,10 @@ mention (`<!subteam^…>`) içeren mesajlar tetiklemez, ekip iki kez bildirim al
    ```
    Çıktıda `Workspace: … bot: …`, `config yüklendi: @petra, … (mod: dm)` ve `Hedefler çözüldü: N user group, M kişi`
    görünmeli. `@x diye bir user group yok` uyarısı varsa handle'ı düzelt.
-8. **Botu kanala ekle.** `#cozum-talepleri` içinde `/invite @Etiket Köprüsü` yaz (ya da kanal adı >
-   *Integrations* > *Add apps*). Bot yalnızca eklendiği kanalları görür.
+8. **Botu kanala ekle.** Paylaşımlı kanalın içinde `/invite @Etiket Köprüsü` yaz (ya da kanal adı >
+   *Integrations* > *Add apps*). Bot yalnızca eklendiği kanalları görür; **başka kanallarda da çalışsın
+   istiyorsan aynı şekilde oraya da ekle**, `config.json` değişmez. Hangi kanallarda olduğunu DM'den
+   `kanallar` komutu gösterir. Bir kanalda artık çalışmasın: `/remove @Etiket Köprüsü`.
 9. **Servis yap.** Windows'ta [NSSM](https://nssm.cc) ile (Python yolunu `(Get-Command python).Source` verir):
    ```powershell
    nssm install EtiketKoprusu "C:\Python312\python.exe" "C:\kote\slack\mention-bridge\app.py"
@@ -184,12 +223,20 @@ mention (`<!subteam^…>`) içeren mesajlar tetiklemez, ekip iki kez bildirim al
    `@petra` eski zone'da otomatik tamamlamada **çıkmaz**, düz metin kalır; bu normaldir, bot yine yakalar.
 4. **Kurulacak bir şey yok.** App, token, yetki gerekmez.
 
+**App daha önce eski manifestle oluşturulduysa:** api.slack.com/apps > app > *App Manifest* > yeni
+`manifest.json` içeriğini yapıştır > *Save Changes*, sonra *OAuth & Permissions* > **Reinstall to Workspace**
+(yeni scope'lar: `im:history`, `usergroups:write`, `channels:read`, `groups:read`; DM sekmesi açılır).
+Token'lar değişmez.
+
 ### Test
 
 Eski zone'dan biri kanala `@petra test` yazsın. Kanalda hiçbir şey olmaz; Çözüm ekibindeki herkese
 "Etiket Köprüsü" botundan DM gelir, linke tıklayınca mesaj açılır. Gelmiyorsa aşağıdaki *Sorun giderme*.
 
-Geliştirme: `python -m unittest` (Slack'e bağlanmadan eşleştirme, config ve olay işleme mantığını test eder),
+Sonra kendi hesabından bota DM at: `yardım`, `durum`, `kanallar`. Yanıt gelmiyorsa `admins` alanını ve
+app'in *App Home > Messages Tab* ayarını kontrol et (manifestten kurulduysa açık).
+
+Geliştirme: `python -m unittest` (Slack'e bağlanmadan eşleştirme, config, DM komutları ve olay işleme mantığını test eder),
 `BRIDGE_DEBUG=1` ile ayrıntılı log, `BRIDGE_CONFIG=<yol>` ile farklı config dosyası.
 
 ### Sorun giderme
@@ -203,3 +250,6 @@ Geliştirme: `python -m unittest` (Slack'e bağlanmadan eşleştirme, config ve 
 | `DM gönderilemedi (…)` | Kişi devre dışı, ya da `im:write` scope'u eksik (manifest güncellendiyse app'i *Reinstall* et). |
 | `invalid_auth` / `not_allowed_token_type` | `xoxb` ile `xapp` yer değişmiş ya da token başka app/workspace'e ait. |
 | Aynı mesaja iki DM | Botun iki kopyası çalışıyor (servis + elle başlatılan). |
+| Bota DM yazınca yanıt yok | *App Home > Messages Tab* kapalı (manifesti güncelle) ya da `im:history` scope'u eksik (Reinstall). `admins` boşsa "Yönetici tanımlı değil" yanıtı gelir. |
+| `grup ekle` → `permission_denied` | Workspace ayarı user group yönetimini sadece admin'e veriyor: *Workspace Settings > Permissions > User Groups*. |
+| `grup ekle` → `invalid_users` | Kişi bu workspace'in tam üyesi değil (guest ya da başka workspace). |

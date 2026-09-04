@@ -94,6 +94,15 @@ def normalize_config(raw):
         raise ValueError("config: ack_reaction emoji adı (string) olmalı, ör. \"bell\".")
 
     channels = raw.get("channels") or []
+    admins_raw = raw.get("admins") or []
+    if not isinstance(admins_raw, list):
+        raise ValueError('config: "admins" bir liste olmalı (kullanıcı ID\'si ya da e-posta).')
+    admins = []
+    for a in admins_raw:
+        t = parse_target(a, "admins")
+        if t["type"] == "usergroup":
+            raise ValueError(f'config: admins içindeki "{a}" bir kullanıcı ID\'si (U…) ya da e-posta olmalı.')
+        admins.append(t)
     return {
         "keywords": keywords,
         "channels": set(channels) if isinstance(channels, list) else set(),
@@ -102,14 +111,16 @@ def normalize_config(raw):
         "ack_reaction": ack.strip(":"),
         "dm_template": dm_template,
         "reply_template": reply_template,
+        "admins": admins,
     }
 
 
 class ConfigLoader:
-    """Dosya değiştiyse yeniden okur (mtime'a bakar). load() -> (config, changed)."""
+    """Dosya değiştiyse yeniden okur (mtime'a bakar). load() -> (config, changed). save(raw) dosyaya yazar."""
 
     def __init__(self, path):
         self.path = path
+        self.raw = None
         self._config = None
         self._mtime = None
 
@@ -120,8 +131,22 @@ class ConfigLoader:
         with open(self.path, encoding="utf-8") as f:
             raw = json.load(f)
         self._config = normalize_config(raw)
+        self.raw = raw
         self._mtime = mtime
         return self._config, True
+
+    def save(self, raw):
+        """Önce doğrular, sonra atomik yazar (yarım dosya kalmaz). Dönen: yeni normalize config."""
+        config = normalize_config(raw)
+        tmp = self.path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(raw, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp, self.path)
+        self.raw = raw
+        self._config = config
+        self._mtime = os.stat(self.path).st_mtime
+        return config
 
 
 def permalink(team_url, channel, ts, thread_ts=None):

@@ -5,6 +5,10 @@
     "background_color": "#2c2d30"
   },
   "features": {
+    "app_home": {
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
     "bot_user": {
       "display_name": "Etiket Köprüsü",
       "always_online": true
@@ -14,11 +18,15 @@
     "scopes": {
       "bot": [
         "channels:history",
+        "channels:read",
         "groups:history",
-        "chat:write",
+        "groups:read",
+        "im:history",
         "im:write",
+        "chat:write",
         "reactions:write",
         "usergroups:read",
+        "usergroups:write",
         "users:read",
         "users:read.email"
       ]
@@ -28,7 +36,8 @@
     "event_subscriptions": {
       "bot_events": [
         "message.channels",
-        "message.groups"
+        "message.groups",
+        "message.im"
       ]
     },
     "interactivity": {

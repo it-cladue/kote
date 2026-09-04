@@ -3,10 +3,13 @@
     "keywords: kanalda düz metin olarak yazılan @etiket -> kime bildirim gidecek.",
     "Hedef: 'petra' gibi bir user group handle'ı, 'ali@firma.com' gibi bir e-posta ya da 'U0123ABCD' gibi bir kullanıcı ID'si.",
     "Karışık ve birden fazla olabilir; tek hedef varsa liste yerine düz string de yazılabilir.",
+    "admins: bota DM'den komut yazabilecek hesaplar (kullanıcı ID'si ya da e-posta). Boşsa komutlar kapalı.",
+    "channels: boşsa bot eklendiği her kanalda çalışır; sadece belirli kanallar istenirse kanal ID'leri.",
     "notify_mode: dm (kanala hiçbir şey yazılmaz, her üyeye DM) | thread | channel.",
     "ack_reaction: dolu ise orijinal mesaja bu emoji konur (ör. bell), boş ise hiçbir iz bırakılmaz.",
-    "Dosya kaydedilince bot yeniden başlatmadan yeni ayarı alır."
+    "Dosya kaydedilince (elle ya da DM komutuyla) bot yeniden başlatmadan yeni ayarı alır."
   ],
+  "admins": ["yonetici@firma.com"],
   "keywords": {
     "petra":  ["petra"],
     "kote":   ["kote", "mehmet@firma.com"],
