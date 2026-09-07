@@ -155,13 +155,22 @@ def already_seen(key):
 
 # ---------------- kanal mesajları: etiket -> bildirim ----------------
 
+def message_link(client, event):
+    """Slack'in kendi kalıcı linki (thread parametrelerini de o ekler); alınamazsa elle kurulan biçim."""
+    try:
+        return client.chat_getPermalink(channel=event["channel"], message_ts=event["ts"])["permalink"]
+    except Exception as e:  # noqa: BLE001  (link yüzünden bildirim düşmesin)
+        log.debug("chat.getPermalink başarısız (%s); link elle kuruluyor.", e)
+        return bridge.permalink(state["team_url"], event["channel"], event["ts"], event.get("thread_ts"))
+
+
 def notify_by_dm(event, hits, client):
     cfg = state["config"]
     recipients = bridge.recipients_for(hits, cfg, state["resolved"], members_of(client), exclude=(event["user"],))
     if not recipients:
         log.warning('"%s" eşleşti ama bildirim gidecek kimse yok (grup boş / bulunamadı).', ", ".join(hits))
         return 0
-    link = bridge.permalink(state["team_url"], event["channel"], event["ts"], event.get("thread_ts"))
+    link = message_link(client, event)
     text = bridge.build_dm_text(cfg["dm_template"], event["channel"], event["user"], hits, event.get("text"), link)
     sent = 0
     for uid in recipients:

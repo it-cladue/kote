@@ -57,6 +57,13 @@ class FakeClient:
     def users_conversations(self, **_):
         return {"channels": self.channels, "response_metadata": {"next_cursor": ""}}
 
+    permalink_error = None
+
+    def chat_getPermalink(self, channel, message_ts):
+        if self.permalink_error:
+            raise FakeError(self.permalink_error)
+        return {"permalink": f"https://yeni.slack.com/archives/{channel}/p{message_ts.replace('.', '')}?from=api"}
+
     def usergroups_users_list(self, usergroup):
         for gid, users in self.groups.values():
             if gid == usergroup:
@@ -120,14 +127,22 @@ class OnMessage(unittest.TestCase):
         self.assertIn("<#C000000001>", body)
         self.assertIn("<@U000000EXT>", body)
         self.assertIn("> @petra sunucu düştü", body)
-        self.assertIn("https://yeni.slack.com/archives/C000000001/p1700000000000100", body)
+        self.assertIn("https://yeni.slack.com/archives/C000000001/p1700000000000100?from=api", body)  # Slack'in linki
         self.assertEqual(self.client.reactions, [])             # ack_reaction boş: iz yok
+
+    def test_permalink_api_calismazsa_elle_kurulur(self):
+        self.client.permalink_error = "message_not_found"
+        app.on_message(msg("@petra"), self.client)
+        body = self.client.posted[0]["text"]
+        self.assertIn("https://yeni.slack.com/archives/C000000001/p1700000000000100|Mesaja git", body)
+        self.assertNotIn("?from=api", body)
 
     def test_birden_fazla_keyword_tekrarsiz_ve_yazan_haric(self):
         app.on_message(msg("@petra ve @kote bakın", user="U00000002"), self.client)
         self.assertEqual([p["channel"] for p in self.client.posted], ["U00000001", "U00000009", "U00000003"])
 
     def test_thread_yaniti_ayni_threade_link_verir(self):
+        self.client.permalink_error = "fatal_error"   # elle kurulan biçimde thread parametreleri olmalı
         app.on_message(msg("@kote", ts="1700000005.000200", thread_ts="1700000000.000100"), self.client)
         self.assertIn("?thread_ts=1700000000.000100&cid=C000000001", self.client.posted[0]["text"])
 
