@@ -1,7 +1,8 @@
 ETİKET KÖPRÜSÜ  (Slack Connect kanalında yazılan @petra -> grup üyelerine bildirim)
 =================================================================================
 
-Bu klasör @petra'nın olduğu workspace'e (yeni zone) kurulur. Eski zone'da hiçbir şey yapılmaz.
+Bu klasör @petra'nın olduğu workspace'e (yeni zone) kurulur. Etiketin üyeleri tek zone'daysa eski zone'da
+hiçbir şey yapılmaz; üyeler iki zone'a dağılmışsa 7. maddeye bak (zone başına bir bot).
 
 1) Slack app'i oluştur (yeni zone'da Owner/Admin ile)
    - https://api.slack.com/apps > Create New App > From a manifest > workspace: yeni zone
@@ -9,6 +10,8 @@ Bu klasör @petra'nın olduğu workspace'e (yeni zone) kurulur. Eski zone'da hi�
    - Install to Workspace > Allow
    - OAuth & Permissions > "Bot User OAuth Token" (xoxb-...) kopyala
    - Basic Information > App-Level Tokens > Generate (ad: socket, scope: connections:write) > xapp-... kopyala
+   - (isteğe bağlı) OAuth & Permissions > "User OAuth Token" (xoxp-...): DM'den grup açma/üye ekleme komutları
+     için. Yoksa bu komutlar workspace'in "who can manage user groups" ayarına takılabilir (permission_denied).
    - Kendi kullanıcı ID'n: Slack'te profilin > ... > Copy member ID  (U ile başlar)
 
 2) Bu klasörü sürekli açık bir makineye kopyala (Python 3.9+ kurulu olsun) ve PowerShell'de:
@@ -24,11 +27,14 @@ Bu klasör @petra'nın olduğu workspace'e (yeni zone) kurulur. Eski zone'da hi�
    start.ps1 kullanmadan, elle:
        py -3 -m venv .venv
        .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-       notepad .env      (içine iki satır:  SLACK_BOT_TOKEN=xoxb-...   SLACK_APP_TOKEN=xapp-...)
+       notepad .env      (satırlar:  SLACK_BOT_TOKEN=xoxb-...   SLACK_APP_TOKEN=xapp-...   [SLACK_ADMIN_TOKEN=xoxp-...])
        .\.venv\Scripts\python.exe app.py
 
 3) Botu kanala ekle: paylaşımlı kanalda   /invite @Etiket Köprüsü
-   Bot yalnızca eklendiği kanallarda çalışır; başka kanal için oraya da ekle.
+   Bot yalnızca eklendiği kanallarda çalışır; başka kanal için oraya da ekle. Botu kanala ancak kendi
+   workspace'inden biri ekleyebilir; Slack Connect daveti "yalnızca gönderme" izniyle geldiyse app eklenemez,
+   karşı taraf izni "gönderme, davet ve daha fazlası" yapmalı. Grup üyeleri kanalda olsun: kanalda olmayana
+   bildirim gitmez (Slack'in kendi etiketi gibi).
 
 4) Test: eski zone'dan biri kanala "@petra test" yazsın. Kanalda hiçbir şey görünmez,
    grup üyelerine bottan DM gelir (kanal, yazan, mesaj, "Mesaja git" linki).
@@ -64,6 +70,8 @@ Bu klasör @petra'nın olduğu workspace'e (yeni zone) kurulur. Eski zone'da hi�
    - Her zone'da kendi üyeleriyle @petra grubu (yoksa o botun DM'inden: grup oluştur petra, grup ekle petra @kişi).
    - Her bot paylaşımlı kanala KENDİ tarafından /invite edilir.
    - İki NSSM servisi: EtiketKoprusuA (bridge-a), EtiketKoprusuB (bridge-b).
-   Sonuç: kim yazarsa yazsın A'daki bot A üyelerine, B'deki bot B üyelerine DM atar; kimse iki kez almaz.
+   Sonuç: kim yazarsa yazsın A'daki bot A üyelerine, B'deki bot B üyelerine DM atar. Her hesap en fazla bir
+   bildirim alır; iki zone'da da hesabı olan iki hesabına da alır. İki botta da mod dm, emoji kapalı kalsın.
+   Bir etiketi silmek/eklemek iki botta ayrı yapılır; iki yetkili haberleşsin.
 
 Ayrıntılı anlatım ve sorun giderme: https://github.com/it-cladue/kote  (README, "slack/mention-bridge")

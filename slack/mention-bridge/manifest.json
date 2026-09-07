@@ -29,6 +29,12 @@
         "usergroups:write",
         "users:read",
         "users:read.email"
+      ],
+      "user": [
+        "usergroups:read",
+        "usergroups:write",
+        "users:read",
+        "users:read.email"
       ]
     }
   },

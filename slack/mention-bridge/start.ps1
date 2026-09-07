@@ -77,9 +77,13 @@ if ($Reset -or -not (Test-Path .env)) {
     Write-Host "Slack token'ları (api.slack.com/apps > Etiket Köprüsü):"
     $bot = (Read-Host "  Bot User OAuth Token   (OAuth & Permissions, xoxb-...)").Trim()
     $app = (Read-Host "  App-Level Token        (Basic Information > App-Level Tokens, xapp-...)").Trim()
+    $adm = (Read-Host "  User OAuth Token       (xoxp-..., 'grup' komutları için; boş bırakılabilir)").Trim()
     if ($bot -notlike 'xoxb-*') { throw "Bot token 'xoxb-' ile başlamalı." }
     if ($app -notlike 'xapp-*') { throw "App-level token 'xapp-' ile başlamalı." }
-    @("SLACK_BOT_TOKEN=$bot", "SLACK_APP_TOKEN=$app") | Set-Content -Path .env -Encoding ascii
+    if ($adm -and $adm -notlike 'xoxp-*') { throw "User OAuth Token 'xoxp-' ile başlamalı (ya da boş bırak)." }
+    $lines = @("SLACK_BOT_TOKEN=$bot", "SLACK_APP_TOKEN=$app")
+    if ($adm) { $lines += "SLACK_ADMIN_TOKEN=$adm" }
+    $lines | Set-Content -Path .env -Encoding ascii
     Write-Host ".env yazıldı. Servis çalışıyorsa yeni token'ı alması için: nssm restart <servis adı>"
 }
 

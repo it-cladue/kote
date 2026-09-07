@@ -15,26 +15,28 @@ MAILTO_RE = re.compile(r"^<mailto:([^|>]+)(?:\|[^>]*)?>$")
 SUBTEAM_RE = re.compile(r"^<!subteam\^[A-Z0-9]+\|@?([^>]+)>$")
 LINK_RE = re.compile(r"^<(?:https?|ftp):[^>]*>$")
 
+TWO_ZONE_NOTE = "⚠️ İki zone'lu kurulumda bu ayar iki botta da iz bırakır (çift yanıt/emoji). İki bot varsa `mod dm` ve `emoji kapat` kalsın."
+
 HELP = """*Etiket Köprüsü komutları* (sadece yetkililer, bu DM'den)
 
 *Etiketler* (kanalda `@etiket` yazılınca kime bildirim gidecek)
 • `liste`  tanımlı etiketler
 • `ekle <etiket> [hedef…]`  etikete hedef ekler; etiket yoksa açar. Hedef: user group handle'ı (`petra`), e-posta ya da `@kişi`. Hedef verilmezse etiketle aynı adlı grup kullanılır.
-• `çıkar <etiket> [hedef…]`  hedef çıkarır; hedef verilmezse etiketi siler
+• `çıkar <etiket> [hedef…]`  hedef çıkarır; hedef verilmezse etiketi siler (son etiket silinemez)
 
-*Slack user group'ları* (gerçek gruplar)
+*Slack user group'ları* (gerçek gruplar; workspace ayarı user group yönetimine izin vermeli ya da `.env` içinde `SLACK_ADMIN_TOKEN` olmalı)
 • `grup liste [handle]`  gruplar / bir grubun üyeleri
-• `grup oluştur <handle> [ad]`  Slack'te yeni user group açar ve aynı adla etiket tanımlar
+• `grup oluştur <handle> [ad]`  Slack'te yeni user group açar (devre dışıysa aktif eder) ve aynı adla etiket tanımlar
 • `grup ekle <handle> <kişi…>`  gruba üye ekler (e-posta ya da `@kişi`)
 • `grup çıkar <handle> <kişi…>`  gruptan üye çıkarır
 
 *Ayarlar*
 • `kanallar`  botun içinde olduğu kanallar ve filtre
 • `kanal ekle <#kanal…>` / `kanal çıkar <#kanal…>` / `kanal temizle`  filtre boşsa bot eklendiği her kanalda çalışır
-• `mod dm|thread|channel`  bildirim biçimi
-• `emoji <ad>` / `emoji kapat`  orijinal mesaja konacak emoji
+• `mod dm|thread|channel`  bildirim biçimi (iki zone'lu kurulumda `dm` kalsın)
+• `emoji <ad>` / `emoji kapat`  orijinal mesaja konacak emoji (iki zone'lu kurulumda kapalı kalsın)
 • `yetkili liste` / `yetkili ekle <@kişi…>` / `yetkili çıkar <@kişi…>`
-• `durum`  bağlantı ve özet"""
+• `durum`  bağlantı, son bildirim, çözülemeyen hedefler ve özet"""
 
 
 class CommandError(Exception):
@@ -42,7 +44,7 @@ class CommandError(Exception):
 
 
 def norm_word(word):
-    return word.strip().lower().translate(TR_MAP)
+    return word.strip().translate(TR_MAP).lower()
 
 
 def tokenize(text):
@@ -86,6 +88,12 @@ SUBVERBS = {
 }
 
 
+def is_command(text):
+    """Metin bilinen bir komutla mı başlıyor? (Yetkisiz kişilerin 'teşekkürler' gibi DM'lerini ayırt etmek için.)"""
+    tokens = tokenize(text)
+    return bool(tokens) and norm_word(tokens[0]) in VERBS
+
+
 def parse(text):
     """-> ("ekle", ["petra", "ali@firma.com"]) | ("grup olustur", [...]) | ... CommandError bilinmeyende."""
     tokens = tokenize(text)
@@ -107,9 +115,14 @@ def parse(text):
 # ---- config.json (raw dict) üzerinde çalışan komutlar ----
 
 def _keyword(arg):
-    key = arg.strip().lstrip("@").lower()
+    raw = arg.strip()
+    if bridge.USER_ID_RE.match(raw) or bridge.CHANNEL_ID_RE.match(raw) or bridge.EMAIL_RE.match(raw):
+        raise CommandError("Etiket adı bir kişi, kanal ya da e-posta olamaz; düz bir ad yaz (ör. `petra`). Kişiler hedef olarak verilir: `ekle petra @Ali`.")
+    key = bridge.fold(raw.lstrip("@"))
     if not key or not bridge.HANDLE_RE.match(key):
         raise CommandError(f"`{arg}` geçerli bir etiket adı değil (harf, rakam, nokta, tire, alt çizgi).")
+    if key.startswith("_"):
+        raise CommandError("Etiket adı `_` ile başlayamaz.")
     return key
 
 
@@ -140,21 +153,43 @@ def _target_show(t):
     return f"<@{t['id']}>"
 
 
+def _canon(value, keyword):
+    return _target_str(bridge.parse_target(value, keyword))
+
+
 def _keywords_raw(raw):
+    """keywords sözlüğünü kanonik hale getirir: anahtarlar küçük harf ve @'sız, değerler liste, çakışanlar birleşik."""
     kws = raw.setdefault("keywords", {})
+    canon = {}
     for k, v in list(kws.items()):
-        if not isinstance(v, list):
-            kws[k] = [v]
+        if k.startswith("_"):
+            canon[k] = v
+            continue
+        key = bridge.fold(k.strip().lstrip("@"))
+        items = list(v) if isinstance(v, list) else [v]
+        if key in canon and isinstance(canon[key], list):
+            for t in items:
+                if t not in canon[key]:
+                    canon[key].append(t)
+        else:
+            canon[key] = items
+    kws.clear()
+    kws.update(canon)
     return kws
 
 
+def _tag_keys(kws):
+    return [k for k in kws if not k.startswith("_")]
+
+
 def cmd_liste(raw, args, ctx):
-    kws = {k: v for k, v in _keywords_raw(raw).items() if not k.startswith("_")}
-    if not kws:
+    kws = _keywords_raw(raw)
+    keys = _tag_keys(kws)
+    if not keys:
         return "Tanımlı etiket yok. `ekle <etiket> [hedef…]` ile ekle."
     lines = []
-    for k, targets in kws.items():
-        shown = ", ".join(_target_show(bridge.parse_target(t, k)) for t in targets)
+    for k in keys:
+        shown = ", ".join(_target_show(bridge.parse_target(t, k)) for t in kws[k])
         lines.append(f"• `@{k}` → {shown}")
     return "*Etiketler*\n" + "\n".join(lines)
 
@@ -166,7 +201,7 @@ def cmd_ekle(raw, args, ctx):
     targets = _targets(args[1:], key) if len(args) > 1 else [{"type": "usergroup", "handle": key}]
     kws = _keywords_raw(raw)
     current = kws.setdefault(key, [])
-    existing = {_target_str(bridge.parse_target(t, key)) for t in current}
+    existing = {_canon(t, key) for t in current}
     added, warn = [], []
     for t in targets:
         s = _target_str(t)
@@ -191,17 +226,23 @@ def cmd_cikar(raw, args, ctx):
     kws = _keywords_raw(raw)
     if key not in kws:
         raise CommandError(f"`@{key}` diye bir etiket yok.")
-    if len(args) == 1:
+
+    def delete_tag():
+        if len(_tag_keys(kws)) <= 1:
+            raise CommandError("Son etiketi silemezsin; önce başka bir etiket ekle.")
         del kws[key]
-        return f"`@{key}` etiketi silindi."
+
+    if len(args) == 1:
+        delete_tag()
+        return f"`@{key}` etiketi silindi. (İki zone'lu kurulumda diğer zone'un botunda da silinmesi gerekir.)"
     remove = {_target_str(t) for t in _targets(args[1:], key)}
     before = list(kws[key])
-    kws[key] = [t for t in before if _target_str(bridge.parse_target(t, key)) not in remove]
+    kws[key] = [t for t in before if _canon(t, key) not in remove]
     gone = [t for t in before if t not in kws[key]]
     if not gone:
         raise CommandError("Bu hedefler zaten etikette yok.")
     if not kws[key]:
-        del kws[key]
+        delete_tag()
         return f"Çıkarıldı: {', '.join(gone)}. Hedef kalmadığı için `@{key}` etiketi silindi."
     return f"Çıkarıldı: {', '.join(gone)}\n`@{key}` → " + ", ".join(kws[key])
 
@@ -209,7 +250,7 @@ def cmd_cikar(raw, args, ctx):
 def _channel_ids(args):
     ids = []
     for a in args:
-        if not re.match(r"^[CG][A-Z0-9]{8,}$", a):
+        if not bridge.CHANNEL_ID_RE.match(a):
             raise CommandError(f"`{a}` bir kanal değil. Kanalı `#` ile seçerek yaz (Slack otomatik tamamlasın).")
         ids.append(a)
     if not ids:
@@ -223,7 +264,8 @@ def cmd_kanal_ekle(raw, args, ctx):
     for c in ids:
         if c not in chans:
             chans.append(c)
-    return "Filtre: " + ", ".join(f"<#{c}>" for c in chans) + "\nBot artık sadece bu kanallarda çalışır."
+    return ("Filtre: " + ", ".join(f"<#{c}>" for c in chans) + "\nBot artık sadece bu kanallarda çalışır. "
+            "(Bot zaten yalnızca eklendiği kanallarda çalışır; iki zone'lu kurulumda filtreyi boş bırakmak daha güvenlidir.)")
 
 
 def cmd_kanal_cikar(raw, args, ctx):
@@ -247,7 +289,10 @@ def cmd_mod(raw, args, ctx):
     desc = {"dm": "kanala hiçbir şey yazılmaz, üyelere DM gider",
             "thread": "mesajın thread'ine gerçek mention yazılır",
             "channel": "kanala ayrı mesaj yazılır"}[raw["notify_mode"]]
-    return f"Mod: `{raw['notify_mode']}` ({desc})."
+    out = f"Mod: `{raw['notify_mode']}` ({desc})."
+    if raw["notify_mode"] != "dm":
+        out += "\n" + TWO_ZONE_NOTE
+    return out
 
 
 def cmd_emoji(raw, args, ctx):
@@ -260,11 +305,22 @@ def cmd_emoji(raw, args, ctx):
     if not re.match(r"^[a-z0-9_+-]+$", name):
         raise CommandError(f"`{args[0]}` geçerli bir emoji adı değil (ör. `bell`, `eyes`, `white_check_mark`).")
     raw["ack_reaction"] = name
-    return f"Emoji: :{name}: (etiket yakalanınca orijinal mesaja konur)."
+    return f"Emoji: :{name}: (etiket yakalanınca orijinal mesaja konur).\n" + TWO_ZONE_NOTE
 
 
 def _admins_raw(raw):
-    return raw.setdefault("admins", [])
+    """admins listesini kanonik hale getirir (e-postalar küçük harf, tekrarlar atılır)."""
+    admins = raw.setdefault("admins", [])
+    canon = []
+    for a in admins:
+        try:
+            s = _canon(a, "admins")
+        except ValueError:
+            s = str(a)
+        if s not in canon:
+            canon.append(s)
+    admins[:] = canon
+    return admins
 
 
 def cmd_yetkili_liste(raw, args, ctx):
@@ -297,9 +353,8 @@ def cmd_yetkili_cikar(raw, args, ctx):
     remaining = [a for a in admins if a not in remove]
     if not remaining:
         raise CommandError("Son yetkiliyi çıkaramazsın; önce başka bir yetkili ekle.")
-    me = ctx.get("me")
-    me_email = ctx.get("me_email")
-    if me and me not in remaining and (not me_email or me_email not in remaining):
+    me_keys = {k for k in (ctx.get("me"), (ctx.get("me_email") or "").lower()) if k}
+    if me_keys and not (me_keys & set(remaining)):
         raise CommandError("Kendini yetkiden çıkaramazsın; bunu başka bir yetkili yapmalı.")
     gone = [a for a in admins if a in remove]
     if not gone:

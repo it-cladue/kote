@@ -41,7 +41,10 @@ class FindKeywords(unittest.TestCase):
         self.assertEqual(bridge.find_keywords(t, KW), [])
         # başka workspace'in grubu: "@petra" olur -> eşleşir
         t = bridge.expose_foreign_subteams("<!subteam^S999|@petra> bak", local)
-        self.assertEqual(t, "@petra bak")
+        self.assertEqual(t.split(), ["@petra", "bak"])
+        self.assertEqual(bridge.find_keywords(t, KW), ["petra"])
+        # bitişik ek / karakter eşleşmeyi bozmaz
+        t = bridge.expose_foreign_subteams("x<!subteam^S999|@petra>lar", local)
         self.assertEqual(bridge.find_keywords(t, KW), ["petra"])
         # handle'sız token ve boş metin
         self.assertEqual(bridge.expose_foreign_subteams("<!subteam^S999> x", local), "<!subteam^S999> x")
@@ -50,6 +53,20 @@ class FindKeywords(unittest.TestCase):
     def test_alintida_grup_etiketi_duz_metin(self):
         self.assertEqual(bridge.quote("<!subteam^S111|@petra> acil"), "> @petra acil")
         self.assertEqual(bridge.plain_subteams("<!subteam^S1> x"), "@grup x")
+
+    def test_kod_icindeki_etiket_tetiklemez(self):
+        self.assertEqual(bridge.find_keywords("etiket için `@petra` yazın", KW), [])
+        self.assertEqual(bridge.find_keywords("```\n@petra\n```", KW), [])
+        self.assertEqual(bridge.find_keywords("`@petra` değil @petra", KW), ["petra"])
+
+    def test_noktali_handle_ayri_etikettir(self):
+        self.assertEqual(bridge.find_keywords("@petra.ops bakar mı", KW + ["petra.ops"]), ["petra.ops"])
+        self.assertEqual(bridge.find_keywords("@petra. Sonra", KW), ["petra"])
+
+    def test_turkce_buyuk_harf(self):
+        self.assertEqual(bridge.find_keywords("@İŞ acil", ["iş"]), ["iş"])
+        self.assertEqual(bridge.find_keywords("@PARİS", KW), ["paris"])
+        self.assertEqual(bridge.fold("İstanbul Iıİ"), "istanbul iıi".replace("ı", "i"))
 
     def test_require_at_false(self):
         self.assertEqual(bridge.find_keywords("petra bakar mı", KW, require_at=False), ["petra"])
@@ -97,6 +114,27 @@ class Config(unittest.TestCase):
         self.assertTrue(c["require_at"])
         self.assertEqual(c["ack_reaction"], "")
         self.assertEqual(c["channels"], set())
+
+    def test_anahtarlar_kanonik_ve_birlesik(self):
+        c = bridge.normalize_config({"keywords": {"@Fransa": ["ali@firma.com"], "fransa": ["U0123ABCD"], "İş": "is"}})
+        self.assertEqual(sorted(c["keywords"]), ["fransa", "iş"])
+        self.assertEqual([t["type"] for t in c["keywords"]["fransa"]], ["email", "user"])
+
+    def test_sablon_ve_require_at_dogrulanir(self):
+        with self.assertRaisesRegex(ValueError, "dm_template hatalı"):
+            bridge.normalize_config({"keywords": {"petra": "petra"}, "dm_template": "{link} {kanal}"})
+        with self.assertRaisesRegex(ValueError, "dm_template"):
+            bridge.normalize_config({"keywords": {"petra": "petra"}, "dm_template": "link yok"})
+        with self.assertRaisesRegex(ValueError, "require_at"):
+            bridge.normalize_config({"keywords": {"petra": "petra"}, "require_at": "false"})
+        ok = bridge.normalize_config({"keywords": {"petra": "petra"}, "dm_template": "{keyword} -> {link}"})
+        self.assertEqual(ok["dm_template"], "{keyword} -> {link}")
+
+    def test_alinti_token_ortasinda_kesilmez(self):
+        text = "x " * 190 + "<@U0123456789ABCDEFGH|uzun-isim-buraya>"
+        q = bridge.quote(text, limit=400)
+        self.assertNotIn("<@", q)
+        self.assertTrue(q.endswith("…"))
 
     def test_hatali_girisler(self):
         with self.assertRaisesRegex(ValueError, "keywords"):

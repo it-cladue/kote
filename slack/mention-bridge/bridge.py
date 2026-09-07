@@ -6,13 +6,17 @@ import json
 import os
 import re
 import shutil
+import threading
 import time
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 USER_ID_RE = re.compile(r"^[UW][A-Z0-9]{8,}$")
+CHANNEL_ID_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
 HANDLE_RE = re.compile(r"^[\w.-]+$")
 TOKEN_RE = re.compile(r"<[^>]*>")
+CODE_RE = re.compile(r"```.*?```|`[^`\n]*`", re.S)
 SUBTEAM_TOKEN_RE = re.compile(r"<!subteam\^([A-Z0-9]+)(?:\|@?([^>|]+))?>")
+TR_FOLD = str.maketrans({"İ": "i", "ı": "i"})   # Türkçe İ/ı, lower() öncesi (İ.lower() = 'i' + nokta işareti olurdu)
 NOTIFY_MODES = ("dm", "thread", "channel")
 
 DEFAULT_DM_TEMPLATE = (
@@ -24,27 +28,43 @@ DEFAULT_REPLY_TEMPLATE = "{mentions} {author} sizi etiketledi."
 QUOTE_MAX = 400
 
 
-def strip_slack_tokens(text):
-    """Slack'in kendi token'larını (<@U..>, <!subteam^S..|@petra>, <#C..>, <http..>) metinden atar.
+def fold(text):
+    """Büyük/küçük harf ve Türkçe İ/ı duyarsız karşılaştırma için."""
+    return (text or "").translate(TR_FOLD).lower()
 
-    Atılmazsa gerçek bir @petra mention'ının içindeki "@petra" da yakalanır ve ekip iki kez bildirim alır.
+
+def strip_slack_tokens(text):
+    """Kod bloklarını/aralıklarını ve Slack'in kendi token'larını (<@U..>, <!subteam^S..|@petra>, <#C..>, <http..>) atar.
+
+    Token atılmazsa gerçek bir @petra mention'ının içindeki "@petra" da yakalanır ve ekip iki kez bildirim alır.
+    Kod içindeki `@petra` ("etiketi şöyle kullanın: `@petra`") tetiklemez.
     """
-    return TOKEN_RE.sub(" ", text or "")
+    return TOKEN_RE.sub(" ", CODE_RE.sub(" ", text or ""))
 
 
 def expose_foreign_subteams(text, local_group_ids):
-    """Başka workspace'in gerçek grup etiketini (<!subteam^S…|@petra>) düz "@petra" metnine çevirir.
+    """Başka workspace'in gerçek grup etiketini (<!subteam^S…|@petra>) düz " @petra " metnine çevirir.
 
     İki zone'lu kurulumda A'dan biri otomatik tamamlamayla gerçek @petra yazınca Slack yalnızca A'daki
     üyeleri bildirir; B'deki botun bunu düz "@petra" gibi görüp B'deki üyelere haber vermesi gerekir.
     Kendi workspace'imizin grubu ise olduğu gibi bırakılır (strip_slack_tokens atar; Slack zaten bildirdi).
+    Boşluklarla çevrelenir ki "…>lar" gibi bitişik ekler eşleşmeyi bozmasın.
     """
     def repl(m):
         sid, handle = m.group(1), m.group(2)
         if sid in local_group_ids or not handle:
             return m.group(0)
-        return "@" + handle.strip()
+        return f" @{handle.strip()} "
     return SUBTEAM_TOKEN_RE.sub(repl, text or "")
+
+
+def local_mentioned_handles(text, id_to_handle):
+    """Mesajda gerçek etiketi geçen KENDİ gruplarımızın handle'ları (Slack zaten bildirdi; tekrar bildirme)."""
+    out = set()
+    for sid, _ in SUBTEAM_TOKEN_RE.findall(text or ""):
+        if sid in id_to_handle:
+            out.add(id_to_handle[sid])
+    return out
 
 
 def plain_subteams(text):
@@ -55,13 +75,14 @@ def plain_subteams(text):
 def find_keywords(text, keywords, require_at=True):
     """Metinde geçen keyword'leri config'deki sırayla, tekrarsız döndürür.
 
-    "@petra", "@Petra", "@petra'ya", "(@petra)" eşleşir; "@petrax", "ali@petra.com", "@petra-2" eşleşmez.
+    "@petra", "@Petra", "@petra'ya", "(@petra)", "@petra." eşleşir;
+    "@petrax", "ali@petra.com", "@petra-2", "@petra.ops" (ayrı bir handle) eşleşmez.
     """
-    clean = strip_slack_tokens(text).lower()
+    clean = fold(strip_slack_tokens(text))
     at = "@" if require_at else "@?"
     found = []
     for kw in keywords:
-        pattern = r"(?<![\w@])" + at + re.escape(kw.lower()) + r"(?![\w-])"
+        pattern = r"(?<![\w@])" + at + re.escape(fold(kw)) + r"(?![\w-]|\.\w)"
         if re.search(pattern, clean):
             found.append(kw)
     return found
@@ -82,7 +103,7 @@ def parse_target(raw, keyword):
             f'config: "{keyword}" altındaki "{raw}" ne e-posta, ne kullanıcı ID\'si, '
             f"ne de geçerli bir user group handle'ı."
         )
-    return {"type": "usergroup", "handle": handle.lower()}
+    return {"type": "usergroup", "handle": fold(handle)}
 
 
 def normalize_config(raw):
@@ -92,13 +113,19 @@ def normalize_config(raw):
     for kw, value in raw["keywords"].items():
         if kw.startswith("_"):  # "_aciklama" gibi notlar
             continue
-        key = kw.strip().lstrip("@").lower()
+        key = fold(kw.strip().lstrip("@"))
         if not key:
             raise ValueError("config: boş keyword.")
         targets = value if isinstance(value, list) else [value]
         if not targets:
             raise ValueError(f'config: "{kw}" için en az bir hedef gerekli.')
-        keywords[key] = [parse_target(t, kw) for t in targets]
+        parsed = [parse_target(t, kw) for t in targets]
+        if key in keywords:  # "@Fransa" ve "fransa" aynı etiket
+            for t in parsed:
+                if t not in keywords[key]:
+                    keywords[key].append(t)
+        else:
+            keywords[key] = parsed
     if not keywords:
         raise ValueError("config: hiç keyword tanımlı değil.")
 
@@ -106,12 +133,27 @@ def normalize_config(raw):
     if mode not in NOTIFY_MODES:
         raise ValueError(f'config: notify_mode {", ".join(NOTIFY_MODES)} olmalı, "{mode}" değil.')
 
+    require_at = raw.get("require_at", True)
+    if not isinstance(require_at, bool):
+        raise ValueError("config: require_at true ya da false olmalı (tırnaksız).")
+
     dm_template = raw.get("dm_template")
-    if not isinstance(dm_template, str) or "{link}" not in dm_template:
+    if dm_template is None:
         dm_template = DEFAULT_DM_TEMPLATE
+    elif not isinstance(dm_template, str) or "{link}" not in dm_template:
+        raise ValueError("config: dm_template bir metin olmalı ve {link} içermeli.")
+    try:
+        build_dm_text(dm_template, "C0", "U0", ["k"], "q", "l")
+    except (KeyError, IndexError, ValueError) as e:
+        raise ValueError(
+            f"config: dm_template hatalı ({e}). Kullanılabilir alanlar: {{channel}} {{author}} {{keyword}} {{quote}} {{link}}"
+        )
     reply_template = raw.get("reply_template")
-    if not isinstance(reply_template, str) or "{mentions}" not in reply_template:
+    if reply_template is None:
         reply_template = DEFAULT_REPLY_TEMPLATE
+    elif not isinstance(reply_template, str) or "{mentions}" not in reply_template:
+        raise ValueError("config: reply_template bir metin olmalı ve {mentions} içermeli.")
+
     ack = raw.get("ack_reaction") or ""
     if not isinstance(ack, str):
         raise ValueError("config: ack_reaction emoji adı (string) olmalı, ör. \"bell\".")
@@ -125,12 +167,13 @@ def normalize_config(raw):
         t = parse_target(a, "admins")
         if t["type"] == "usergroup":
             raise ValueError(f'config: admins içindeki "{a}" bir kullanıcı ID\'si (U…) ya da e-posta olmalı.')
-        admins.append(t)
+        if t not in admins:
+            admins.append(t)
     return {
         "keywords": keywords,
         "channels": set(channels) if isinstance(channels, list) else set(),
         "notify_mode": mode,
-        "require_at": raw.get("require_at", True) is not False,
+        "require_at": require_at,
         "ack_reaction": ack.strip(":"),
         "dm_template": dm_template,
         "reply_template": reply_template,
@@ -139,8 +182,8 @@ def normalize_config(raw):
 
 
 def atomic_write_json(path, data):
-    """Önce .tmp'ye yazar, sonra yerine koyar; Windows'ta dosya kısa süre kilitliyse birkaç kez dener."""
-    tmp = path + ".tmp"
+    """Önce benzersiz bir .tmp'ye yazar, sonra yerine koyar; Windows'ta dosya kısa süre kilitliyse birkaç kez dener."""
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
@@ -182,12 +225,19 @@ class ConfigLoader:
         mtime = os.stat(self.path).st_mtime
         if self._config is not None and mtime == self._mtime:
             return self._config, False
-        with open(self.path, encoding="utf-8") as f:
+        with open(self.path, encoding="utf-8-sig") as f:
             raw = json.load(f)
         self._config = normalize_config(raw)
         self.raw = raw
         self._mtime = mtime
         return self._config, True
+
+    def disk_changed(self):
+        """Diskteki dosya belleğe alınandan farklı mı (elle düzenlenmiş ve henüz okunamamış olabilir)."""
+        try:
+            return os.stat(self.path).st_mtime != self._mtime
+        except OSError:
+            return True
 
     def save(self, raw):
         """Önce doğrular, yedek alır, sonra atomik yazar (yarım dosya kalmaz). Dönen: yeni normalize config."""
@@ -212,10 +262,15 @@ def permalink(team_url, channel, ts, thread_ts=None):
 
 
 def quote(text, limit=QUOTE_MAX):
-    """Mesaj metnini alıntı bloğuna çevirir; grup etiketlerini düz metne indirir, uzunsa kısaltır."""
+    """Mesaj metnini alıntı bloğuna çevirir; grup etiketlerini düz metne indirir, uzunsa kelime/token sınırında kısaltır."""
     t = plain_subteams(text).strip()
     if len(t) > limit:
-        t = t[:limit].rstrip() + "…"
+        cut = t[:limit]
+        cut = re.sub(r"<[^>]*$", "", cut)          # yarım kalan <@U…> / <http…> token'ı
+        ws = cut.rfind(" ")
+        if ws > limit // 2:
+            cut = cut[:ws]
+        t = cut.rstrip() + "…"
     if not t:
         return "> _(metin yok)_"
     return "\n".join("> " + line for line in t.splitlines())

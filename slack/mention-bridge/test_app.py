@@ -33,6 +33,9 @@ class FakeClient:
         self.created = []
         self.updated = []
         self.channels = [{"id": "C000000001", "name": "cozum", "is_ext_shared": True}, {"id": "C000000002", "name": "genel"}]
+        self.history = {}            # kanal -> conversations.history mesaj listesi
+        self.history_calls = []
+        self.channel_members = {}    # kanal -> üye listesi; yoksa herkes kanalda sayılır
 
     def usergroups_list(self, **_):
         return {"usergroups": [{"id": gid, "handle": h, "users": list(users), "user_count": len(users), "date_delete": 0}
@@ -58,9 +61,6 @@ class FakeClient:
     def users_conversations(self, **_):
         return {"channels": self.channels, "response_metadata": {"next_cursor": ""}}
 
-    history = {}            # kanal -> conversations.history mesaj listesi
-    history_calls = []
-
     def conversations_history(self, channel, oldest, inclusive=False, limit=200):
         self.history_calls.append((channel, float(oldest)))
         return {"messages": [m for m in self.history.get(channel, []) if float(m["ts"]) > float(oldest)]}
@@ -72,11 +72,25 @@ class FakeClient:
             raise FakeError(self.permalink_error)
         return {"permalink": f"https://yeni.slack.com/archives/{channel}/p{message_ts.replace('.', '')}?from=api"}
 
-    def usergroups_users_list(self, usergroup):
+    users_list_error = None      # ayarlanırsa usergroups.users.list bu hatayı verir
+    members_error = None         # ayarlanırsa conversations.members bu hatayı verir
+
+    def usergroups_users_list(self, usergroup, **_):
+        if self.users_list_error:
+            raise FakeError(self.users_list_error)
         for gid, users in self.groups.values():
             if gid == usergroup:
-                return {"users": users}
+                return {"users": list(users)}
         raise FakeError("no_such_subteam")
+
+    def conversations_members(self, channel, limit=1000, cursor=None):
+        if self.members_error:
+            raise FakeError(self.members_error)
+        if channel in self.channel_members:
+            return {"members": list(self.channel_members[channel]), "response_metadata": {"next_cursor": ""}}
+        everyone = {u for _, users in self.groups.values() for u in users} | set(self.emails.values()) | {
+            "U00000005", "U00000007", "U000000EXT", "U0000ADMIN"}
+        return {"members": sorted(everyone), "response_metadata": {"next_cursor": ""}}
 
     def users_lookupByEmail(self, email):
         if email in self.emails:
@@ -120,9 +134,9 @@ def read_config():
 class OnMessage(unittest.TestCase):
     def setUp(self):
         app.state.update({"config": None, "resolved": {"usergroups": {}, "users": {}}, "admin_ids": set(),
-                          "resolved_at": 0.0, "members": {}, "team_url": "https://yeni.slack.com",
+                          "resolved_at": 0.0, "members": {}, "chan_members": {}, "team_url": "https://yeni.slack.com",
                           "team_name": "Yeni Zone", "seen": {}, "last_ts": {}, "last_notice": None,
-                          "sent_total": 0, "failed_total": 0, "catchup": None, "handler": None})
+                          "sent_total": 0, "failed_total": 0, "catchup": None, "handler": None, "admin_client": None})
         for f in ("state.json", "config.json.bak1", "config.json.bak2", "config.json.bak3"):
             try:
                 os.remove(os.path.join(_TMP, f))
@@ -410,7 +424,129 @@ class Resilience(DmCommands):
         self.assertEqual((app.state["sent_total"], app.state["failed_total"]), (2, 1))
 
 
+class ReviewFixes(DmCommands):
+    """Kod incelemesinden çıkan düzeltmeler."""
+
+    def dms(self):
+        return [p["channel"] for p in self.client.posted if p["channel"].startswith("U")]
+
+    def test_kanalda_olmayan_uyeye_dm_gitmez(self):
+        self.client.channel_members["C000000001"] = ["U00000001", "U000000EXT"]
+        app.on_message(msg("@petra"), self.client)
+        self.assertEqual(self.dms(), ["U00000001"])                       # U2 ve U9 kanalda değil
+
+    def test_kanal_uyeleri_alinamazsa_filtresiz(self):
+        self.client.members_error = "internal_error"
+        app.on_message(msg("@petra"), self.client)
+        self.assertEqual(self.dms(), ["U00000001", "U00000002", "U00000009"])
+
+    def test_uye_listesi_hatasi_onbellege_alinmaz(self):
+        self.client.users_list_error = "ratelimited"
+        app.on_message(msg("@petra", ts="1700000000.000100"), self.client)
+        self.assertEqual(self.dms(), ["U00000009"])                       # grup boş sayıldı, e-posta hedefi gitti
+        self.client.users_list_error = None
+        app.on_message(msg("@petra", ts="1700000001.000100"), self.client)
+        self.assertEqual(self.dms()[1:], ["U00000001", "U00000002", "U00000009"])   # hemen düzeldi, 5 dk beklemedi
+
+    def test_bozuk_dm_sablonu_bildirimi_dusurmez(self):
+        app.on_message(msg("selam"), self.client)                          # config yüklensin
+        app.state["config"]["dm_template"] = "{link} {kanal}"              # config'e elle sızmış hatalı şablon
+        app.on_message(msg("@petra", ts="1700000002.000100"), self.client)
+        self.assertEqual(len(self.dms()), 3)
+        self.assertIn("Mesaja git", self.client.posted[0]["text"])          # varsayılan şablona düştü
+
+    def test_eposta_ile_tanimli_yetkili_baskasini_cikarabilir(self):
+        write_config({"admins": ["yonetici@firma.com", "U00000002"], "keywords": {"petra": "petra"}})
+        app.on_message(dm("yetkili çıkar <@U00000002>"), self.client)     # U0000ADMIN = yonetici@firma.com
+        self.assertIn("Yetkiden çıkarıldı", self.replies()[0])
+        self.assertEqual(read_config()["admins"], ["yonetici@firma.com"])
+        app.on_message(dm("yetkili çıkar <mailto:yonetici@firma.com|yonetici@firma.com>"), self.client)
+        self.assertIn("Son yetkiliyi", self.replies()[1])
+
+    def test_duzenlemeyle_eklenen_etiket_bildirilir(self):
+        def edit(new, old, edit_ts):
+            return {"type": "message", "subtype": "message_changed", "channel": "C000000001", "ts": edit_ts,
+                    "event_ts": edit_ts,
+                    "message": {"user": "U000000EXT", "text": new, "ts": "1700000000.000100", "edited": {"ts": edit_ts}},
+                    "previous_message": {"user": "U000000EXT", "text": old, "ts": "1700000000.000100"}}
+        app.on_message(msg("petra bakar mısın"), self.client)              # @ yok: bildirim yok
+        self.assertEqual(self.dms(), [])
+        app.on_message(edit("@petra bakar mısın", "petra bakar mısın", "1700000010.000000"), self.client)
+        self.assertEqual(self.dms(), ["U00000001", "U00000002", "U00000009"])
+        app.on_message(edit("@petra bakar mısın", "petra bakar mısın", "1700000010.000000"), self.client)  # aynı olay
+        app.on_message(edit("@petra bakar mısın!", "@petra bakar mısın", "1700000011.000000"), self.client)  # etiket zaten vardı
+        self.assertEqual(len(self.dms()), 3)
+        app.on_message(edit("@petra @kote", "@petra", "1700000012.000000"), self.client)  # sadece yeni etiket (kote)
+        self.assertEqual(self.dms()[3:], ["U00000002", "U00000003"])       # kote üyeleri; petra tekrar gitmedi
+
+    def test_kendi_gercek_etiketi_arti_duz_yazim_tek_bildirim(self):
+        app.on_message(msg("<!subteam^S111|@petra> yani @petra bakın"), self.client)
+        self.assertEqual(self.dms(), [])                                     # Slack zaten bildirdi
+        app.on_message(msg("<!subteam^S999|@petra> yani @petra bakın", ts="1700000001.000100"), self.client)
+        self.assertEqual(self.dms(), ["U00000001", "U00000002", "U00000009"])   # dış etiket + düz: bir kez
+
+    def test_yetkisiz_kisinin_siradan_dmine_nazik_yanit(self):
+        app.on_message(dm("teşekkürler, bakıyorum", user="U000000EXT"), self.client)
+        self.assertIn("otomatik bildirim", self.replies()[0])
+        app.on_message(dm("liste", user="U000000EXT"), self.client)
+        self.assertIn("yetkin yok", self.replies()[1])
+
+    def test_diskteki_bozuk_config_uzerine_yazilmaz(self):
+        app.on_message(dm("liste"), self.client)                             # config belleğe alınsın
+        with open(os.environ["BRIDGE_CONFIG"], "w", encoding="utf-8") as f:
+            f.write("{ bozuk json")
+        os.utime(os.environ["BRIDGE_CONFIG"], (time.time() + 5, time.time() + 5))
+        app.on_message(dm("mod thread"), self.client)
+        self.assertIn("diskteki haliyle geçersiz", self.replies()[-1])
+        with open(os.environ["BRIDGE_CONFIG"], encoding="utf-8") as f:
+            self.assertEqual(f.read(), "{ bozuk json")                       # dokunulmadı
+
+    def test_yonetici_tokeni_grup_islemlerinde_kullanilir(self):
+        admin = FakeClient()
+        admin.groups = self.client.groups                                    # aynı workspace
+        app.state["admin_client"] = admin
+        app.on_message(dm("grup oluştur paris Paris Ekibi"), self.client)
+        self.assertEqual(admin.created, [("Paris Ekibi", "paris")])
+        self.assertEqual(self.client.created, [])
+        app.on_message(dm("grup ekle petra <@U00000007>"), self.client)
+        self.assertEqual(admin.updated, [("petra", ["U00000001", "U00000002", "U00000007"])])
+        self.assertEqual(self.client.updated, [])
+
+    def test_devre_disi_gruba_uye_eklenmez(self):
+        self.client.groups["eski"] = ("S333", ["U00000001"])
+        orig = self.client.usergroups_list
+
+        def with_disabled(**kw):
+            r = orig(**kw)
+            for g in r["usergroups"]:
+                if g["handle"] == "eski":
+                    g["date_delete"] = 1700000000
+            return r
+        self.client.usergroups_list = with_disabled
+        app.on_message(dm("grup ekle eski <@U00000007>"), self.client)
+        self.assertIn("devre dışı", self.replies()[0])
+        self.assertEqual(self.client.updated, [])
+
+    def test_kanallar_slack_connect_yoksa_uyarir(self):
+        self.client.channels = [{"id": "C000000002", "name": "genel"}]
+        app.on_message(dm("kanallar"), self.client)
+        self.assertIn("Slack Connect kanalı görünmüyor", self.replies()[0])
+
+    def test_durum_cozulemeyen_epostayi_gosterir(self):
+        write_config({"admins": ["yonetici@firma.com"], "keywords": {"petra": ["petra", "kimse@firma.com"]}})
+        app.on_message(dm("durum"), self.client)
+        self.assertIn("bulunamayan e-postalar: kimse@firma.com", self.replies()[0])
+
+
 class DotEnv(unittest.TestCase):
+    def test_bom_lu_env_dosyasi_okunur(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, ".env")
+            with open(p, "w", encoding="utf-8-sig") as f:                   # Notepad "UTF-8" = BOM'lu
+                f.write("SLACK_BOT_TOKEN=xoxb-bom\n")
+            app.load_dotenv(p)
+            self.assertEqual(os.environ["SLACK_BOT_TOKEN"], "xoxb-bom")
+
     def test_env_dosyasi_ortami_ezer(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, ".env")

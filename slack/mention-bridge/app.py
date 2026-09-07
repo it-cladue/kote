@@ -5,11 +5,14 @@ Slack Connect kanalında düz metin "@petra" görünce @petra user group'unun ü
 Bot hangi kanala eklendiyse orada çalışır (config.json > channels boşsa); yönetim komutları bota DM'den,
 sadece config.json > admins listesindeki hesaplardan (bkz. commands.py > HELP ya da DM'de `yardım`).
 
-    .env dosyası (app.py'nin yanında):  SLACK_BOT_TOKEN=xoxb-...   SLACK_APP_TOKEN=xapp-...
+    .env dosyası (app.py'nin yanında):
+        SLACK_BOT_TOKEN=xoxb-...      zorunlu (Bot User OAuth Token)
+        SLACK_APP_TOKEN=xapp-...      zorunlu (App-Level Token, connections:write)
+        SLACK_ADMIN_TOKEN=xoxp-...    isteğe bağlı (User OAuth Token); `grup …` komutları bununla çalışır, yoksa bot token
     python app.py
 
 notify_mode:
-  dm      -> kanala/thread'e HİÇBİR ŞEY yazılmaz; her grup üyesine "şu kanalda şu kişi sizi etiketledi,
+  dm      -> kanala/thread'e HİÇBİR ŞEY yazılmaz; kanalda olan grup üyelerine "şu kanalda şu kişi sizi etiketledi,
              mesaja git" DM'i gider (Slack'in kendi "kanalda etiketlendiniz" Slackbot mesajı gibi).
   thread  -> mesajın thread'ine gerçek <!subteam^…|@petra> mention'ı yazılır.
   channel -> kanala ayrı bir mesaj olarak yazılır.
@@ -41,13 +44,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def load_dotenv(path):
-    """Yanındaki .env dosyasından SLACK_BOT_TOKEN / SLACK_APP_TOKEN okur. .env varsa ortam değişkenini ezer;
-    tek doğru kaynak .env olsun diye (token yenilemede sadece .env düzenlenir)."""
+    """Yanındaki .env dosyasından token'ları okur. .env varsa ortam değişkenini ezer; tek doğru kaynak .env olsun diye
+    (token yenilemede sadece .env düzenlenir). Notepad'in koyduğu BOM'u tolere eder."""
     if not os.path.exists(path):
         return
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:
         for line in f:
-            line = line.strip()
+            line = line.strip().lstrip("﻿")
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
@@ -59,10 +62,11 @@ def load_dotenv(path):
 load_dotenv(os.path.join(HERE, ".env"))
 BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
 APP_TOKEN = os.environ.get("SLACK_APP_TOKEN")
+ADMIN_TOKEN = os.environ.get("SLACK_ADMIN_TOKEN")
 CONFIG_PATH = os.environ.get("BRIDGE_CONFIG") or os.path.join(HERE, "config.json")
 STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(CONFIG_PATH)), "state.json")
 RESOLVE_TTL = 15 * 60        # grup/kişi ID'leri: yeni grup en geç 15 dk'da görülür
-MEMBERS_TTL = 5 * 60         # grup üye listesi: üye değişikliği en geç 5 dk'da görülür
+MEMBERS_TTL = 5 * 60         # grup üye listesi ve kanal üye listesi: değişiklik en geç 5 dk'da görülür
 CATCHUP_WINDOW = 60 * 60     # açılışta en fazla bu kadar geriye bakılır
 WATCHDOG_SECONDS = 5 * 60    # bağlantı bu kadar süre kopuksa çık (servis yeniden başlatsın)
 HEARTBEAT_SECONDS = 30
@@ -73,6 +77,7 @@ state = {
     "resolved_at": 0.0,
     "admin_ids": set(),
     "members": {},                                  # S… -> (zaman, [U…])
+    "chan_members": {},                             # C… -> (zaman, {U…})
     "team_url": "",
     "team_name": "",
     "seen": {},                                     # "C…:ts" -> zaman (aynı event'i iki kez işlememek için)
@@ -84,6 +89,7 @@ state = {
     "failed_total": 0,
     "catchup": None,                                # {"scanned","notified","channels"}
     "handler": None,
+    "admin_client": None,
 }
 
 
@@ -111,8 +117,13 @@ if not BOT_TOKEN or not APP_TOKEN:
 _client = WebClient(token=BOT_TOKEN)
 _client.retry_handlers.append(RateLimitErrorRetryHandler(max_retry_count=3))
 app = App(client=_client, logger=logging.getLogger("bolt"), token_verification_enabled=False)  # auth_test'i main() yapar
+if ADMIN_TOKEN:
+    state["admin_client"] = WebClient(token=ADMIN_TOKEN)
+    state["admin_client"].retry_handlers.append(RateLimitErrorRetryHandler(max_retry_count=3))
 loader = bridge.ConfigLoader(CONFIG_PATH)
-lock = threading.Lock()
+lock = threading.Lock()        # config + hedef çözümleme + grup üyelik değişiklikleri
+seen_lock = threading.Lock()   # seen sözlüğü (listener'lar paralel çalışır)
+state_lock = threading.Lock()  # state.json yazımı
 
 
 def slack_error(e):
@@ -133,17 +144,18 @@ def load_state():
 
 
 def save_state():
-    data = {
-        "last_ping": time.time(),
-        "team": state["team_name"],
-        "connected": is_connected(),
-        "last_event_at": state["last_event_at"],
-        "last_ts": state["last_ts"],
-    }
-    try:
-        bridge.atomic_write_json(STATE_PATH, data)
-    except OSError as e:
-        log.warning("state.json yazılamadı (%s).", e)
+    with state_lock:
+        data = {
+            "last_ping": time.time(),
+            "team": state["team_name"],
+            "connected": is_connected(),
+            "last_event_at": state["last_event_at"],
+            "last_ts": dict(state["last_ts"]),
+        }
+        try:
+            bridge.atomic_write_json(STATE_PATH, data)
+        except OSError as e:
+            log.warning("state.json yazılamadı (%s).", e)
 
 
 def is_connected():
@@ -165,6 +177,14 @@ def lookup_email(client, email):
     return uid
 
 
+def compute_admin_ids():
+    cfg = state["config"]
+    users = state["resolved"]["users"]
+    state["admin_ids"] = {
+        t["id"] if t["type"] == "user" else users.get(t["email"]) for t in cfg["admins"]
+    } - {None}
+
+
 def resolve_targets(client):
     """config'deki handle ve e-postaları Slack ID'lerine çevirir. Bulunamayan loglanır, bot düşmez."""
     groups = {}
@@ -182,22 +202,26 @@ def resolve_targets(client):
                 except SlackApiError as e:
                     log.warning("%s bu workspace'te bulunamadı (%s); atlanıyor.", t["email"], slack_error(e))
     state["resolved"] = {"usergroups": groups, "users": users}
-    state["admin_ids"] = {
-        t["id"] if t["type"] == "user" else users.get(t["email"]) for t in cfg["admins"]
-    } - {None}
+    compute_admin_ids()
     state["resolved_at"] = time.time()
     state["members"] = {}
     log.info("Hedefler çözüldü: %d user group, %d kişi, %d yetkili.", len(groups), len(users), len(state["admin_ids"]))
 
 
 def ensure_fresh(client):
+    """config değiştiyse yükler; hedefleri gerekirse çözer. Slack'e ulaşılamazsa eldeki bilgiyle devam eder."""
     with lock:
         config, changed = loader.load()
         state["config"] = config
         if changed:
             log.info("config yüklendi: %s  (mod: %s)", ", ".join("@" + k for k in config["keywords"]), config["notify_mode"])
+            compute_admin_ids()  # ağ gerektirmeyen kısım hemen (ID ile tanımlı yetkililer ve önbellekteki e-postalar)
         if changed or time.time() - state["resolved_at"] > RESOLVE_TTL:
-            resolve_targets(client)
+            try:
+                resolve_targets(client)
+            except Exception as e:  # noqa: BLE001  (ratelimited, ağ) -> bir sonraki olayda yeniden dene
+                state["resolved_at"] = 0
+                log.warning("Hedefler çözülemedi (%s); eldeki bilgiyle devam, sonra yeniden denenecek.", e)
 
 
 def members_of(client):
@@ -207,24 +231,44 @@ def members_of(client):
             return cached[1]
         try:
             ids = client.usergroups_users_list(usergroup=gid).get("users", [])
-        except SlackApiError as e:
-            log.warning("%s üyeleri alınamadı (%s).", gid, slack_error(e))
-            ids = cached[1] if cached else []
+        except Exception as e:  # noqa: BLE001  (hata önbelleğe alınmaz; bir sonraki mesajda yeniden denenir)
+            log.warning("%s üyeleri alınamadı (%s).", gid, slack_error(e) if isinstance(e, SlackApiError) else e)
+            return cached[1] if cached else []
         state["members"][gid] = (time.time(), ids)
         return ids
     return fetch
 
 
+def channel_members(client, channel):
+    """Kanal üyeleri (kısa önbellek). Alınamazsa eski önbellek; hiç yoksa None (filtre uygulanamaz)."""
+    cached = state["chan_members"].get(channel)
+    if cached and time.time() - cached[0] < MEMBERS_TTL:
+        return cached[1]
+    try:
+        members, cursor = set(), None
+        while True:
+            r = client.conversations_members(channel=channel, limit=1000, cursor=cursor)
+            members.update(r.get("members", []))
+            cursor = (r.get("response_metadata") or {}).get("next_cursor")
+            if not cursor:
+                break
+    except Exception as e:  # noqa: BLE001
+        log.warning("%s kanal üyeleri alınamadı (%s).", channel, slack_error(e) if isinstance(e, SlackApiError) else e)
+        return cached[1] if cached else None
+    state["chan_members"][channel] = (time.time(), members)
+    return members
+
+
 def already_seen(key):
-    now = time.time()
-    seen = state["seen"]
-    if key in seen:
-        return True
-    seen[key] = now
-    if len(seen) > 1000:
-        for k in [k for k, t in seen.items() if now - t > 600]:
-            del seen[k]
-    return False
+    with seen_lock:
+        now = time.time()
+        seen = state["seen"]
+        if key in seen:
+            return True
+        seen[key] = now
+        if len(seen) > 1000:
+            state["seen"] = {k: t for k, t in seen.items() if now - t <= 600}
+        return False
 
 
 def bot_channels(client):
@@ -255,16 +299,32 @@ def notify_by_dm(event, hits, client):
     if not recipients:
         log.warning('"%s" eşleşti ama bildirim gidecek kimse yok (grup boş / bulunamadı).', ", ".join(hits))
         return 0
+    # Slack'in kendi davranışı gibi: yalnızca KANALDA olan üyeler. Kanalda olmayan, karşı tarafın mesajını görmemeli.
+    members = channel_members(client, event["channel"])
+    if members is None:
+        log.warning("Kanal üyeleri doğrulanamadı; %d alıcıya filtresiz gönderiliyor.", len(recipients))
+    else:
+        skipped = [u for u in recipients if u not in members]
+        recipients = [u for u in recipients if u in members]
+        if skipped:
+            log.info("Kanalda olmayan üyeler atlandı (kanala ekleyin): %s", " ".join(skipped))
+        if not recipients:
+            log.warning('"%s" eşleşti ama grubun hiçbir üyesi kanalda değil.', ", ".join(hits))
+            return 0
     link = message_link(client, event)
-    text = bridge.build_dm_text(cfg["dm_template"], event["channel"], event["user"], hits, event.get("text"), link)
+    try:
+        text = bridge.build_dm_text(cfg["dm_template"], event["channel"], event["user"], hits, event.get("text"), link)
+    except Exception as e:  # noqa: BLE001  (şablon hatası bildirimi düşürmesin)
+        log.error("dm_template uygulanamadı (%s); varsayılan şablon kullanıldı.", e)
+        text = bridge.build_dm_text(bridge.DEFAULT_DM_TEMPLATE, event["channel"], event["user"], hits, event.get("text"), link)
     sent = failed = 0
     for uid in recipients:
         try:
             client.chat_postMessage(channel=uid, text=text, unfurl_links=False, unfurl_media=False)
             sent += 1
-        except SlackApiError as e:
+        except Exception as e:  # noqa: BLE001  (bir kişi hata verirse diğerleri yine alsın)
             failed += 1
-            log.warning("%s kişisine DM gönderilemedi (%s).", uid, slack_error(e))
+            log.warning("%s kişisine DM gönderilemedi (%s).", uid, slack_error(e) if isinstance(e, SlackApiError) else e)
     if failed:
         log.warning("%d/%d kişiye DM gidemedi.", failed, len(recipients))
     state["sent_total"] += sent
@@ -292,16 +352,31 @@ def remember_ts(channel, ts):
         save_state()
 
 
+def hits_in(text):
+    """Metindeki etiketler: başka zone'un gerçek etiketi düz metin sayılır, kendi grubumuzun gerçek etiketi sayılmaz
+    (Slack zaten bildirdi), kendi grubumuzun gerçek etiketiyle aynı mesajdaki düz "@petra" da sayılmaz."""
+    cfg = state["config"]
+    groups = state["resolved"]["usergroups"]
+    exposed = bridge.expose_foreign_subteams(text, set(groups.values()))
+    hits = bridge.find_keywords(exposed, list(cfg["keywords"]), require_at=cfg["require_at"])
+    if hits:
+        native = bridge.local_mentioned_handles(text, {v: k for k, v in groups.items()})
+        hits = [h for h in hits if h not in native]
+    return hits
+
+
 def handle_channel_message(event, client):
     """Dönen: gönderilen bildirim sayısı (eşleşme yoksa 0)."""
     cfg = state["config"]
     if cfg["channels"] and event["channel"] not in cfg["channels"]:
+        log.info("%s kanal filtresi dışında; mesaj atlandı.", event["channel"])
         return 0
     n = 0
     try:
-        # Başka zone'un gerçek @grup etiketi bizim için düz metindir (iki zone'lu kurulum); kendi grubumuzunki değildir.
-        text = bridge.expose_foreign_subteams(event.get("text"), set(state["resolved"]["usergroups"].values()))
-        hits = bridge.find_keywords(text, list(cfg["keywords"]), require_at=cfg["require_at"])
+        hits = hits_in(event.get("text"))
+        if event.get("previous_text") is not None:  # düzenleme: yalnızca yeni eklenen etiketler
+            old = hits_in(event["previous_text"])
+            hits = [h for h in hits if h not in old]
         if not hits:
             return 0
         if cfg["notify_mode"] == "dm":
@@ -320,10 +395,16 @@ def handle_channel_message(event, client):
         log.info("%s %s: @%s -> %s.", event["channel"], event["ts"], ", @".join(hits), what)
         return n
     finally:
-        remember_ts(event["channel"], event["ts"])
+        if event.get("previous_text") is None:
+            remember_ts(event["channel"], event["ts"])
 
 
 # ---------------- DM: yönetim komutları ----------------
+
+def group_client(client):
+    """Slack user group'larını değiştiren çağrılar için: varsa yönetici (xoxp) token'ı, yoksa bot token'ı."""
+    return state.get("admin_client") or client
+
 
 def find_group(client, handle):
     handle = handle.lstrip("@").lower()
@@ -362,8 +443,26 @@ def save_config(raw):
     state["resolved_at"] = 0  # yeni hedef/yetkili ID'lerini hemen çöz
 
 
+def editable_raw():
+    """Komutla değiştirilecek config'in taze kopyası. Diskteki dosya elle bozulmuşsa üzerine yazmayı reddeder."""
+    try:
+        loader.load()
+    except Exception as e:  # noqa: BLE001
+        raise commands.CommandError(f"config.json diskteki haliyle geçersiz ({e}). Önce dosyayı düzelt (ya da .bak1 yedeğinden geri al), sonra komutu tekrar ver.")
+    return copy.deepcopy(loader.raw)
+
+
+GROUP_ERR_HINT = {
+    "invalid_users": "kişi bu workspace'in tam üyesi değil (guest ya da başka workspace).",
+    "permission_denied": "workspace ayarı user group yönetimini sadece Owner/Admin'e veriyor. Ya Workspace Settings > Permissions > User Groups ayarını genişlet ya da .env'e Owner/Admin'in User OAuth Token'ını (SLACK_ADMIN_TOKEN=xoxp-…) ekleyip botu yeniden başlat.",
+    "missing_scope": "token'da usergroups:write scope'u yok; manifesti güncelleyip Reinstall yap.",
+    "not_allowed_token_type": "bu token türü user group yönetemiyor; SLACK_ADMIN_TOKEN (xoxp) kullan.",
+}
+
+
 def group_command(cmd, args, client):
     """grup liste / oluştur / ekle / çıkar: gerçek Slack user group'ları."""
+    gclient = group_client(client)
     if cmd == "grup liste":
         groups = client.usergroups_list(include_disabled=False, include_users=True, include_count=True).get("usergroups", [])
         if args:
@@ -372,7 +471,8 @@ def group_command(cmd, args, client):
                 raise commands.CommandError(f"@{args[0].lstrip('@')} diye bir user group yok.")
             users = g.get("users") or []
             shown = " ".join(f"<@{u}>" for u in users[:100]) or "_(üye yok)_"
-            return f"*@{g['handle']}* ({g['id']}) {len(users)} üye:\n{shown}"
+            note = "  ⚠️ devre dışı" if g.get("date_delete") else ""
+            return f"*@{g['handle']}* ({g['id']}) {len(users)} üye{note}:\n{shown}"
         if not groups:
             return "Bu workspace'te aktif user group yok."
         return "*User group'lar*\n" + "\n".join(f"• `@{g['handle']}` {g.get('user_count', len(g.get('users') or []))} üye" for g in groups)
@@ -380,22 +480,26 @@ def group_command(cmd, args, client):
     if cmd == "grup olustur":
         if not args:
             raise commands.CommandError("Kullanım: `grup oluştur <handle> [ad]`")
-        handle = args[0].lstrip("@").lower()
-        if not bridge.HANDLE_RE.match(handle):
+        handle = bridge.fold(args[0].lstrip("@"))
+        if not bridge.HANDLE_RE.match(handle) or handle.startswith("_"):
             raise commands.CommandError(f"`{args[0]}` geçerli bir handle değil.")
         name = " ".join(args[1:]) or handle
         existing = find_group(client, handle)
-        if existing:
-            if existing.get("date_delete"):
-                client.usergroups_enable(usergroup=existing["id"])
-                note = f"@{handle} devre dışıydı, yeniden aktif edildi."
+        try:
+            if existing:
+                if existing.get("date_delete"):
+                    gclient.usergroups_enable(usergroup=existing["id"])
+                    note = f"@{handle} devre dışıydı, yeniden aktif edildi."
+                else:
+                    note = f"@{handle} zaten vardı."
             else:
-                note = f"@{handle} zaten vardı."
-        else:
-            g = client.usergroups_create(name=name, handle=handle)["usergroup"]
-            note = f"Slack'te *@{g['handle']}* user group'u açıldı ({g['id']}). Üye eklemek için `grup ekle {handle} @kişi`."
+                g = gclient.usergroups_create(name=name, handle=handle)["usergroup"]
+                note = f"Slack'te *@{g['handle']}* user group'u açıldı ({g['id']}). Üye eklemek için `grup ekle {handle} @kişi`."
+        except SlackApiError as e:
+            err = slack_error(e)
+            raise commands.CommandError(f"Slack hatası: `{err}` {GROUP_ERR_HINT.get(err, '')}".strip())
         with lock:
-            raw = copy.deepcopy(loader.raw)
+            raw = editable_raw()
             reply, _ = commands.apply(raw, "ekle", [handle], {"known_groups": None})
             save_config(raw)
         return note + "\nEtiket: " + reply.splitlines()[-1]
@@ -403,36 +507,37 @@ def group_command(cmd, args, client):
     if cmd in ("grup ekle", "grup cikar"):
         if len(args) < 2:
             raise commands.CommandError(f"Kullanım: `{ 'grup ekle' if cmd == 'grup ekle' else 'grup çıkar' } <handle> <kişi…>`")
-        g = find_group(client, args[0])
-        if not g:
-            raise commands.CommandError(f"@{args[0].lstrip('@')} diye bir user group yok. `grup oluştur {args[0].lstrip('@')}` ile açabilirsin.")
-        ids, problems = resolve_people(client, args[1:])
-        current = list(g.get("users") or [])
-        if cmd == "grup ekle":
-            new = current + [u for u in ids if u not in current]
-            changed = [u for u in ids if u not in current]
-        else:
-            new = [u for u in current if u not in ids]
-            changed = [u for u in ids if u in current]
-        lines = []
-        if problems:
-            lines.append("⚠️ " + "\n⚠️ ".join(problems))
-        if not changed:
-            lines.append("Değişiklik yok." if not problems else "Geçerli kişi kalmadı, değişiklik yok.")
-            return "\n".join(lines)
-        if not new:
-            raise commands.CommandError("Slack user group'u boş bırakmaz; son üyeyi çıkaramazsın.")
-        try:
-            client.usergroups_users_update(usergroup=g["id"], users=",".join(new))
-        except SlackApiError as e:
-            err = slack_error(e)
-            hint = {
-                "invalid_users": "kişi bu workspace'in tam üyesi değil (guest ya da başka workspace).",
-                "permission_denied": "workspace ayarı user group yönetimini sadece admin'e veriyor (Workspace Settings > Permissions > User Groups).",
-                "missing_scope": "app'te usergroups:write scope'u yok; manifesti güncelleyip Reinstall yap.",
-            }.get(err, "")
-            raise commands.CommandError(f"Slack hatası: `{err}` {hint}".strip())
-        state["members"].pop(g["id"], None)
+        with lock:  # iki yetkili aynı anda değiştirmesin (users.update tüm listeyi değiştirir)
+            g = find_group(client, args[0])
+            if not g:
+                raise commands.CommandError(f"@{args[0].lstrip('@')} diye bir user group yok. `grup oluştur {args[0].lstrip('@')}` ile açabilirsin.")
+            if g.get("date_delete"):
+                raise commands.CommandError(f"@{g['handle']} devre dışı; önce `grup oluştur {g['handle']}` ile aktif et.")
+            ids, problems = resolve_people(client, args[1:])
+            try:  # güncel üye listesi (users.update listeyi KOMPLE değiştirir; eksik liste grubu siler)
+                current = list(client.usergroups_users_list(usergroup=g["id"]).get("users") or [])
+            except SlackApiError as e:
+                raise commands.CommandError(f"Üye listesi alınamadı (`{slack_error(e)}`); değişiklik yapılmadı.")
+            if cmd == "grup ekle":
+                new = current + [u for u in ids if u not in current]
+                changed = [u for u in ids if u not in current]
+            else:
+                new = [u for u in current if u not in ids]
+                changed = [u for u in ids if u in current]
+            lines = []
+            if problems:
+                lines.append("⚠️ " + "\n⚠️ ".join(problems))
+            if not changed:
+                lines.append("Değişiklik yok." if not problems else "Geçerli kişi kalmadı, değişiklik yok.")
+                return "\n".join(lines)
+            if not new:
+                raise commands.CommandError("Slack user group'u boş bırakmaz; son üyeyi çıkaramazsın.")
+            try:
+                gclient.usergroups_users_update(usergroup=g["id"], users=",".join(new))
+            except SlackApiError as e:
+                err = slack_error(e)
+                raise commands.CommandError(f"Slack hatası: `{err}` {GROUP_ERR_HINT.get(err, '')}".strip())
+            state["members"].pop(g["id"], None)
         verb = "eklendi" if cmd == "grup ekle" else "çıkarıldı"
         lines.append(f"*@{g['handle']}* {verb}: " + " ".join(f"<@{u}>" for u in changed) + f"\nŞu an {len(new)} üye.")
         return "\n".join(lines)
@@ -465,15 +570,19 @@ def status_text(client):
         f"*Etiketler:* " + (", ".join("@" + k for k in cfg["keywords"]) or "yok"),
         f"*Çözülen:* {len(state['resolved']['usergroups'])} user group, {len(state['resolved']['users'])} kişi",
         f"*Yetkililer:* " + (" ".join(f"<@{u}>" for u in sorted(state["admin_ids"])) or "yok"),
+        "*Grup yönetimi:* " + ("yönetici token'ı (xoxp)" if state.get("admin_client") else "bot token'ı (workspace izni gerekir)"),
         f"*Config:* `{CONFIG_PATH}`",
     ]
     cu = state["catchup"]
     if cu:
         lines.append(f"*Açılış taraması:* {cu['channels']} kanal, {cu['scanned']} mesaj, {cu['notified']} bildirim")
-    missing = [t["handle"] for ts in cfg["keywords"].values() for t in ts
-               if t["type"] == "usergroup" and t["handle"] not in state["resolved"]["usergroups"]]
-    if missing:
-        lines.append("⚠️ Slack'te olmayan gruplar: " + ", ".join("@" + h for h in sorted(set(missing))))
+    all_targets = [t for ts in cfg["keywords"].values() for t in ts] + list(cfg["admins"])
+    missing_groups = sorted({t["handle"] for t in all_targets if t["type"] == "usergroup" and t["handle"] not in state["resolved"]["usergroups"]})
+    missing_mails = sorted({t["email"] for t in all_targets if t["type"] == "email" and t["email"] not in state["resolved"]["users"]})
+    if missing_groups:
+        lines.append("⚠️ Slack'te olmayan gruplar: " + ", ".join("@" + h for h in missing_groups))
+    if missing_mails:
+        lines.append("⚠️ Bu workspace'te bulunamayan e-postalar: " + ", ".join(missing_mails))
     return "\n".join(lines)
 
 
@@ -492,7 +601,11 @@ def channels_text(client):
             for c in chans
         )
     filt = ", ".join(f"<#{c}>" for c in cfg["channels"]) if cfg["channels"] else "yok (eklendiği her kanalda çalışır)"
-    return f"*Botun olduğu kanallar*\n{inside}\n*Filtre:* {filt}"
+    out = f"*Botun olduğu kanallar*\n{inside}\n*Filtre:* {filt}"
+    if not any(c.get("is_ext_shared") or c.get("is_shared") for c in chans):
+        out += ("\n⚠️ Slack Connect kanalı görünmüyor. Botu paylaşımlı kanala kendi workspace'inden biri eklemeli; "
+                "davet 'yalnızca gönderme' izniyle geldiyse app eklenemez, karşı taraf izni 'gönderme, davet ve daha fazlası' yapmalı.")
+    return out
 
 
 def handle_command(event, client):
@@ -506,8 +619,12 @@ def handle_command(event, client):
         reply("Yönetici tanımlı değil. `config.json` içindeki `admins` alanına kendi kullanıcı ID'ni (U…) ya da e-postanı yaz.")
         return
     if uid not in state["admin_ids"]:
-        log.warning("Yetkisiz komut denemesi: %s: %s", uid, text)
-        reply("Bu botu yönetme yetkin yok.")
+        if commands.is_command(text):
+            log.warning("Yetkisiz komut denemesi: %s", uid)
+            reply("Bu botu yönetme yetkin yok.")
+        else:  # bildirim DM'ine yazılan "tamam", "teşekkürler" gibi yanıtlar
+            log.debug("Yetkisiz kişiden DM (%s), yok sayıldı.", uid)
+            reply("Ben otomatik bildirim gönderen bir botum; mesajı yanıtlamak için bildirimdeki *Mesaja git* linkini kullan.")
         return
     try:
         cmd, args = commands.parse(text)
@@ -521,8 +638,9 @@ def handle_command(event, client):
             reply(group_command(cmd, args, client))
         else:
             with lock:
-                raw = copy.deepcopy(loader.raw)
-                ctx = {"me": uid, "known_groups": set(state["resolved"]["usergroups"])}
+                raw = editable_raw()
+                me_email = next((e for e, u in state["resolved"]["users"].items() if u == uid), None)
+                ctx = {"me": uid, "me_email": me_email, "known_groups": set(state["resolved"]["usergroups"])}
                 msg, changed = commands.apply(raw, cmd, args, ctx)
                 if changed:
                     save_config(raw)
@@ -535,7 +653,14 @@ def handle_command(event, client):
         log.warning("Komut Slack hatası (%s): %s", text, slack_error(e))
     except ValueError as e:  # config doğrulaması
         reply(f"Ayar kaydedilemedi: {e}")
-    ensure_fresh(client)
+    except Exception as e:  # noqa: BLE001
+        log.exception("Komut işlenemedi (%s)", text)
+        reply(f"Beklenmeyen hata: {type(e).__name__}: {e}")
+    finally:
+        try:
+            ensure_fresh(client)
+        except Exception as e:  # noqa: BLE001
+            log.error("config okunamadı: %s", e)
 
 
 # ---------------- olay girişi ----------------
@@ -543,12 +668,23 @@ def handle_command(event, client):
 def process_event(event, client):
     """Canlı event ve açılış taraması aynı yoldan geçer. Dönen: bildirim sayısı."""
     subtype = event.get("subtype")
-    if subtype and subtype not in ("file_share", "thread_broadcast"):
-        return 0
-    if event.get("bot_id") or not event.get("user"):
-        return 0
-    if already_seen(f"{event['channel']}:{event['ts']}"):
-        return 0
+    if subtype == "message_changed":  # düzenlemeyle eklenen etiket de bildirilir (Slack'in kendi etiketi gibi)
+        msg = event.get("message") or {}
+        prev = event.get("previous_message") or {}
+        if msg.get("bot_id") or not msg.get("user") or msg.get("subtype") not in (None, "file_share", "thread_broadcast"):
+            return 0
+        edited_ts = (msg.get("edited") or {}).get("ts") or event.get("event_ts") or event.get("ts")
+        if already_seen(f"{event['channel']}:{msg['ts']}:edit:{edited_ts}"):
+            return 0
+        event = {"type": "message", "channel": event["channel"], "user": msg["user"], "text": msg.get("text"),
+                 "ts": msg["ts"], "thread_ts": msg.get("thread_ts"), "previous_text": prev.get("text") or ""}
+    else:
+        if subtype and subtype not in ("file_share", "thread_broadcast"):
+            return 0
+        if event.get("bot_id") or not event.get("user"):
+            return 0
+        if already_seen(f"{event['channel']}:{event['ts']}"):
+            return 0
     try:
         ensure_fresh(client)
     except Exception as e:  # noqa: BLE001  (config bozuksa eski config ile devam, bot düşmez)
@@ -609,6 +745,17 @@ def main():
     state["team_url"] = me["url"]
     state["team_name"] = me["team"]
     log.info("Workspace: %s (%s)  bot: %s  config: %s", me["team"], me["team_id"], me["user"], CONFIG_PATH)
+    if state.get("admin_client"):
+        try:
+            who = state["admin_client"].auth_test()
+            if who.get("team_id") != me["team_id"]:
+                log.warning("SLACK_ADMIN_TOKEN başka bir workspace'e ait (%s); grup komutları bot token'ı ile çalışacak.", who.get("team"))
+                state["admin_client"] = None
+            else:
+                log.info("Grup yönetimi için yönetici token'ı: %s", who.get("user"))
+        except Exception as e:  # noqa: BLE001
+            log.warning("SLACK_ADMIN_TOKEN geçersiz (%s); grup komutları bot token'ı ile çalışacak.", e)
+            state["admin_client"] = None
     try:
         ensure_fresh(app.client)
     except Exception as e:  # noqa: BLE001
