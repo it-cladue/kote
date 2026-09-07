@@ -5,11 +5,14 @@ app.py bunları kullanır; test_bridge.py Slack olmadan test eder.
 import json
 import os
 import re
+import shutil
+import time
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 USER_ID_RE = re.compile(r"^[UW][A-Z0-9]{8,}$")
 HANDLE_RE = re.compile(r"^[\w.-]+$")
 TOKEN_RE = re.compile(r"<[^>]*>")
+SUBTEAM_TOKEN_RE = re.compile(r"<!subteam\^([A-Z0-9]+)(?:\|@?([^>|]+))?>")
 NOTIFY_MODES = ("dm", "thread", "channel")
 
 DEFAULT_DM_TEMPLATE = (
@@ -27,6 +30,26 @@ def strip_slack_tokens(text):
     Atılmazsa gerçek bir @petra mention'ının içindeki "@petra" da yakalanır ve ekip iki kez bildirim alır.
     """
     return TOKEN_RE.sub(" ", text or "")
+
+
+def expose_foreign_subteams(text, local_group_ids):
+    """Başka workspace'in gerçek grup etiketini (<!subteam^S…|@petra>) düz "@petra" metnine çevirir.
+
+    İki zone'lu kurulumda A'dan biri otomatik tamamlamayla gerçek @petra yazınca Slack yalnızca A'daki
+    üyeleri bildirir; B'deki botun bunu düz "@petra" gibi görüp B'deki üyelere haber vermesi gerekir.
+    Kendi workspace'imizin grubu ise olduğu gibi bırakılır (strip_slack_tokens atar; Slack zaten bildirdi).
+    """
+    def repl(m):
+        sid, handle = m.group(1), m.group(2)
+        if sid in local_group_ids or not handle:
+            return m.group(0)
+        return "@" + handle.strip()
+    return SUBTEAM_TOKEN_RE.sub(repl, text or "")
+
+
+def plain_subteams(text):
+    """Alıntı için: her grup etiketini düz "@handle" yapar (DM'de ham token ya da ikinci bildirim olmasın)."""
+    return SUBTEAM_TOKEN_RE.sub(lambda m: "@" + (m.group(2) or "grup").strip(), text or "")
 
 
 def find_keywords(text, keywords, require_at=True):
@@ -115,6 +138,37 @@ def normalize_config(raw):
     }
 
 
+def atomic_write_json(path, data):
+    """Önce .tmp'ye yazar, sonra yerine koyar; Windows'ta dosya kısa süre kilitliyse birkaç kez dener."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    for attempt in range(5):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 4:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise
+            time.sleep(0.2 * (attempt + 1))
+
+
+def rotate_backups(path, keep=3):
+    """config.json -> config.json.bak1, eskiler .bak2/.bak3 olur (DM komutları dosyayı yazdığı için yedek)."""
+    if not os.path.exists(path):
+        return
+    for i in range(keep, 1, -1):
+        src, dst = f"{path}.bak{i - 1}", f"{path}.bak{i}"
+        if os.path.exists(src):
+            os.replace(src, dst)
+    shutil.copyfile(path, f"{path}.bak1")
+
+
 class ConfigLoader:
     """Dosya değiştiyse yeniden okur (mtime'a bakar). load() -> (config, changed). save(raw) dosyaya yazar."""
 
@@ -136,13 +190,13 @@ class ConfigLoader:
         return self._config, True
 
     def save(self, raw):
-        """Önce doğrular, sonra atomik yazar (yarım dosya kalmaz). Dönen: yeni normalize config."""
+        """Önce doğrular, yedek alır, sonra atomik yazar (yarım dosya kalmaz). Dönen: yeni normalize config."""
         config = normalize_config(raw)
-        tmp = self.path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(raw, f, ensure_ascii=False, indent=2)
-            f.write("\n")
-        os.replace(tmp, self.path)
+        try:
+            rotate_backups(self.path)
+        except OSError:
+            pass  # yedek alınamaması kaydı engellemesin
+        atomic_write_json(self.path, raw)
         self.raw = raw
         self._config = config
         self._mtime = os.stat(self.path).st_mtime
@@ -158,8 +212,8 @@ def permalink(team_url, channel, ts, thread_ts=None):
 
 
 def quote(text, limit=QUOTE_MAX):
-    """Mesaj metnini alıntı bloğuna çevirir; uzunsa kısaltır."""
-    t = (text or "").strip()
+    """Mesaj metnini alıntı bloğuna çevirir; grup etiketlerini düz metne indirir, uzunsa kısaltır."""
+    t = plain_subteams(text).strip()
     if len(t) > limit:
         t = t[:limit].rstrip() + "…"
     if not t:

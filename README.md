@@ -134,6 +134,38 @@ Bir keyword birden fazla hedefe gidebilir, hedefler karışık olabilir; istedi�
 grup en geç 15 dakikada, gruba eklenen/çıkarılan üye en geç 5 dakikada görülür. Yazan kişi grubun üyesiyse kendine DM gitmez. Gerçek
 mention (`<!subteam^…>`) içeren mesajlar tetiklemez, ekip iki kez bildirim almaz.
 
+### İki zone'da da alıcı varsa: zone başına bir bot
+
+Bir bot yalnızca **kendi workspace'inin** user group'unu görebilir ve yalnızca kendi workspace'inin üyelerine DM
+atabilir; Slack, bir app'in dış organizasyondaki kişiye DM atmasına izin vermez. Etiketin üyeleri hem A'da hem B'de
+olacaksa (ya da iki tarafın da haber alması gerekiyorsa) **her workspace'e kendi app'i ve kendi bot kopyası** kurulur.
+
+Nasıl çalışır: iki bot da aynı paylaşımlı kanaldadır. Biri `@petra` yazınca A'nın botu A'daki `@petra` üyelerine, B'nin
+botu B'deki `@petra` üyelerine DM atar; kim yazarsa yazsın. A'dan biri otomatik tamamlamayla **gerçek** `@petra`
+etiketini kullanırsa Slack A'daki üyeleri kendisi bildirir, A'nın botu bunu atlar; B'nin botu ise bu etiketi (başka
+workspace'in grubu olduğu için) düz `@petra` gibi görür ve B'deki üyelere DM atar. İki taraf da her durumda haber alır,
+kimse iki kez almaz. İki zone'da da hesabı olan bir kişi iki DM alır; bu beklenen davranış.
+
+Kurulum, her zone için aynı, iki kez:
+
+1. **App.** api.slack.com/apps > *Create New App* > *From a manifest* > workspace olarak **o zone'u** seç > `manifest.json`.
+   İki app'i kanalda ayırt etmek için yapıştırmadan önce manifestteki `"name"` ve `"display_name"` alanlarını zone adıyla
+   değiştir: `Etiket Köprüsü A`, `Etiket Köprüsü B`. *Install to Workspace* > o zone'un `xoxb` ve `xapp` token'ları.
+2. **Klasör.** Aynı makinede iki kopya: `C:\kote\bridge-a` ve `C:\kote\bridge-b`. Her birinde kendi `.env` (o zone'un
+   token'ları) ve kendi `config.json`: `admins` o zone'daki hesabın, `keywords` ikisinde de **aynı etiket adı** ile,
+   ör. `"petra": ["petra"]`.
+3. **Grup.** Her zone'da kendi üyeleriyle bir `@petra` user group'u olmalı. Yoksa o zone'un botuna DM'den
+   `grup oluştur petra Çözüm Ekibi` ve `grup ekle petra @kişi …`.
+4. **Kanal.** Her bot paylaşımlı kanala **kendi tarafından** davet edilir: A'da bir A üyesi `/invite @Etiket Köprüsü A`,
+   B'de bir B üyesi `/invite @Etiket Köprüsü B`. Her zone'daki `@petra` üyeleri kanalda olsun.
+5. **Servis.** İki NSSM servisi, farklı ad ve klasörle: `EtiketKoprusuA` (`bridge-a`), `EtiketKoprusuB` (`bridge-b`).
+6. **Test.** A'dan `@petra test`: A'daki (yazan hariç) ve B'deki üyeler DM alır. B'den de aynı. Her botun penceresinde
+   kendi `@petra -> N kişiye DM` satırı çıkar.
+
+Yönetim: her bot kendi zone'unun etiketlerini ve gruplarını yönetir. Yeni bir etiket iki tarafta da alıcı bulacaksa iki
+bota da tanımlanır (`grup oluştur kote` / `ekle kote …`); yalnızca bir tarafta üyesi olan etiket sadece o bota tanımlanır,
+diğer bot o kelimeyi tanımadığı için sessiz kalır.
+
 ### Yönetim: bota DM'den komut
 
 `config.json` içindeki `admins` listesindeki hesaplar, Slack'te botun DM'ine (sol menü > Apps > Etiket Köprüsü,
@@ -166,6 +198,13 @@ Not: `grup …` komutları Slack'in kendi user group yetkisine tabidir. Workspac
 sadece Owner/Admin'e veriyorsa (`Workspace Settings > Permissions > User Groups`) Slack `permission_denied`
 döner; ayarı genişlet ya da grubu elle aç.
 
+### Önce karar: tek bot mu, iki bot mu?
+
+- Etiketin üyeleri **yalnızca bir** workspace'te (ör. Çözüm ekibi sadece yeni zone'da): aşağıdaki adımlar **bir kez**,
+  eski zone'a hiçbir şey kurulmaz.
+- Etiketin üyeleri **iki** workspace'te de var, ya da iki tarafın da haber alması gerekiyor: aşağıdaki adımlar **her zone
+  için bir kez** (bkz. *İki zone'da da alıcı varsa*); iki botta da `notify_mode` `dm` kalsın, `ack_reaction` boş olsun.
+
 ### Adım adım: yeni zone'da (Çözüm ekibi, `@petra`'nın olduğu workspace)
 
 1. **`@petra` hazır olsun.** *More > People & user groups > User groups* içinde `@petra` var ve üyeleri tam.
@@ -182,39 +221,62 @@ döner; ayarı genişlet ya da grubu elle aç.
 5. **App-level token al.** *Basic Information* > *App-Level Tokens* > *Generate Token and Scopes* > ad `socket`,
    scope `connections:write` > *Generate* > `xapp-…` kopyala.
 6. **Botu kur.** Sürekli açık bir makinede Python 3.9+ olsun. Windows'ta en kısa yol `start.ps1`: Python'ı bulur,
-   bağımlılığı kurar, ilk çalıştırmada `config.json` oluşturup Notepad'de açar, ikinci çalıştırmada token'ları
-   sorup `.env` dosyasına yazar ve botu başlatır (`.\start.ps1 -Test` testleri koşar, `-Reset` token'ları
-   yeniden sorar). Elle kurmak istersen:
+   klasöre özel bir `.venv` kurar (servis de aynı yorumlayıcıyı kullanır), bağımlılığı kurar, ilk çalıştırmada
+   `config.json` oluşturup Notepad'de açar, ikinci çalıştırmada token'ları sorup `.env` dosyasına yazar ve botu
+   başlatır (`.\start.ps1 -Test` testleri koşar, `-Reset` token'ları yeniden sorar). Bu klasör için bir servis
+   zaten çalışıyorsa ikinci kopyayı başlatmaz. Elle kurmak istersen:
    ```powershell
    cd .\slack\mention-bridge
-   pip install -r requirements.txt
+   py -3 -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
    Copy-Item config.example.json config.json    # sonra admins ve keywords bölümlerini düzenle
    ```
    `admins` alanına kendi e-postanı ya da kullanıcı ID'ni yaz (Slack'te profilin > `⋯` > *Copy member ID*).
    Yetkiyi sonradan DM'den `yetkili ekle @kişi` ile genişletebilirsin.
-7. **Çalıştır ve doğrula.** Token'ları ortam değişkeni olarak ver ya da `app.py`'nin yanına `.env` dosyası koy
-   (`SLACK_BOT_TOKEN=xoxb-...` ve `SLACK_APP_TOKEN=xapp-...` satırları; dosya git'e girmez):
+7. **Çalıştır ve doğrula.** Token'lar `app.py`'nin yanındaki `.env` dosyasından okunur (`SLACK_BOT_TOKEN=xoxb-...`
+   ve `SLACK_APP_TOKEN=xapp-...` satırları; dosya git'e girmez ve varsa ortam değişkenini ezer, tek doğru kaynak odur):
    ```powershell
-   $env:SLACK_BOT_TOKEN = "xoxb-..."
-   $env:SLACK_APP_TOKEN = "xapp-..."
-   python app.py
+   .\.venv\Scripts\python.exe app.py
    ```
-   Çıktıda `Workspace: … bot: …`, `config yüklendi: @petra, … (mod: dm)` ve `Hedefler çözüldü: N user group, M kişi`
-   görünmeli. `@x diye bir user group yok` uyarısı varsa handle'ı düzelt.
+   Log'da `Workspace: … bot: …`, `config yüklendi: @petra, … (mod: dm)` ve `Hedefler çözüldü: N user group, M kişi,
+   K yetkili` görünmeli. `@x diye bir user group yok` uyarısı varsa handle'ı düzelt.
 8. **Botu kanala ekle.** Paylaşımlı kanalın içinde `/invite @Etiket Köprüsü` yaz (ya da kanal adı >
    *Integrations* > *Add apps*). Bot yalnızca eklendiği kanalları görür; **başka kanallarda da çalışsın
    istiyorsan aynı şekilde oraya da ekle**, `config.json` değişmez. Hangi kanallarda olduğunu DM'den
    `kanallar` komutu gösterir. Bir kanalda artık çalışmasın: `/remove @Etiket Köprüsü`.
-9. **Servis yap.** Windows'ta [NSSM](https://nssm.cc) ile (Python yolunu `(Get-Command python).Source` verir):
+9. **Servis yap.** Windows'ta [NSSM](https://nssm.cc) ile; Python olarak klasördeki `.venv` kullanılır, token'lar
+   `.env`'den gelir, her servisin **kendi** log dosyası olur:
    ```powershell
-   nssm install EtiketKoprusu "C:\Python312\python.exe" "C:\kote\slack\mention-bridge\app.py"
-   nssm set EtiketKoprusu AppDirectory "C:\kote\slack\mention-bridge"
-   nssm set EtiketKoprusu AppEnvironmentExtra SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-...   # .env varsa gerekmez
+   mkdir C:\kote\logs
+   nssm install EtiketKoprusu "C:\kote\mention-bridge\.venv\Scripts\python.exe" "C:\kote\mention-bridge\app.py"
+   nssm set EtiketKoprusu AppDirectory "C:\kote\mention-bridge"
+   nssm set EtiketKoprusu AppEnvironmentExtra PYTHONUNBUFFERED=1 PYTHONUTF8=1
    nssm set EtiketKoprusu AppStdout "C:\kote\logs\bridge.log"
    nssm set EtiketKoprusu AppStderr "C:\kote\logs\bridge.log"
+   nssm set EtiketKoprusu AppRotateFiles 1
+   nssm set EtiketKoprusu AppRotateOnline 1
+   nssm set EtiketKoprusu AppRotateBytes 10485760
+   nssm set EtiketKoprusu AppRestartDelay 15000
+   nssm set EtiketKoprusu Start SERVICE_DELAYED_AUTO_START
    nssm start EtiketKoprusu
    ```
-   Linux'ta bir systemd unit ya da `pm2 start app.py --interpreter python3 --name etiket-koprusu` yeterli.
+   Linux'ta bir systemd unit ya da `pm2 start app.py --interpreter .venv/bin/python --name etiket-koprusu` yeterli.
+
+   **İşletme notları.**
+   - *Sağlık:* bota DM'den `durum` bağlantı durumunu, çalışma süresini, son olayı, son bildirimi ve toplam
+     gönderim/başarısız sayısını gösterir. Klasördeki `state.json` her 30 sn'de yenilenir; `last_ping` 2 dakikadan
+     eskiyse süreç ölmüş demektir (`nssm status EtiketKoprusu`, log dosyası).
+   - *Bağlantı koparsa:* bot 5 dakika içinde bağlanamazsa kendini kapatır, NSSM 15 sn sonra yeniden başlatır.
+   - *Bot kapalıyken yazılanlar:* açılışta, daha önce gördüğü her kanal için son işlediği mesajdan itibaren (en fazla
+     1 saat geriye) geçmişi tarar ve kaçırdığı `@etiket`leri bildirir. Thread içindeki yanıtlar bu taramaya girmez.
+   - *Token yenileme:* api.slack.com/apps'te yeni token al, o klasörün `.env` dosyasını düzenle (ya da
+     `.\start.ps1 -Reset`), `nssm restart EtiketKoprusu`, log'daki `Workspace:` satırını gör.
+   - *Yedek:* DM komutları `config.json`'ı her yazışında `config.json.bak1..3` yedeklerini tutar; `config.json`'ı
+     düzenli olarak yedeklenen bir yere kopyala (`.env` değil).
+   - *Rate limit:* DM gönderimi `ratelimited` alırsa 3 kez yeniden denenir; yine gidemeyenler log'da ve `durum`da
+     "başarısız" olarak sayılır.
+   - *İki kopya:* aynı klasördeki iki süreç olayları bölüşür ve `config.json`'ı aynı anda yazar; `start.ps1` servis
+     çalışırken elle başlatmayı reddeder. İki zone için iki **ayrı** klasör kullan.
 
 ### Adım adım: eski zone'da (Canlı / Finans / Risk)
 
@@ -225,7 +287,8 @@ döner; ayarı genişlet ya da grubu elle aç.
    kanalı herkese açık bırak.
 3. **Kullanıma anlat.** Kanal açıklamasına yaz: "Çözüm ekibine ulaşmak için mesajınıza `@petra` ekleyin."
    `@petra` eski zone'da otomatik tamamlamada **çıkmaz**, düz metin kalır; bu normaldir, bot yine yakalar.
-4. **Kurulacak bir şey yok.** App, token, yetki gerekmez.
+4. **Kurulacak bir şey yok.** App, token, yetki gerekmez. (İstisna: etiketin üyeleri bu zone'da da varsa, *İki zone'da
+   da alıcı varsa* bölümündeki gibi bu zone'a da kendi botu kurulur.)
 
 **App daha önce eski manifestle oluşturulduysa:** api.slack.com/apps > app > *App Manifest* > yeni
 `manifest.json` içeriğini yapıştır > *Save Changes*, sonra *OAuth & Permissions* > **Reinstall to Workspace**
@@ -253,7 +316,9 @@ Geliştirme: `python -m unittest` (Slack'e bağlanmadan eşleştirme, config, DM
 | `x@firma.com bulunamadı` | Kişi bu workspace'te yok ya da `users:read.email` scope'u eksik (manifestten kurulduysa var). |
 | `DM gönderilemedi (…)` | Kişi devre dışı, ya da `im:write` scope'u eksik (manifest güncellendiyse app'i *Reinstall* et). |
 | `invalid_auth` / `not_allowed_token_type` | `xoxb` ile `xapp` yer değişmiş ya da token başka app/workspace'e ait. |
-| Aynı mesaja iki DM | Botun iki kopyası çalışıyor (servis + elle başlatılan). |
+| Aynı mesaja iki DM | Kişi iki zone'da da hesaba ve gruba sahip (beklenen). Aynı workspace'te aynı klasörden iki kopya çalışıyorsa belirti çift DM değil, bazı mesajların bir kopyaya bazılarının diğerine düşmesi ve `config.json`'ın karışmasıdır; fazla kopyayı kapat. |
+| Servis "çalışıyor" ama bildirim yok | `durum` > *Bağlantı: KOPUK* ya da `state.json` > `last_ping` eski. Log'da `Slack bağlantısı yok` satırları varsa `xapp` token'ı yenile; bot 5 dk sonra kendini kapatıp yeniden başlar. |
+| İki zone'lu kurulumda bir taraf bildirim almıyor | O zone'un botu kanala kendi tarafından eklenmemiş, o zone'da `@petra` grubu yok/boş, ya da o botun `config.json`'ında etiket tanımlı değil (`liste`). |
 | Bota DM yazınca yanıt yok | *App Home > Messages Tab* kapalı (manifesti güncelle) ya da `im:history` scope'u eksik (Reinstall). `admins` boşsa "Yönetici tanımlı değil" yanıtı gelir. |
 | `grup ekle` → `permission_denied` | Workspace ayarı user group yönetimini sadece admin'e veriyor: *Workspace Settings > Permissions > User Groups*. |
 | `grup ekle` → `invalid_users` | Kişi bu workspace'in tam üyesi değil (guest ya da başka workspace). |

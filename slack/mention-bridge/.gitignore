@@ -1,4 +1,7 @@
 config.json
+state.json
+config.json.bak*
+config.json.tmp
 .env
 __pycache__/
 .venv/

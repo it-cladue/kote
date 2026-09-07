@@ -2,6 +2,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 
 os.environ.setdefault("SLACK_BOT_TOKEN", "xoxb-test")
@@ -56,6 +57,13 @@ class FakeClient:
 
     def users_conversations(self, **_):
         return {"channels": self.channels, "response_metadata": {"next_cursor": ""}}
+
+    history = {}            # kanal -> conversations.history mesaj listesi
+    history_calls = []
+
+    def conversations_history(self, channel, oldest, inclusive=False, limit=200):
+        self.history_calls.append((channel, float(oldest)))
+        return {"messages": [m for m in self.history.get(channel, []) if float(m["ts"]) > float(oldest)]}
 
     permalink_error = None
 
@@ -113,7 +121,13 @@ class OnMessage(unittest.TestCase):
     def setUp(self):
         app.state.update({"config": None, "resolved": {"usergroups": {}, "users": {}}, "admin_ids": set(),
                           "resolved_at": 0.0, "members": {}, "team_url": "https://yeni.slack.com",
-                          "team_name": "Yeni Zone", "seen": {}})
+                          "team_name": "Yeni Zone", "seen": {}, "last_ts": {}, "last_notice": None,
+                          "sent_total": 0, "failed_total": 0, "catchup": None, "handler": None})
+        for f in ("state.json", "config.json.bak1", "config.json.bak2", "config.json.bak3"):
+            try:
+                os.remove(os.path.join(_TMP, f))
+            except FileNotFoundError:
+                pass
         app.loader = app.bridge.ConfigLoader(os.environ["BRIDGE_CONFIG"])
         write_config({"admins": ["yonetici@firma.com"], "keywords": {"petra": ["petra", "ali@firma.com"], "kote": "kote"}})
         self.client = FakeClient()
@@ -148,8 +162,14 @@ class OnMessage(unittest.TestCase):
 
     def test_eslesme_yoksa_sessiz(self):
         app.on_message(msg("bugün toplantı var"), self.client)
-        app.on_message(msg("<!subteam^S111|@petra> gerçek mention"), self.client)
+        app.on_message(msg("<!subteam^S111|@petra> gerçek mention"), self.client)   # kendi grubumuz: Slack bildirdi
         self.assertEqual(self.client.posted, [])
+
+    def test_diger_zonun_gercek_etiketi_bizim_uyelere_dm(self):
+        # İki zone'lu kurulum: A'daki kişi gerçek @petra yazdı (S999 A'nın grubu), bu bot B'nin.
+        app.on_message(msg("<!subteam^S999|@petra> sunucu düştü"), self.client)
+        self.assertEqual([p["channel"] for p in self.client.posted], ["U00000001", "U00000002", "U00000009"])
+        self.assertIn("> @petra sunucu düştü", self.client.posted[0]["text"])   # alıntıda ham token yok
 
     def test_bot_ve_alt_turler_atlanir(self):
         app.on_message(msg("@petra", bot_id="B1"), self.client)
@@ -297,6 +317,112 @@ class DmCommands(OnMessage):
         self.assertEqual(read_config()["admins"], ["yonetici@firma.com", "U000000EXT"])
         app.on_message(dm("liste", user="U000000EXT"), self.client)
         self.assertIn("`@petra`", self.replies()[1])
+
+
+class Resilience(DmCommands):
+    """state.json, açılış taraması, yedekler, yazma hatası, durum."""
+
+    def state_file(self):
+        with open(app.STATE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_islenen_mesajin_ts_i_state_jsona_yazilir(self):
+        app.on_message(msg("selam", ts="1700000000.000100"), self.client)          # eşleşmese de kaydedilir
+        self.assertEqual(self.state_file()["last_ts"], {"C000000001": "1700000000.000100"})
+        app.on_message(msg("@petra", ts="1700000005.000100"), self.client)
+        self.assertEqual(self.state_file()["last_ts"]["C000000001"], "1700000005.000100")
+        app.on_message(msg("eski", ts="1700000001.000100"), self.client)          # geriye gitmez
+        self.assertEqual(self.state_file()["last_ts"]["C000000001"], "1700000005.000100")
+        self.assertIn("last_ping", self.state_file())
+
+    def test_acilis_taramasi_kacirilan_etiketi_bildirir(self):
+        now = time.time()
+        old_ts = f"{now - 600:.6f}"
+        app.state["last_ts"] = {"C000000001": old_ts}
+        self.client.history["C000000001"] = [
+            {"ts": f"{now - 900:.6f}", "user": "U000000EXT", "text": "@petra eski, zaten görüldü"},
+            {"ts": f"{now - 300:.6f}", "user": "U000000EXT", "text": "@petra kaçırılan"},
+            {"ts": f"{now - 200:.6f}", "user": "U000000EXT", "text": "alakasız"},
+            {"ts": f"{now - 100:.6f}", "user": "U000000EXT", "text": "@petra düzenlendi", "subtype": "message_changed"},
+        ]
+        self.client.history["C000000002"] = [{"ts": f"{now - 50:.6f}", "user": "U000000EXT", "text": "@petra"}]  # last_ts yok
+        app.catch_up(self.client)
+        self.assertEqual([c for c, _ in self.client.history_calls], ["C000000001"])       # C2 hiç görülmemiş: taranmaz
+        dms = [p for p in self.client.posted if p["channel"].startswith("U")]
+        self.assertEqual(len(dms), 3)                                                     # sadece "kaçırılan"
+        self.assertIn("> @petra kaçırılan", dms[0]["text"])
+        self.assertEqual(app.state["catchup"], {"scanned": 3, "notified": 3, "channels": 1})
+        # son ts = son İNSAN mesajı ("alakasız"); düzenleme olayı (message_changed) sayılmaz
+        self.assertEqual(self.state_file()["last_ts"]["C000000001"], f"{now - 200:.6f}")
+        # ikinci kez çağrılırsa aynı mesaj yeniden bildirilmez (last_ts ilerledi)
+        app.catch_up(self.client)
+        self.assertEqual(len([p for p in self.client.posted if p["channel"].startswith("U")]), 3)
+
+    def test_acilis_taramasi_pencereyle_sinirli(self):
+        now = time.time()
+        app.state["last_ts"] = {"C000000001": f"{now - 7200:.6f}"}     # 2 saat önce
+        self.client.history["C000000001"] = [{"ts": f"{now - 5000:.6f}", "user": "U000000EXT", "text": "@petra çok eski"}]
+        app.catch_up(self.client)
+        self.assertGreaterEqual(self.client.history_calls[0][1], now - app.CATCHUP_WINDOW - 1)
+        self.assertEqual([p for p in self.client.posted if p["channel"].startswith("U")], [])
+
+    def test_config_kaydinda_yedek_alinir(self):
+        app.on_message(dm("mod thread"), self.client)
+        app.on_message(dm("mod dm"), self.client)
+        b1 = os.path.join(_TMP, "config.json.bak1")
+        b2 = os.path.join(_TMP, "config.json.bak2")
+        self.assertTrue(os.path.exists(b1) and os.path.exists(b2))
+        with open(b1, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["notify_mode"], "thread")      # bir önceki hâl
+        self.assertEqual(read_config()["notify_mode"], "dm")
+
+    def test_config_yazilamazsa_komut_yaniti(self):
+        orig = app.bridge.atomic_write_json
+
+        def boom(path, data):
+            raise PermissionError("dosya kilitli")
+        app.bridge.atomic_write_json = boom
+        try:
+            app.on_message(dm("mod thread"), self.client)
+        finally:
+            app.bridge.atomic_write_json = orig
+        self.assertIn("config.json yazılamadı", self.replies()[0])
+        self.assertEqual(read_config().get("notify_mode", "dm"), "dm")   # değişmedi
+
+    def test_durum_canlilik_bilgisi(self):
+        app.on_message(msg("@petra"), self.client)
+        app.on_message(dm("durum"), self.client)
+        out = self.replies()[-1]
+        self.assertIn("*Bağlantı:* KOPUK", out)                          # testte socket yok
+        self.assertIn("*Son bildirim:* <#C000000001> @petra → 3 kişi", out)
+        self.assertIn("3 gönderildi, 0 başarısız", out)
+        self.assertIn("*Config:*", out)
+
+    def test_dm_gonderim_hatasi_sayilir(self):
+        orig = self.client.chat_postMessage
+
+        def flaky(**kw):
+            if kw["channel"] == "U00000002":
+                raise FakeError("user_not_found")
+            return orig(**kw)
+        self.client.chat_postMessage = flaky
+        app.on_message(msg("@petra"), self.client)
+        self.assertEqual((app.state["sent_total"], app.state["failed_total"]), (2, 1))
+
+
+class DotEnv(unittest.TestCase):
+    def test_env_dosyasi_ortami_ezer(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, ".env")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("# yorum\nSLACK_BOT_TOKEN=\"xoxb-dosya\"\nBOS=\nSLACK_APP_TOKEN=xapp-dosya\n")
+            os.environ["SLACK_BOT_TOKEN"] = "xoxb-ortam"
+            os.environ.pop("BOS", None)
+            app.load_dotenv(p)
+            self.assertEqual(os.environ["SLACK_BOT_TOKEN"], "xoxb-dosya")
+            self.assertEqual(os.environ["SLACK_APP_TOKEN"], "xapp-dosya")
+            self.assertNotIn("BOS", os.environ)
+            app.load_dotenv(os.path.join(d, "yok.env"))                   # yoksa sessiz
 
 
 if __name__ == "__main__":

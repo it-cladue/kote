@@ -33,6 +33,24 @@ class FindKeywords(unittest.TestCase):
         self.assertEqual(bridge.find_keywords("<@U123> <#C1|petra> <https://x.y/@petra>", KW), [])
         self.assertEqual(bridge.find_keywords("<!subteam^S123|@petra> ayrıca @kote", KW), ["kote"])
 
+    def test_baska_zonun_gercek_etiketi_duz_metin_olur(self):
+        local = {"S111"}
+        # kendi grubumuz: dokunulmaz -> strip eder -> eşleşmez (Slack zaten bildirdi)
+        t = bridge.expose_foreign_subteams("<!subteam^S111|@petra> bak", local)
+        self.assertEqual(t, "<!subteam^S111|@petra> bak")
+        self.assertEqual(bridge.find_keywords(t, KW), [])
+        # başka workspace'in grubu: "@petra" olur -> eşleşir
+        t = bridge.expose_foreign_subteams("<!subteam^S999|@petra> bak", local)
+        self.assertEqual(t, "@petra bak")
+        self.assertEqual(bridge.find_keywords(t, KW), ["petra"])
+        # handle'sız token ve boş metin
+        self.assertEqual(bridge.expose_foreign_subteams("<!subteam^S999> x", local), "<!subteam^S999> x")
+        self.assertEqual(bridge.expose_foreign_subteams(None, local), "")
+
+    def test_alintida_grup_etiketi_duz_metin(self):
+        self.assertEqual(bridge.quote("<!subteam^S111|@petra> acil"), "> @petra acil")
+        self.assertEqual(bridge.plain_subteams("<!subteam^S1> x"), "@grup x")
+
     def test_require_at_false(self):
         self.assertEqual(bridge.find_keywords("petra bakar mı", KW, require_at=False), ["petra"])
         self.assertEqual(bridge.find_keywords("@petra bakar mı", KW, require_at=False), ["petra"])

@@ -20,10 +20,12 @@ Bu klasör @petra'nın olduğu workspace'e (yeni zone) kurulur. Eski zone'da hi�
    Kaydet, kapat, tekrar .\start.ps1  -> token'ları sorar, .env'e yazar, botu başlatır.
    "running scripts is disabled" hatası:  powershell -ExecutionPolicy Bypass -File .\start.ps1
 
+   start.ps1 klasöre özel bir .venv kurar; servis de aynı .venv\Scripts\python.exe ile çalıştırılır.
    start.ps1 kullanmadan, elle:
-       py -3 -m pip install -r requirements.txt
+       py -3 -m venv .venv
+       .\.venv\Scripts\python.exe -m pip install -r requirements.txt
        notepad .env      (içine iki satır:  SLACK_BOT_TOKEN=xoxb-...   SLACK_APP_TOKEN=xapp-...)
-       py -3 app.py
+       .\.venv\Scripts\python.exe app.py
 
 3) Botu kanala ekle: paylaşımlı kanalda   /invite @Etiket Köprüsü
    Bot yalnızca eklendiği kanallarda çalışır; başka kanal için oraya da ekle.
@@ -39,12 +41,29 @@ Bu klasör @petra'nın olduğu workspace'e (yeni zone) kurulur. Eski zone'da hi�
        mod dm|thread|channel           emoji bell | emoji kapat
        yetkili ekle @kişi | yetkili çıkar @kişi | yetkili liste
 
-6) Kalıcı servis (Windows, NSSM: https://nssm.cc):
-       nssm install EtiketKoprusu "C:\Python312\python.exe" "C:\kote\mention-bridge\app.py"
+6) Kalıcı servis (Windows, NSSM: https://nssm.cc). Token'lar .env'den gelir, Python klasördeki .venv'dir:
+       mkdir C:\kote\logs
+       nssm install EtiketKoprusu "C:\kote\mention-bridge\.venv\Scripts\python.exe" "C:\kote\mention-bridge\app.py"
        nssm set EtiketKoprusu AppDirectory "C:\kote\mention-bridge"
+       nssm set EtiketKoprusu AppEnvironmentExtra PYTHONUNBUFFERED=1 PYTHONUTF8=1
        nssm set EtiketKoprusu AppStdout "C:\kote\logs\bridge.log"
        nssm set EtiketKoprusu AppStderr "C:\kote\logs\bridge.log"
+       nssm set EtiketKoprusu AppRotateFiles 1
+       nssm set EtiketKoprusu AppRotateOnline 1
+       nssm set EtiketKoprusu AppRotateBytes 10485760
+       nssm set EtiketKoprusu AppRestartDelay 15000
        nssm start EtiketKoprusu
-   (.env dosyası klasörde olduğu için token vermek gerekmez. Python yolu: (Get-Command python).Source)
+   Sağlık: bota DM'den "durum" (bağlantı, son olay, son bildirim). Bot kapalıyken yazılan @etiketler açılışta
+   (en fazla 1 saat geriye) taranıp bildirilir; bağlantı 5 dk kopuk kalırsa bot kendini kapatır, NSSM yeniden başlatır.
+   Token yenileme: .env'i düzenle (ya da .\start.ps1 -Reset), sonra: nssm restart EtiketKoprusu
+
+7) İki zone'da da alıcı varsa (etiketin üyeleri hem A'da hem B'de): ZONE BAŞINA BİR BOT.
+   Bir bot sadece kendi workspace'inin grubunu görür ve sadece kendi üyelerine DM atabilir.
+   - Her zone'da ayrı app (manifest'teki "name"/"display_name" alanını "Etiket Köprüsü A" / "... B" yap).
+   - Bu klasörden iki kopya: C:\kote\bridge-a ve C:\kote\bridge-b; her birinde o zone'un .env'i ve config.json'ı.
+   - Her zone'da kendi üyeleriyle @petra grubu (yoksa o botun DM'inden: grup oluştur petra, grup ekle petra @kişi).
+   - Her bot paylaşımlı kanala KENDİ tarafından /invite edilir.
+   - İki NSSM servisi: EtiketKoprusuA (bridge-a), EtiketKoprusuB (bridge-b).
+   Sonuç: kim yazarsa yazsın A'daki bot A üyelerine, B'deki bot B üyelerine DM atar; kimse iki kez almaz.
 
 Ayrıntılı anlatım ve sorun giderme: https://github.com/it-cladue/kote  (README, "slack/mention-bridge")
