@@ -1,0 +1,43 @@
+﻿TELEGRAM KANIT BOTU - EKRAN GORUNTULERINI GERI ALMA (PNG)
+=========================================================
+
+NEREYE ACILACAK?
+  Bu zip'in icindekileri BOT KLASORUNE cikarin; yani bot_log.txt, telegram_cache.txt,
+  telegrambot_gyazo.xlsx ve config.json'un oldugu klasore (ornek: ...\telegramkant\).
+  config.json'a dokunmaniza gerek yok; TELEGRAM_TOKEN ve ADMIN_IDS oradan okunur.
+  Gyazo anahtari bu islem icin GEREKMEZ.
+
+NASIL CALISTIRILIR?
+  0) Botu kapatin (telebot.ps1 penceresi aciksa CTRL+C ile durdurun).
+  1) 1_ONCE_TARA.bat        -> cift tiklayin. Sadece tarar, indirmez. telegram_gorseller\indeks.csv olusur;
+                               Excel'de acip kac fotograf bulundugunu, isimleri gorun.
+  2) 2_INDIR.bat            -> cift tiklayin. Son 2 ayin fotograflari PNG olarak iner.
+                               Kesilirse tekrar cift tiklayin; inmis olanlar atlanir.
+  3) 3_GYAZO_OPSIYONEL.bat  -> istege bagli. Gyazo'da hala acilan linkleri de indirir (bot kapali olmasi gerekmez).
+
+CIKTI
+  telegram_gorseller\
+     OF\  GA\  HI\  PP\  VI\  PA\      <- proje klasorleri
+     PROJESIZ\                         <- proje/kategori eslesmeyen fotograflar (yine de tarih+kullanici ile adli)
+     indeks.csv                         <- her fotograf: tarih, kullanici, proje, kategori, personel, uye ID, dosya adi, durum
+     indirme_log.txt
+
+  Dosya adi ornegi:
+     2026-09-15_16-01-18_Dilek-Office_OF_CVPS_P263_U490241154_m21518.png
+     tarih_saat _ kullanici _ proje _ kategori _ P(personel) _ U(uye ID) _ A(ana uye ID) _ tip _ m(mesaj no)
+
+BILMENIZ GEREKENLER
+  * Gorseller GYAZO'DAN DEGIL, dogrudan TELEGRAM'DAN alinir (eski Gyazo linkleri artik acilmiyor).
+  * Bot eski fotograflari ancak "yonlendirerek" okuyabilir: her fotograf bir an icin yonetici sohbetine
+    (config.json ADMIN_IDS) dusup hemen silinir. Bildirim yagmasin isterseniz botu yonetici yaptiginiz
+    BOS bir grup acin ve config.json'a su satiri ekleyin:  "KURTARMA_HEDEF_CHAT_ID": "-100xxxxxxxxxx"
+  * Bot tarafindan silinmis yazi mesajlari geri gelmez (normal). Fotograflar silinmedigi icin gelir.
+    Kullanici sohbeti sildiyse / botu engellediyse o kisinin fotograflari gelmez (indeks: erisim_yok).
+  * Proje/kategori/personel bilgisi Telegram'da yoktur; bot_log.txt + Excel ile eslestirilerek eklenir.
+    Eslesmeyen fotograf PROJESIZ klasorune tarih+kullanici adiyla iner (kayip yok).
+  * Cikti PNG'dir. Bir dosya PNG'ye cevrilemezse .jpg olarak kalir (indeks: indirildi_jpg).
+
+FARKLI ISTEKLER (isteyenler icin, zorunlu degil)
+  PowerShell'de:  .\Recover-TelegramGorselleri.ps1 -Baslangic 2026-08-01 -Bitis 2026-08-31
+                  .\Recover-TelegramGorselleri.ps1 -SonAy 3
+                  .\Recover-TelegramGorselleri.ps1 -Format jpg

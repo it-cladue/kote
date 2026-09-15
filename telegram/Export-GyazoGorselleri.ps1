@@ -59,6 +59,10 @@
 .PARAMETER BeklemeMs
     Iki indirme arasi bekleme (ms). Varsayilan 300. Gyazo'yu yormamak icin.
 
+.PARAMETER Format
+    Cikti bicimi: png (varsayilan) veya jpg. png secilirse Windows'ta System.Drawing ile cevrilir;
+    cevrilemezse dosya .jpg kalir (Durum: indirildi_jpg).
+
 .EXAMPLE
     # Once sadece listele, indeks.csv'yi Excel'de acip kontrol et
     .\Export-GyazoGorselleri.ps1 -BotKlasoru "C:\Users\...\telegramkant" -SadeceListele
@@ -93,7 +97,8 @@ param(
     [switch]$ExcelKullanma,
     [int]$BeklemeMs = 300,
     [int]$DenemeSayisi = 3,
-    [int]$ZamanAsimiSn = 60
+    [int]$ZamanAsimiSn = 60,
+    [ValidateSet("png","jpg")] [string]$Format = "png"
 )
 
 Set-StrictMode -Version 2
@@ -142,6 +147,7 @@ Write-Bilgi "Gyazo gorsel geri alma basliyor"
 Write-Bilgi "  Log    : $LogDosyasi"
 Write-Bilgi "  Excel  : $ExcelDosyasi $(if ($ExcelKullanma) { '(KULLANILMAYACAK)' })"
 Write-Bilgi "  Cikti  : $CiktiKlasoru"
+Write-Bilgi "  Format : $Format"
 Write-Bilgi "  Aralik : $($BaslangicTarihi.ToString('yyyy-MM-dd HH:mm:ss', $Inv)) -> $(if ($BitisTarihi -eq [datetime]::MaxValue) { 'simdi' } else { $BitisTarihi.ToString('yyyy-MM-dd HH:mm:ss', $Inv) })"
 if ($ProjeFiltre.Count -gt 0) { Write-Bilgi "  Proje  : $($ProjeFiltre -join ', ')" }
 if ($SadeceListele) { Write-Bilgi "  MOD    : sadece listele (indirme yok)" }
@@ -536,6 +542,7 @@ function New-DosyaAdi($kayit, $satir) {
     if (-not $ad) { $ad = $kayit.GyazoId }
     $uz = [System.IO.Path]::GetExtension(($kayit.Link -split '\?')[0])
     if (-not $uz -or $uz.Length -gt 5 -or $uz -notmatch '^\.[A-Za-z0-9]+$') { $uz = ".jpg" }
+    if ($Format -eq "png") { $uz = ".png" }
     return @{ Ad = $ad; Uzanti = $uz.ToLowerInvariant(); Kategori = $kat }
 }
 
@@ -625,25 +632,70 @@ function Get-HttpDurumKodu($hata) {
     return 0
 }
 
+$script:PngDestek = $null
+function ConvertTo-PngDosyasi($kaynak, $hedefPng) {
+    # Windows'ta GDI+ (System.Drawing) ile JPEG -> PNG. Basarisizsa $false doner, dosya dokunulmadan kalir.
+    # Not: tipler yansima (reflection) ile cozulur; boylece System.Drawing olmayan ortamlarda hata try icinde yakalanir.
+    if ($script:PngDestek -eq $false) { return $false }
+    try {
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        $asm = [System.AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GetName().Name -in @("System.Drawing", "System.Drawing.Common") } | Select-Object -First 1
+        if (-not $asm) { throw "System.Drawing yuklenemedi" }
+        $imgType = $asm.GetType("System.Drawing.Image", $true)
+        $bmpType = $asm.GetType("System.Drawing.Bitmap", $true)
+        $fmtType = $asm.GetType("System.Drawing.Imaging.ImageFormat", $true)
+        $pngFmt  = $fmtType.GetProperty("Png").GetValue($null, $null)
+        $img = $imgType.GetMethod("FromFile", [type[]]@([string])).Invoke($null, @([string]$kaynak))
+        try {
+            $bmp = [System.Activator]::CreateInstance($bmpType, @($img))
+            try { $bmp.Save([string]$hedefPng, $pngFmt) } finally { $bmp.Dispose() }
+        } finally { $img.Dispose() }
+        if (-not (Test-GorselDosyasi $hedefPng)) { Remove-Item $hedefPng -Force -ErrorAction SilentlyContinue; return $false }
+        $script:PngDestek = $true
+        return $true
+    } catch {
+        $msg = $_.Exception.Message
+        if ($_.Exception.InnerException) { $msg = $_.Exception.InnerException.Message }
+        if ($null -eq $script:PngDestek) { Write-Bilgi "  ! PNG donusumu bu makinede calismadi ($msg); dosyalar .jpg olarak kaydedilecek."; $script:PngDestek = $false }
+        Remove-Item $hedefPng -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+}
+function Complete-GorselDosyasi($gecici, $hedef) {
+    if ($Format -eq "png") {
+        if (ConvertTo-PngDosyasi $gecici $hedef) { Remove-Item $gecici -Force -ErrorAction SilentlyContinue; return $hedef }
+        $jpg = [System.IO.Path]::ChangeExtension($hedef, ".jpg")
+        Move-Item $gecici $jpg -Force
+        return $jpg
+    }
+    Move-Item -Path $gecici -Destination $hedef -Force
+    return $hedef
+}
+function Find-MevcutGorsel($hedef) {
+    foreach ($aday in @($hedef, [System.IO.Path]::ChangeExtension($hedef, ".jpg"), [System.IO.Path]::ChangeExtension($hedef, ".png"))) {
+        if ((Test-Path $aday) -and (Test-GorselDosyasi $aday)) { return $aday }
+    }
+    return $null
+}
 function Invoke-GorselIndir($url, $hedef) {
-    # Donus: "indirildi" | "gyazo_silinmis" | "hata: ..."
+    # Donus: @{ Durum = "indirildi" | "indirildi_jpg" | "gyazo_silinmis" | "hata: ..."; Yol = son dosya yolu }
     $gecici = "$hedef.indiriliyor"
     for ($deneme = 1; $deneme -le $DenemeSayisi; $deneme++) {
         try {
             Remove-Item $gecici -Force -ErrorAction SilentlyContinue
             Invoke-WebRequest -Uri $url -OutFile $gecici -UseBasicParsing -TimeoutSec $ZamanAsimiSn | Out-Null
             if (-not (Test-GorselDosyasi $gecici)) { throw "indirilen dosya gorsel degil (bos ya da HTML sayfasi)" }
-            Move-Item -Path $gecici -Destination $hedef -Force
-            return "indirildi"
+            $son = Complete-GorselDosyasi $gecici $hedef
+            return @{ Durum = $(if ($son -ne $hedef) { "indirildi_jpg" } else { "indirildi" }); Yol = $son }
         } catch {
             $kod = Get-HttpDurumKodu $_
             Remove-Item $gecici -Force -ErrorAction SilentlyContinue
-            if ($kod -eq 404 -or $kod -eq 410) { return "gyazo_silinmis" }
-            if ($deneme -ge $DenemeSayisi) { return "hata: $($_.Exception.Message)" }
+            if ($kod -eq 404 -or $kod -eq 410) { return @{ Durum = "gyazo_silinmis"; Yol = $null } }
+            if ($deneme -ge $DenemeSayisi) { return @{ Durum = "hata: $($_.Exception.Message)"; Yol = $null } }
             Start-Sleep -Seconds (2 * $deneme)
         }
     }
-    return "hata: bilinmeyen"
+    return @{ Durum = "hata: bilinmeyen"; Yol = $null }
 }
 
 Write-Bilgi "Indirme basliyor: $($plan.Count) gorsel"
@@ -654,20 +706,25 @@ foreach ($p in $plan) {
     $i++
     $klasor = Split-Path -Parent $p.DosyaYolu
     if (-not (Test-Path $klasor)) { New-Item -ItemType Directory -Path $klasor -Force | Out-Null }
-    if ((Test-Path $p.DosyaYolu) -and -not $Yeniden -and (Test-GorselDosyasi $p.DosyaYolu)) {
+    $mevcut = $(if ($Yeniden) { $null } else { Find-MevcutGorsel $p.DosyaYolu })
+    if ($mevcut) {
         $p.Durum = "zaten_var"; $sayac.zaten_var++
-        $inmisDosya[$p.GyazoId] = $p.DosyaYolu
+        $p.DosyaYolu = $mevcut; $p.DosyaAdi = Split-Path $mevcut -Leaf
+        $inmisDosya[$p.GyazoId] = $mevcut
     } elseif ($inmisDosya.ContainsKey($p.GyazoId) -and (Test-Path $inmisDosya[$p.GyazoId])) {
-        Copy-Item -Path $inmisDosya[$p.GyazoId] -Destination $p.DosyaYolu -Force
+        $kaynak = $inmisDosya[$p.GyazoId]
+        $hedefKopya = [System.IO.Path]::ChangeExtension($p.DosyaYolu, [System.IO.Path]::GetExtension($kaynak))
+        Copy-Item -Path $kaynak -Destination $hedefKopya -Force
+        $p.DosyaYolu = $hedefKopya; $p.DosyaAdi = Split-Path $hedefKopya -Leaf
         $p.Durum = "kopyalandi"; $sayac.kopyalandi++
         if ($p.Not) { $p.Not += "; " }
         $p.Not += "ayni_gorsel_baska_kayitta_da_var"
     } else {
         $sonuc = Invoke-GorselIndir $p.GyazoLinki $p.DosyaYolu
-        $p.Durum = $sonuc
-        if ($sonuc -eq "indirildi") { $sayac.indirildi++; $inmisDosya[$p.GyazoId] = $p.DosyaYolu }
-        elseif ($sonuc -eq "gyazo_silinmis") { $sayac.gyazo_silinmis++; Write-Bilgi "  ! Gyazo'da yok (404): $($p.GyazoLinki)" }
-        else { $sayac.hata++; Write-Bilgi "  ! $($p.GyazoLinki) -> $sonuc" }
+        $p.Durum = $sonuc.Durum
+        if ($sonuc.Yol) { $sayac.indirildi++; $p.DosyaYolu = $sonuc.Yol; $p.DosyaAdi = Split-Path $sonuc.Yol -Leaf; $inmisDosya[$p.GyazoId] = $sonuc.Yol }
+        elseif ($sonuc.Durum -eq "gyazo_silinmis") { $sayac.gyazo_silinmis++; Write-Bilgi "  ! Gyazo'da yok (404): $($p.GyazoLinki)" }
+        else { $sayac.hata++; Write-Bilgi "  ! $($p.GyazoLinki) -> $($sonuc.Durum)" }
         if ($BeklemeMs -gt 0) { Start-Sleep -Milliseconds $BeklemeMs }
     }
     if (($i % 25) -eq 0 -or $i -eq $plan.Count) {

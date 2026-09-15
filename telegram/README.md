@@ -9,12 +9,17 @@ Gyazo'dan değil **doğrudan Telegram'dan** geri alıyoruz.
 | `Recover-TelegramGorselleri.ps1` | **Geriye dönük** (son 2 ay): eski görselleri Telegram'dan geri indirir. | **Telegram** |
 | `telebot.ps1` | **İleriye dönük**: botun yamalı hali. Bundan sonra her kayıtta görseli yerele de kaydeder. | Telegram |
 | `Export-GyazoGorselleri.ps1` | Opsiyonel: Gyazo linki hâlâ açılan kayıtları Gyazo'dan indirir (tam adlandırma, Telegram'a hiç dokunmadan). | Gyazo |
+| `1_ONCE_TARA.bat`, `2_INDIR.bat`, `3_GYAZO_OPSIYONEL.bat`, `OKU_BENI.txt` | Çift tıkla çalıştırma. Bot klasörüne kopyalayıp sırayla çalıştırın; parametre yazmak gerekmez. | – |
+
+**Hazır paket:** bu klasördeki iki script + üç `.bat` + `OKU_BENI.txt` bot klasörüne (bot_log.txt, telegram_cache.txt,
+config.json'un olduğu yere) kopyalanır, `1_ONCE_TARA.bat` sonra `2_INDIR.bat` çift tıklanır. Çıktı **PNG**'dir
+(`-Format jpg` ile JPEG). Bir dosya PNG'ye çevrilemezse `.jpg` kalır ve `indeks.csv`'de `indirildi_jpg` yazar.
 
 Üçünde de dosya adı aynı düzendedir; boş alanlar atlanır:
 
 ```
-2026-09-15_16-01-18_Dilek-Office_OF_CVPS_P263_U490241154.jpg
-2026-07-18_11-10-43_galabeyza_GA_ARK_P275_U435686089_A435422754.jpg
+2026-09-15_16-01-18_Dilek-Office_OF_CVPS_P263_U490241154.png
+2026-07-18_11-10-43_galabeyza_GA_ARK_P275_U435686089_A435422754.png
 ```
 `P` = personel kodu, `U` = üye ID, `A` = ana üye ID. Türkçe karakter ve boşluklar sadeleştirilir
 (`Dilek Office` → `Dilek-Office`).
@@ -45,7 +50,8 @@ ID**'yi de dosya adına ekler. Eşleşme bulunamazsa ad yine `tarih_kullanıcı`
 2. **Bir "dökme" sohbeti açın (önerilir).** Yönlendirme her mesajı bir an için `-HedefChatId` sohbetine
    düşürür (script hemen siler). Bildirim yağmuru olmasın diye: Telegram'da **botun yönetici olduğu boş
    bir grup/kanal** açın, ID'sini `-HedefChatId` verin. Vermezseniz `config.json`'daki ilk `ADMIN_IDS`
-   kullanılır (yönetici hesabına anlık bildirimler gelir).
+   kullanılır (yönetici hesabına anlık bildirimler gelir). `.bat` ile çalıştırıyorsanız `config.json`'a
+   `"KURTARMA_HEDEF_CHAT_ID": "-100..."` satırı ekleyerek de verebilirsiniz.
 3. Bot silinmiş mesajları (akıştaki personel/üye ID yazıları bot tarafından silinir) yönlendiremez;
    bunlar `mesaj_yok` diye atlanır. **Fotoğraf mesajları silinmediği için kurtarılır.** Kullanıcı sohbeti
    sildiyse/botu engellediyse (`erisim_yok`) o kişinin görselleri gelmez.
@@ -76,12 +82,12 @@ yönlendirmez.
 |---|---|
 | `KullaniciAdi`, `KullaniciId` | Kaydı ekleyen (Telegram sohbet ID'sinden, kesin) |
 | `Zenginlik` | `eslesti` (proje/kategori/personel bulundu) / `sadece_kullanici_tarih` |
-| `Durum` | `indirildi` / `zaten_var` / `tarandi` (-SadeceTara) / `getfile_hata:...` |
+| `Durum` | `indirildi` / `indirildi_jpg` (PNG'ye çevrilemedi, .jpg kaldı) / `zaten_var` / `tarandi` (-SadeceTara) / `getfile_hata:...` |
 
 Diğer parametreler: `-SonAy 3`, `-AdSablonu "{proje}_{personel}_{tarih}"`
 (alanlar: `tarih kullanici kullaniciid proje kategori personel uyeid anaid tip mesajid`),
 `-Zenginlestir:$false` (log/Excel eşlemesini kapat), `-Yeniden`, `-KopyaBirak` (yönlendirilen kopyayı
-silme), `-BeklemeMs 350`, `-EskiDurma 400`.
+silme), `-Format jpg`, `-BeklemeMs 350`, `-EskiDurma 400`.
 
 ### Bilinen sınırlar (dürüstçe)
 

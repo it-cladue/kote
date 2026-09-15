@@ -59,6 +59,10 @@
     -SonAy/-Baslangic ile tarama yaparken, araliktan eski ust uste bu kadar mesaj gorulunce dur (varsayilan 400).
 .PARAMETER BeklemeMs
     Iki istek arasi bekleme (ms). Varsayilan 350. Telegram limitlerini asmamak icin.
+.PARAMETER Format
+    Cikti dosya bicimi: png (varsayilan) veya jpg. Telegram fotograflari JPEG gelir; png secilirse
+    Windows'ta System.Drawing ile PNG'ye cevrilir. Cevrilemezse dosya .jpg olarak birakilir ve
+    indeks.csv'de Durum "indirildi_jpg" olur.
 .PARAMETER ApiTaban
     Telegram API taban adresi. Varsayilan https://api.telegram.org (degistirmeyin; test icindir).
 
@@ -96,6 +100,7 @@ param(
     [int]$BeklemeMs = 350,
     [int]$DenemeSayisi = 3,
     [int]$ZamanAsimiSn = 60,
+    [ValidateSet("png","jpg")] [string]$Format = "png",
     [string]$ApiTaban = "https://api.telegram.org"
 )
 
@@ -141,12 +146,15 @@ if (-not $Token -or -not $HedefChatId) {
     if (Test-Path $ConfigDosyasi) { try { $cfg = [System.IO.File]::ReadAllText($ConfigDosyasi, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch { Write-Bilgi "! config.json okunamadi: $($_.Exception.Message)" } }
     if (-not $Token -and $cfg) { $Token = [string](Get-Prop $cfg "TELEGRAM_TOKEN") }
     if (-not $HedefChatId -and $cfg) {
-        $ids = Get-Prop $cfg "ADMIN_IDS"
-        if ($ids) { $HedefChatId = [string](@($ids)[0]) }
+        # Istege bagli: config.json icine "KURTARMA_HEDEF_CHAT_ID": "-100..." yazarsaniz dokme sohbeti o olur.
+        $HedefChatId = [string](Get-Prop $cfg "KURTARMA_HEDEF_CHAT_ID")
+        if (-not $HedefChatId) { $ids = Get-Prop $cfg "ADMIN_IDS"; if ($ids) { $HedefChatId = [string](@($ids)[0]) } }
     }
 }
-if (-not $Token)       { throw "Telegram token yok. -Token verin ya da config.json icinde TELEGRAM_TOKEN olsun." }
-if (-not $HedefChatId) { throw "HedefChatId yok. -HedefChatId verin ya da config.json icinde ADMIN_IDS olsun." }
+if (-not (Test-Path $CacheDosyasi)) { throw "telegram_cache.txt bulunamadi ($CacheDosyasi). Bu dosyalari BOT KLASORUNE (bot_log.txt ve telegram_cache.txt'nin oldugu yere) cikarip oradan calistirin ya da -BotKlasoru verin." }
+if (-not $Token)       { throw "Telegram token yok. config.json icinde TELEGRAM_TOKEN olmali (bot klasorundeki config.json) ya da -Token verin." }
+if (-not $HedefChatId) { throw "HedefChatId yok. config.json icinde ADMIN_IDS ya da KURTARMA_HEDEF_CHAT_ID olmali, ya da -HedefChatId verin." }
+if ($Token -like "BURAYA_*") { throw "config.json icindeki TELEGRAM_TOKEN doldurulmamis." }
 
 $ApiTaban = $ApiTaban.TrimEnd("/")
 $BitisTarihi     = if ($Bitis) { [datetime]::Parse($Bitis, $Inv) } else { [datetime]::MaxValue }
@@ -159,6 +167,7 @@ Write-Bilgi "  Cache  : $CacheDosyasi"
 Write-Bilgi "  Hedef  : $HedefChatId (yonlendirme dokme sohbeti)"
 Write-Bilgi "  Cikti  : $CiktiKlasoru"
 Write-Bilgi "  Aralik : $($BaslangicTarihi.ToString('yyyy-MM-dd', $Inv)) -> $(if ($BitisTarihi -eq [datetime]::MaxValue) { 'simdi' } else { $BitisTarihi.ToString('yyyy-MM-dd', $Inv) }) (orijinal gonderim tarihine gore)"
+Write-Bilgi "  Format : $Format"
 Write-Bilgi "  API    : $ApiTaban"
 if ($SadeceTara) { Write-Bilgi "  MOD    : sadece tara (indirme yok)" }
 
@@ -404,7 +413,48 @@ function Test-GorselDosyasi($yol) {
         return $false
     } catch { return $false }
 }
+$script:PngDestek = $null
+function ConvertTo-PngDosyasi($kaynak, $hedefPng) {
+    # Windows'ta GDI+ (System.Drawing) ile JPEG -> PNG. Basarisizsa $false doner, dosya dokunulmadan kalir.
+    # Not: tipler yansima (reflection) ile cozulur; boylece System.Drawing olmayan ortamlarda hata try icinde yakalanir.
+    if ($script:PngDestek -eq $false) { return $false }
+    try {
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        $asm = [System.AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GetName().Name -in @("System.Drawing", "System.Drawing.Common") } | Select-Object -First 1
+        if (-not $asm) { throw "System.Drawing yuklenemedi" }
+        $imgType = $asm.GetType("System.Drawing.Image", $true)
+        $bmpType = $asm.GetType("System.Drawing.Bitmap", $true)
+        $fmtType = $asm.GetType("System.Drawing.Imaging.ImageFormat", $true)
+        $pngFmt  = $fmtType.GetProperty("Png").GetValue($null, $null)
+        $img = $imgType.GetMethod("FromFile", [type[]]@([string])).Invoke($null, @([string]$kaynak))
+        try {
+            $bmp = [System.Activator]::CreateInstance($bmpType, @($img))
+            try { $bmp.Save([string]$hedefPng, $pngFmt) } finally { $bmp.Dispose() }
+        } finally { $img.Dispose() }
+        if (-not (Test-GorselDosyasi $hedefPng)) { Remove-Item $hedefPng -Force -ErrorAction SilentlyContinue; return $false }
+        $script:PngDestek = $true
+        return $true
+    } catch {
+        $msg = $_.Exception.Message
+        if ($_.Exception.InnerException) { $msg = $_.Exception.InnerException.Message }
+        if ($null -eq $script:PngDestek) { Write-Bilgi "  ! PNG donusumu bu makinede calismadi ($msg); dosyalar .jpg olarak kaydedilecek."; $script:PngDestek = $false }
+        Remove-Item $hedefPng -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+}
+function Complete-GorselDosyasi($gecici, $hedef) {
+    # Gecici (dogrulanmis) gorseli son yerine koy; png istendiyse cevir, olmazsa .jpg olarak birak. Son yolu doner.
+    if ($Format -eq "png") {
+        if (ConvertTo-PngDosyasi $gecici $hedef) { Remove-Item $gecici -Force -ErrorAction SilentlyContinue; return $hedef }
+        $jpg = [System.IO.Path]::ChangeExtension($hedef, ".jpg")
+        Move-Item $gecici $jpg -Force
+        return $jpg
+    }
+    Move-Item $gecici $hedef -Force
+    return $hedef
+}
 function Save-TelegramDosya($filePath, $hedef) {
+    # Basarili: son dosya yolu (png ya da yedek olarak jpg). Basarisiz: $null
     $url = "$ApiTaban/file/bot$Token/$filePath"
     $gecici = "$hedef.indiriliyor"
     for ($deneme=1; $deneme -le $DenemeSayisi; $deneme++) {
@@ -412,11 +462,17 @@ function Save-TelegramDosya($filePath, $hedef) {
             Remove-Item $gecici -Force -ErrorAction SilentlyContinue
             Invoke-WebRequest -Uri $url -OutFile $gecici -UseBasicParsing -TimeoutSec $ZamanAsimiSn | Out-Null
             if (-not (Test-GorselDosyasi $gecici)) { throw "indirilen dosya gorsel degil" }
-            Move-Item $gecici $hedef -Force
-            return $true
-        } catch { Remove-Item $gecici -Force -ErrorAction SilentlyContinue; if ($deneme -ge $DenemeSayisi) { return $false }; Start-Sleep -Seconds (2*$deneme) }
+            return (Complete-GorselDosyasi $gecici $hedef)
+        } catch { Remove-Item $gecici -Force -ErrorAction SilentlyContinue; if ($deneme -ge $DenemeSayisi) { return $null }; Start-Sleep -Seconds (2*$deneme) }
     }
-    return $false
+    return $null
+}
+function Find-MevcutGorsel($hedef) {
+    # Daha once inmis dosya var mi (png ya da jpg yedegi)?
+    foreach ($aday in @($hedef, [System.IO.Path]::ChangeExtension($hedef, ".jpg"), [System.IO.Path]::ChangeExtension($hedef, ".png"))) {
+        if ((Test-Path $aday) -and (Test-GorselDosyasi $aday)) { return $aday }
+    }
+    return $null
 }
 
 # ==================== CACHE OKU ====================
@@ -519,20 +575,26 @@ for ($idx = $ciftler.Count - 1; $idx -ge 0; $idx--) {
             $klasor = Join-Path $CiktiKlasoru $(if ($kayit -and $kayit.Proje) { (ConvertTo-GuvenliAd $kayit.Proje).ToUpperInvariant() } else { "PROJESIZ" })
             if (-not (Test-Path $klasor)) { New-Item -ItemType Directory -Path $klasor -Force | Out-Null }
             $temelAd = New-Ad $tarih $c.ChatId $c.MesajId $kayit
-            $dosyaAdi = "$temelAd`_m$($c.MesajId).jpg"
+            $uz = $(if ($Format -eq "png") { ".png" } else { ".jpg" })
+            $dosyaAdi = "$temelAd`_m$($c.MesajId)$uz"
             $anahtar = (Join-Path $klasor $dosyaAdi).ToLowerInvariant()
-            $n=2; while ($kullanilanAd.ContainsKey($anahtar)) { $dosyaAdi = "$temelAd`_m$($c.MesajId)_$n.jpg"; $anahtar=(Join-Path $klasor $dosyaAdi).ToLowerInvariant(); $n++ }
+            $n=2; while ($kullanilanAd.ContainsKey($anahtar)) { $dosyaAdi = "$temelAd`_m$($c.MesajId)_$n$uz"; $anahtar=(Join-Path $klasor $dosyaAdi).ToLowerInvariant(); $n++ }
             $kullanilanAd[$anahtar]=$true
             $hedef = Join-Path $klasor $dosyaAdi
             $durum = "tarandi"
             if (-not $SadeceTara) {
-                if ((Test-Path $hedef) -and -not $Yeniden -and (Test-GorselDosyasi $hedef)) { $durum="zaten_var"; $sayac.zaten_var++ }
+                $mevcut = $(if ($Yeniden) { $null } else { Find-MevcutGorsel $hedef })
+                if ($mevcut) { $durum="zaten_var"; $sayac.zaten_var++; $hedef = $mevcut; $dosyaAdi = Split-Path $mevcut -Leaf }
                 else {
                     $gf = Invoke-Telegram "getFile" @{ file_id=$fileId }
                     if ($BeklemeMs -gt 0) { Start-Sleep -Milliseconds ([math]::Min($BeklemeMs,150)) }
                     if (Get-Prop $gf "ok") {
                         $fp = [string](Get-Prop (Get-Prop $gf "result") "file_path")
-                        if ($fp -and (Save-TelegramDosya $fp $hedef)) { $durum="indirildi"; $sayac.indirildi++ } else { $durum="indirilemedi"; $sayac.hata++ }
+                        $son = $(if ($fp) { Save-TelegramDosya $fp $hedef } else { $null })
+                        if ($son) {
+                            $durum = $(if ($son -ne $hedef) { "indirildi_jpg" } else { "indirildi" })
+                            $sayac.indirildi++; $hedef = $son; $dosyaAdi = Split-Path $son -Leaf
+                        } else { $durum="indirilemedi"; $sayac.hata++ }
                     } else { $durum="getfile_hata:$([string](Get-Prop $gf 'description'))"; $sayac.hata++ }
                 }
             }
