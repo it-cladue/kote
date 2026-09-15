@@ -6,6 +6,7 @@ Gyazo'dan değil **doğrudan Telegram'dan** geri alıyoruz.
 
 | Dosya | Ne işe yarar | Kaynak |
 |---|---|---|
+| `Gorselleri-Cek.ps1` | **TEK DOSYA, sıfır ayar**: sağ tık → "PowerShell ile çalıştır". Bot klasörünü kendisi bulur, son 2 ayı Telegram'dan PNG olarak çeker. | **Telegram** |
 | `Recover-TelegramGorselleri.ps1` | **Geriye dönük** (son 2 ay): eski görselleri Telegram'dan geri indirir. | **Telegram** |
 | `telebot.ps1` | **İleriye dönük**: botun yamalı hali. Bundan sonra her kayıtta görseli yerele de kaydeder. | Telegram |
 | `Export-GyazoGorselleri.ps1` | Opsiyonel: Gyazo linki hâlâ açılan kayıtları Gyazo'dan indirir (tam adlandırma, Telegram'a hiç dokunmadan). | Gyazo |
