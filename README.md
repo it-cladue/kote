@@ -1,6 +1,9 @@
 # kote
 
-Slack yönetim scriptleri.
+Slack ve Telegram bot yönetim scriptleri.
+
+- `slack/` — Slack user group scriptleri (aşağıda)
+- `telegram/` — Telegram kanıt botu: Gyazo görsellerini yerelde tutma (geriye dönük indirme scripti + bot yaması). Bkz. [telegram/README.md](telegram/README.md)
 
 ## slack/Add-SlackUserGroupMember.ps1
 
