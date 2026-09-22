@@ -1,0 +1,145 @@
+# ============================================================================
+#  TELEGRAM KAMPANYA BOTU — AYAR DOSYASI
+#  Her satirin ne ise yaradigi ustundeki aciklamada yazar.
+#  Degisiklikten sonra botu yeniden baslatin (BASLAT.bat).
+#  SITENE OZEL DOLDURMAN GEREKEN SATIRLAR "### DOLDUR:" ile isaretli.
+# ============================================================================
+
+# --- KIMLIK -----------------------------------------------------------------
+# BotFather'in verdigi token. Yeni token alirsan buraya yapistir.
+TOKEN=BURAYA_BOT_TOKEN
+# Admin parola ozeti. Yeni parola icin: py sifre_hash_olustur.py
+PASSWORD_HASH=pbkdf2_sha256$BURAYA_GUCLU_ADMIN_SIFRESI
+# Admin oturumu kac dakika acik kalsin (islem yapildikca kendini yeniler)
+ADMIN_SESSION_MINUTES=15
+# 1 = /admin sonrasi ayrica parola sorulur. 0 = yalnizca admins.txt listesi yeter.
+ADMIN_REQUIRE_PASSWORD=0
+# Konsol basliginda gorunen ad (kullanici gormez)
+BOT_NAME=Telegram Kampanya Botu
+
+# --- ACILIS AKISI (/start) --------------------------------------------------
+# 0 = PASIF (onerilen): karsilama + kampanya gosterilir; Site ID yalnizca
+#     kullanici Profil menusunden isterse girilir.
+# 1 = kayitsiz kullaniciya acilista Site ID sorulur.
+SITE_ID_ON_START=0
+
+# Karsilama metni. {name} kullanicinin adiyla degisir. Satir atlamak icin \n.
+WELCOME_TEXT=Merhaba {name} 👋\n\nAramıza hoş geldin! 🎉 Güncel bonus ve kampanyalar için aşağıdaki butonları kullanabilirsin 👇
+
+# Acilis gorseli/videosu (https:// URL). Bos ise: aktif kampanya medyasi,
+# o da yoksa images/promo.jpg gonderilir. Panelden de degistirilebilir:
+# /admin -> Banner & Medya
+WELCOME_MEDIA_URL=
+
+# Acilista kanal daveti. Bos = kanal mesaji HIC gonderilmez (su an gizli).
+# Acmak icin: CHANNEL_LINK=https://t.me/kanaladi
+CHANNEL_LINK=
+CHANNEL_TEXT=👉 Kanalımıza abone ol
+
+# --- LINKLER (SITENE GORE) --------------------------------------------------
+### DOLDUR: uyelik kayit sayfan
+REGISTER_LINK=https://example.com/register
+### DOLDUR: kampanya/bonus aktivasyon sayfan
+ACTIVATE_LINK=https://example.com/campaign
+### DOLDUR: guncel giris adresin (https:// sart) — panelden de degisir:
+### /admin -> Linkler -> Giris (degisince tek tikla herkese duyurabilirsin)
+LOGIN_LINK=https://example.com/login
+### DOLDUR: genel canli destek hatti (t.me/... veya https://...)
+SUPPORT_LINK=https://t.me/example_support
+
+# ANA MENU ozel linkleri. BOS birakilan giris linkine duser; hepsi panelden
+# de degistirilebilir (/admin -> Linkler).
+### DOLDUR (varsa): Telegram Mini App adresin (https:// sart)
+MINIAPP_LINK=
+### DOLDUR (varsa): para yatirma sayfasi
+DEPOSIT_LINK=
+### DOLDUR (varsa): para cekme sayfasi
+WITHDRAW_LINK=
+
+# AKILLI DESTEK YONLENDIRME kanallari. Kullanici serbest yazinca:
+#   "param gelmedi / cekim"  -> WITHDRAW_SUPPORT_LINK
+#   "yatiramiyorum / odeme"  -> DEPOSIT_SUPPORT_LINK
+#   "bonus alamadim"         -> BONUS_SUPPORT_LINK
+# Bos birakilan kanal, destek merkezinde gosterilmez (genel destek kalir).
+### DOLDUR (onerilir): odeme sorunlari kanali
+DEPOSIT_SUPPORT_LINK=
+### DOLDUR (onerilir): cekim sorunlari kanali
+WITHDRAW_SUPPORT_LINK=
+### DOLDUR (onerilir): bonus sorunlari kanali
+BONUS_SUPPORT_LINK=
+
+# --- ANA MENU GORUNUMU ------------------------------------------------------
+MAIN_MENU_TITLE=🏠 ANA MENÜ
+MAIN_MENU_TEXT=İstediğin bölüme tek dokunuşla ulaş 👇
+
+# --- ALT KLAVYE (yazi alaninin altindaki kalici menu, Luks tarzi) -----------
+# Satirlar virgulle, ayni satirdaki butonlar | ile ayrilir.
+# VARSAYILAN: ikonun icinde TUM menu (13 bolum + Profil + Kampanya vitrini).
+# Buton yazisini degistirsen de su kelimeler GECIYORSA taninir:
+# menu, kampanya, profil, destek, giris, bonus, duyuru, sss, para yatir, para cek...
+REPLY_MENU_BUTTONS=🏠 Siteye Giriş|📱 Mini App,🎁 Bonuslar|🆕 Yeni Üye,🎰 Slot|⚽ Spor,⭐ Bana Özel|🏆 Turnuvalar,💰 Para Yatır|💸 Para Çek,📢 Duyurular|❓ SSS,💬 Canlı Destek|🤴 Profil,📸 Ekran Görüntüsü|🏠 Ana Menü
+REPLY_MENU_PROMPT=Alt menü her zaman hazır 👇
+
+# --- KOMUT MENUSU (⌘ simgesi / "/" listesi) ---------------------------------
+# Bicim: komut:aciklama, virgulle. Sira burada nasil ise menude oyle gorunur.
+USER_COMMANDS=start:🚀 Başla, menu:🏠 Ana Menü, giris:🏠 Siteye Giriş, miniapp:📱 Mini App, bonuslar:🎁 Güncel Bonuslar, yeniuye:🆕 Yeni Üye Bonusları, slot:🎰 Slot Kampanyaları, spor:⚽ Spor Bonusları, banaozel:⭐ Bana Özel Kampanyalar, turnuvalar:🏆 Turnuvalar, parayatir:💰 Para Yatır, paracek:💸 Para Çek, duyurular:📢 Duyurular, sss:❓ Sık Sorulan Sorular, destek:💬 Canlı Destek, profil:🤴 Profil, ekran:📸 Ekran Görüntüsü Gönder, iptal:❌ İşlemi iptal et
+
+# --- SOL ALT BUTON: PLAY mi, ⌘ komut menusu mu? ------------------------------
+#   play = 🎮 PLAY web-app butonu. DIKKAT: bu moddayken Telegram ⌘ simgesini
+#          GIZLER (ikisi ayni slottadir, ayni anda olmaz). Komutlar yine "/"
+#          yazinca acilir. PLAY icin BotFather /setcommands bir kez yapilmali.
+#   menu = ⌘ komut simgesi her istemcide gorunur; PLAY butonu olmaz.
+MENU_BUTTON_MODE=play
+MENU_BUTTON_TEXT=🎮 PLAY
+# PLAY'in acacagi ayri adres (https:// sart). Bos = giris linkini kullanir.
+PLAY_LINK=
+
+# --- BUTON YAZILARI ----------------------------------------------------------
+REGISTER_BUTTON_TEXT=🔥 Hemen Üye Ol
+ACTIVATE_BUTTON_TEXT=🎁 Aktif Et
+LOGIN_BUTTON_TEXT=🔗 Güncel Giriş
+
+# --- BOT PROFILI ("What can this bot do?" alani; acilista otomatik yazilir) --
+BOT_DESCRIPTION=Güncel kampanyalara ulaşmak, kayıt olmak ve giriş yapmak kolay ve hızlı. Başlamak için START'a bas! 🚀
+BOT_SHORT_DESCRIPTION=Güncel kampanyalar ve hızlı giriş 🎁
+
+# --- KAMPANYA VITRINI (acilista gosterilen medya + yazi) ---------------------
+CAMPAIGN_TITLE=Günün Kampanyası
+CAMPAIGN_CAPTION=Günün kampanyasını hemen aktif et!
+# Medya altinda tiklanabilir yazi (istege bagli)
+CAPTION_LINK_TEXT=
+CAPTION_LINK_URL=
+# Kopyalanabilir promosyon kodu (istege bagli). copy = gorunur, spoiler = dokununca acilir
+CAMPAIGN_CODE=
+CAMPAIGN_CODE_STYLE=copy
+# Vitrin medyasi URL ile de verilebilir; en kolayi admin olarak bota
+# dogrudan foto/video gondermek (otomatik kutuphaneye girer ve aktif olur).
+CAMPAIGN_MEDIA_URL=
+
+# --- SITE ID AKISI -----------------------------------------------------------
+SITE_ID_PROMPT_TEXT=Yeni bonuslar almak için Site ID'ni gir.
+REGISTER_LINK_TEXT=Kayıt Linki
+
+# --- EKRAN GORUNTUSU KAYDI ---------------------------------------------------
+# 1 = kullanici (veya admin) bota FOTO gonderince kategori secenekleri sunulur;
+#     sectigi kategori, gonderdigi tarih ve yazdigi bilgiler (Site ID, arkadas ID,
+#     tutar...) DOSYA ADINA yazilarak screenshots/ klasorune kaydedilir.
+#     Diger yol: /ekran (veya alt klavyedeki 📸 tusu) -> kategori -> bilgiler -> foto.
+# 0 = kapali (kullanici fotolari eskisi gibi yanitsiz kalir; admin fotosu kutuphaneye gider).
+SCREENSHOTS_ENABLED=1
+# Kategoriler: anahtar:Buton Yazisi:Alan1|Alan2, ... (virgulle ayrilir; en fazla 12 kategori, 6 alan)
+# Her alan kullanicidan sirayla istenir; yazdigi degerler dosya adina eklenir.
+# Bos birakilirsa yerlesik liste kullanilir. Panelden de degistirilebilir: /admin -> 📸 Ekran Goruntuleri
+SCREENSHOT_CATEGORIES=arkadas:👥 Arkadaşını Getir:Site ID|Arkadaş ID, yatirim:💰 Para Yatırma:Site ID|Tutar, cekim:💸 Para Çekme:Site ID|Tutar, bonus:🎁 Bonus Talebi:Site ID|Bonus Adı, diger:📄 Diğer:Site ID|Konu
+# Dosya adi sablonu. Yer tutucular: {kategori} {tarih} {saat} {alanlar} {tgid} {kullanici}
+# {alan1} {alan2}... ya da alan adi ({site_id} {arkadas_id} {tutar}...).
+# Ornek cikti: Arkadasini-Getir_2026-09-22_14-30-05_ABC123_XYZ789_123456789.jpg
+SCREENSHOT_NAME_FORMAT={kategori}_{tarih}_{saat}_{alanlar}_{tgid}
+# Kullanici basina gunluk en fazla kayit (adminler sinirsiz; 0 = sinirsiz)
+SCREENSHOT_DAILY_LIMIT=10
+# Foto gelince kullaniciya gosterilen secenek sorusu
+SCREENSHOT_PROMPT_TEXT=Bu ekran görüntüsü ne için? Bir seçenek seç 👇
+
+# --- ZAMANLI MESAJ -----------------------------------------------------------
+# Gonderimden kac dakika once adminlere onizlemeli hatirlatma gitsin
+SCHED_NOTIFY_MINUTES=5
