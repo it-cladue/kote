@@ -1,0 +1,52 @@
+[
+    {
+        "code":  "ark",
+        "label":  "ARK",
+        "mode":  "ark_ana"
+    },
+    {
+        "code":  "dds",
+        "label":  "DDS",
+        "mode":  "sessiz_tip"
+    },
+    {
+        "code":  "ddt",
+        "label":  "DDT",
+        "mode":  "sessiz_tip"
+    },
+    {
+        "code":  "hgst",
+        "label":  "HGST",
+        "mode":  "tek_uye"
+    },
+    {
+        "code":  "prcst",
+        "label":  "PRCST",
+        "mode":  "tek_uye"
+    },
+    {
+        "code":  "lpst",
+        "label":  "LPST",
+        "mode":  "ana_only"
+    },
+    {
+        "code":  "cvpsz",
+        "label":  "CVPS",
+        "mode":  "tek_uye"
+    },
+    {
+        "code":  "btagsz",
+        "label":  "btagsz",
+        "mode":  "tek_uye"
+    },
+    {
+        "code":  "30gn",
+        "label":  "30gün",
+        "mode":  "tek_uye"
+    },
+    {
+        "code":  "sark",
+        "label":  "S.ARK",
+        "mode":  "ark_ana"
+    }
+]

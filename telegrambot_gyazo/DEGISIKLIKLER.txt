@@ -1,0 +1,28 @@
+TELEBOT - GORSEL DIREKT KAYIT OZELLIGI (2026-09-23)
+=====================================================
+
+KULLANICI AKISI
+- Gorsel gonderilince bot artik once SECENEK sunar:
+    🔗 Gyazo linkine donustur  |  💾 Gorseli direkt kaydet  |  ❌ Iptal
+- Gyazo secilirse (Gyazo bakim modu ACIKKEN): "Gyazo sunucusu su anda bakimda" uyarisi
+  cikar ve "Gorseli direkt kaydet" ile devam etmesi istenir.
+- Iki secenekte de sonraki adimlar AYNEN eski gibidir:
+    proje -> kategori -> personel kodu -> uye ID (/ ana ID / tur) -> ozet -> Onayla
+- "Gorseli direkt kaydet" secildiyse Onayla'da gorsel Gyazo'ya gitmez; bilgisayara
+  kaydedilir:  gorseller\<PROJE>\KATEGORI_tarih_saat_personel_uyeid_anaid_tur.jpg
+  Ornek:       gorseller\PP\ARK_2026-09-23_14-30-05_232_490175617_111222.jpg
+  (tarih = gorselin gonderildigi an; bos alanlar atlanir; Turkce harf/bosluk temizlenir)
+- Excel'in "Gyazo Linki" sutununa dosyanin tam yolu yazilir (tiklaninca acilir).
+- Onay ekraninda Gyazo bakima takilirsa girilen bilgiler KAYBOLMAZ; "Gorseli direkt
+  kaydet" secilince dogrudan onay ekranina donulur.
+- Lead ID (yazili) akisi degismedi.
+
+ADMIN
+- /gyazo_bakim_ac   : Gyazo secenegi "sunucu bakimda" der (varsayilan durum)
+- /gyazo_bakim_kapat: Gyazo secenegi yeniden normal calisir
+- /durum            : Gyazo durumu ve gorsel klasoru gosterilir
+
+AYARLAR (config.json)
+- "GYAZO_BAKIM": "1"  -> baslangicta bakim acik (0 = kapali). Admin komutu dosyayla
+  (gyazo_bakim.txt) bunu ezer.
+- "GORSEL_KLASOR": "" -> bos ise bot klasoru altinda "gorseller" kullanilir.
