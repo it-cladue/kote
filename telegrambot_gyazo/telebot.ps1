@@ -1711,9 +1711,9 @@ function Process-Callback($update) {
                 Edit-Message $chatId $msgId "$(E '26A0') <b>Gorsel kaydedilemedi.</b>`nNe yapmak istersiniz?" (KB-Hata)
                 return
             }
-            $kayitDosyaAdi = [System.IO.Path]::GetFileName($gyazoUrl)
+            $kayitDosyaAdi = ([string]$gyazoUrl -split '[\\/]')[-1]
             # OneDrive ayarliysa Excel'e yerel yol yerine tiklanabilir web linki yaz.
-            $webLink = Get-GorselWebLink (Get-DosyaParcasi ($oturum.proje.ToUpper()) 10) ([System.IO.Path]::GetFileName($gyazoUrl))
+            $webLink = Get-GorselWebLink (Get-DosyaParcasi ($oturum.proje.ToUpper()) 10) $kayitDosyaAdi
             if ($webLink) { Write-Log "  OneDrive linki -> $webLink"; $gyazoUrl = $webLink }
         } else {
             if (Is-GyazoBakim) {
