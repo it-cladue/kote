@@ -1474,6 +1474,8 @@ def test_ekran_dosya_adi_ve_kategoriler():
                                          fmt="{kategori}_{alanlar}_{tgid}") == "Cekim_5"
     assert bot.build_screenshot_filename({"key": "x", "label": "", "fields": []}, [], 5, when, fmt="{yok}") == \
         "Ekran_2026-09-22_14-30-05_5"
+    uzun = "A" * 60
+    assert uzun in bot.build_screenshot_filename(cat, [uzun, "B"], 1, when, fmt="{alanlar}_{tgid}")
     # Windows ayrilmis adlari
     assert bot.build_screenshot_filename({"key": "x", "label": "L", "fields": ["A"]}, ["CON"], 5, when, fmt="{alan1}") == "Ekran_CON"
     # Kategori tanimi ayristirma
@@ -1692,7 +1694,7 @@ async def test_ekran_bilgi_once_akisi():
         # Acik sikayet akisi varken foto/ekran yeni akis BASLATMAZ (bilgiler sikayete dusmesin)
         ctx.user_data["cmp"] = {"kind": "text", "text": None, "image_id": None}
         mc = _ss_photo("ph-c")
-        assert await bot.ss_photo_entry(_ss_upd(user, mc), ctx) == bot.ConversationHandler.END
+        assert await bot.ss_photo_entry(_ss_upd(user, mc), ctx) is None
         assert "AÇIK İŞLEM" in mc.replies[-1][0][0] and "ss" not in ctx.user_data
         mc2 = SSMessage(text="/ekran")
         assert await bot.ss_start_cmd(_ss_upd(user, mc2), ctx) == bot.ConversationHandler.END and "AÇIK İŞLEM" in mc2.replies[-1][0][0]
@@ -1707,8 +1709,34 @@ async def test_ekran_bilgi_once_akisi():
         bot._cb_last_press.clear()
         a1, a2 = _ss_photo("alb-1"), _ss_photo("alb-2")
         assert await bot.ss_photo_entry(_ss_upd(user, a1), ctx) == bot.SS_CAT
-        assert await bot.ss_photo_entry(_ss_upd(user, a2), ctx) == bot.ConversationHandler.END and a2.replies == []
+        # 2. foto None doner: ACIK konusma silinmez (END silerdi, kategori butonlari olurdu)
+        assert await bot.ss_photo_entry(_ss_upd(user, a2), ctx) is None and a2.replies == []
         assert ctx.user_data["ss"]["file_id"] == "alb-1"
+        # Site ID akisi beklerken foto/ekran yeni akis BASLATMAZ
+        ctx.user_data.pop("ss", None); ctx.user_data.pop("wizard_lock", None)
+        bot._cb_last_press.clear()
+        ctx.user_data["site_wait"] = True
+        ms = _ss_photo("ph-s")
+        assert await bot.ss_photo_entry(_ss_upd(user, ms), ctx) is None and "AÇIK İŞLEM" in ms.replies[-1][0][0]
+        ctx.user_data.pop("site_wait")
+        # Akis ortasinda /ekran: sifirlamaz, kaldigi adimi hatirlatir
+        bot._cb_last_press.clear()
+        await bot.ss_photo_entry(_ss_upd(user, _ss_photo("ph-r")), ctx)
+        await bot.ss_cat_pick(_ss_upd(user, query=SSQuery("sscat_arkadas", chat_id=5150)), ctx)
+        await bot.ss_field_step(_ss_upd(user, SSMessage(text="KEEP1")), ctx)
+        assert await bot.ss_start_cmd(_ss_upd(user, SSMessage(text="📸 Ekran Görüntüsü")), ctx) == bot.SS_FIELD
+        assert ctx.user_data["ss"]["values"] == ["KEEP1"] and ctx.user_data["ss"]["file_id"] == "ph-r"
+        # Duzenlenmis mesaj (message=None) akisa dokunmaz
+        assert await bot.ss_photo_entry(SimpleNamespace(message=None, callback_query=None, effective_user=user,
+                                                        effective_chat=SimpleNamespace(id=5150, type="private")), ctx) is None
+        assert ctx.user_data["ss"]["values"] == ["KEEP1"]
+        # Zaman asimi: akis yoksa mesaj yok, varsa var
+        ctx.bot.calls.clear()
+        await bot.ss_timeout(_ss_upd(user, SSMessage(text="x")), ctx)
+        assert any("SÜRE DOLDU" in c[1].get("text", "") for c in ctx.bot.calls)
+        ctx.bot.calls.clear()
+        await bot.ss_timeout(_ss_upd(user, SSMessage(text="x")), ctx)
+        assert ctx.bot.calls == []
         bot._cb_throttled = lambda *a, **k: False
         ctx.user_data.pop("ss", None); ctx.user_data.pop("wizard_lock", None)
 
@@ -1720,13 +1748,13 @@ async def test_ekran_bilgi_once_akisi():
         assert await bot.ss_start_cmd(_ss_upd(user, m5), ctx) == bot.ConversationHandler.END and "kapalı" in m5.replies[-1][0][0]
         # Kapaliyken kullanici fotosu SESSIZCE yok sayilir
         m6 = _ss_photo("ph-k")
-        assert await bot.ss_photo_entry(_ss_upd(user, m6), ctx) == bot.ConversationHandler.END and m6.replies == []
+        assert await bot.ss_photo_entry(_ss_upd(user, m6), ctx) is None and m6.replies == []
         bot.db.set_setting("screenshots_enabled", "1")
 
         # Gunluk limit
         bot.SCREENSHOT_DAILY_LIMIT = 2
         m7 = _ss_photo("ph-l")
-        assert await bot.ss_photo_entry(_ss_upd(user, m7), ctx) == bot.ConversationHandler.END
+        assert await bot.ss_photo_entry(_ss_upd(user, m7), ctx) is None
         assert "LİMİT" in ctx.bot.calls[-1][1]["text"] and "ss" not in ctx.user_data
         # Beyaz listedeki admin limite takilmaz
         bot.ADMIN_IDS[:] = [777, 5150]
@@ -1755,9 +1783,10 @@ async def test_ekran_admin_secenekleri():
 
         m2 = _ss_photo("lib-2")
         assert await bot.ss_photo_entry(_ss_upd(admin, m2), ctx) == bot.SS_ACTION
+        assert "wizard_lock" not in ctx.user_data, "secenek ekraninda admin kilitlenmemeli"
         q2 = SSQuery("ssact_screenshot", chat_id=9001)
         r = await bot.ss_action_pick(_ss_upd(admin, query=q2), ctx)
-        assert r == bot.SS_CAT and q2.edits
+        assert r == bot.SS_CAT and q2.edits and ctx.user_data["wizard_lock"][0] == "ss"
         await bot.ss_cat_pick(_ss_upd(admin, query=SSQuery("sscat_cekim", chat_id=9001)), ctx)
         await bot.ss_field_step(_ss_upd(admin, SSMessage(text="ADM1")), ctx)
         r = await bot.ss_field_step(_ss_upd(admin, SSMessage(text="1000")), ctx)
@@ -1776,14 +1805,14 @@ async def test_ekran_admin_secenekleri():
         # Ozellik kapaliyken admin fotosu eski davranisla dogrudan kutuphaneye
         bot.db.set_setting("screenshots_enabled", "0")
         m3 = _ss_photo("lib-3")
-        assert await bot.ss_photo_entry(_ss_upd(admin, m3), ctx) == bot.ConversationHandler.END
+        assert await bot.ss_photo_entry(_ss_upd(admin, m3), ctx) is None
         assert bot.db.get_setting("campaign_media_id") == "lib-3" and "ss" not in ctx.user_data
         bot.db.set_setting("screenshots_enabled", "1")
 
         # Baska sihirbaz acikken foto islenmez, uyarilir
         ctx.user_data["wizard_lock"] = ("aset", time.time())
         m4 = _ss_photo("lib-4")
-        assert await bot.ss_photo_entry(_ss_upd(admin, m4), ctx) == bot.ConversationHandler.END
+        assert await bot.ss_photo_entry(_ss_upd(admin, m4), ctx) is None
         assert "SIHIRBAZ ACIK" in m4.replies[-1][0][0] and "ss" not in ctx.user_data
         ctx.user_data.pop("wizard_lock")
 

@@ -1207,7 +1207,7 @@ def build_screenshot_filename(category, values, user_id, when=None, fmt=None, us
         label, key, field_labels = category.get("label", ""), category.get("key", ""), category.get("fields", [])
     else:
         label, key, field_labels = str(category or ""), str(category or ""), []
-    vals = [_dosya_parcasi(v) for v in (values or [])]
+    vals = [_dosya_parcasi(v, 60) for v in (values or [])]
     vals_clean = [v for v in vals if v]
     uid = str(int(user_id or 0))
     repl = {
@@ -1231,7 +1231,7 @@ def build_screenshot_filename(category, values, user_id, when=None, fmt=None, us
     name = re.sub(r"_{2,}", "_", name)
     name = re.sub(r"-{2,}", "-", name)
     name = re.sub(r"\.{2,}", ".", name)
-    name = name.strip("._-")[:150].rstrip("._-")
+    name = name.strip("._-")[:200].rstrip("._-")
     if not name:
         name = f"Ekran_{when.strftime('%Y-%m-%d_%H-%M-%S')}_{uid}"
     if name.split(".")[0].upper() in _WINDOWS_RESERVED:
@@ -1595,7 +1595,9 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if SITE_ID_ON_START and not db.get_site_id_record(user.id):
         # Site ID akisi ACIK ve kullanici kayitsiz: kayit akisini baslat.
         await _send_onboarding(context, user, chat_id)
+        context.user_data["site_wait"] = True  # ekran goruntusu akisi araya girmesin
         return SITE_ID_WAIT_INPUT
+    context.user_data.pop("site_wait", None)
     # Varsayilan akis: karsilama + butonlar -> kanal -> gunun kampanyasi.
     # Site ID istege bagli olarak /profil menusunden yonetilir.
     await _send_registered_start(context, user, chat_id)
@@ -1613,12 +1615,14 @@ async def _clear_confirm_buttons(context, chat_id):
 async def site_id_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Kayit akisinda /iptal: veri saklanmaz, akis kapanir."""
     context.user_data.pop("pending_site_id", None)
+    context.user_data.pop("site_wait", None)
     await _clear_confirm_buttons(context, update.effective_chat.id)
     await update.message.reply_text("İşlem iptal edildi")
     return ConversationHandler.END
 
 async def site_id_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("pending_site_id", None)
+    context.user_data.pop("site_wait", None)
     try:
         chat = update.effective_chat
         if chat:
@@ -1690,10 +1694,12 @@ async def site_id_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if db.is_banned(user.id) or db.is_temp_banned(user.id):
         context.user_data.pop("pending_site_id", None)
+        context.user_data.pop("site_wait", None)
         return ConversationHandler.END
     context.user_data.pop("site_confirm_mid", None)
     site_id = context.user_data.get("pending_site_id")
     if not site_id:
+        context.user_data.pop("site_wait", None)
         await query.edit_message_text("Kayit oturumu sona erdi. Yeniden /start yazin.")
         return ConversationHandler.END
     if query.data == "site_confirm_no":
@@ -1714,6 +1720,7 @@ async def site_id_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.security_event("site_id_export_error", user.id, export_error[:300])
     db.log(user.id, "site_id_confirmed", site_id)
     context.user_data.pop("pending_site_id", None)
+    context.user_data.pop("site_wait", None)
     await query.edit_message_text(box_message("KAYIT TAMAMLANDI", "Bilgileriniz onaylanarak kaydedildi.", "\u2705"),
         parse_mode=ParseMode.HTML)
     if export_error:
@@ -1801,6 +1808,7 @@ async def profil_siteid_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=update.effective_chat.id,
         text=box_message("SİTE ID", "Yeni Site ID'ni mesaj olarak gönder.\n\nVazgeçmek için /iptal yazabilirsin.", "\U0001f194"),
         parse_mode=ParseMode.HTML)
+    context.user_data["site_wait"] = True
     return SITE_ID_WAIT_INPUT
 
 async def profil_kampanya_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2279,6 +2287,7 @@ async def iptal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("pending_site_id", None)
     context.user_data.pop("cmp", None)
     context.user_data.pop("ss", None)
+    context.user_data.pop("site_wait", None)
     # Sizmis sihirbaz kilidi kalmis olabilir; /iptal her zaman temizlesin.
     context.user_data.pop("wizard_lock", None)
     await update.message.reply_text("İşlem iptal edildi")
@@ -5733,7 +5742,18 @@ def _ss_other_flow_open(context):
     """Sikayet sihirbazi (cmp) veya baska bir admin sihirbazi (wizard_lock) acik mi?
     Bu akislar ONCE kayitli oldugu icin yazilan bilgiler onlara duser; o yuzden
     ekran goruntusu akisi baslatilmaz."""
-    return bool(context.user_data.get("cmp")) or _wizard_busy(context, "ss")
+    return (bool(context.user_data.get("cmp")) or bool(context.user_data.get("site_wait"))
+            or _wizard_busy(context, "ss"))
+
+async def _ss_resume_open_flow(context, user, chat_id):
+    """/ekran veya 📸 tusu akis ORTASINDA basildiysa: sifirlama, kaldigi adimi hatirlat."""
+    ss = context.user_data.get("ss")
+    if ss.get("idx", 0) >= len(ss.get("fields") or []):
+        await context.bot.send_message(chat_id=chat_id, text=_ss_photo_prompt(ss), parse_mode=ParseMode.HTML)
+        return SS_PHOTO
+    await context.bot.send_message(chat_id=chat_id, text=_ss_field_prompt(ss),
+        parse_mode=ParseMode.HTML, reply_markup=_ss_field_kb(user, ss))
+    return SS_FIELD
 
 async def _ss_expired(q, context):
     _ss_reset(context)
@@ -5749,55 +5769,62 @@ async def ss_photo_entry(update, context):
     """Sihirbaz disinda gelen foto: secenek sun. Admin oturumunda 'kutuphane'
     secenegi de eklenir; ozellik kapaliysa admin fotosu eskisi gibi kutuphaneye gider,
     kullanici fotosu sessizce yok sayilir."""
+    # NOT: Bu giris noktasi allow_reentry=True nedeniyle akis ACIKKEN gelen fotoyu
+    # da alir (durum handler'larindan ONCE). Bu yuzden "fotoyu yok say" yollari
+    # END degil None dondurur: END acik konusmayi SILER (kategori butonlari olur),
+    # None mevcut durumu oldugu gibi birakir (akis yoksa da bir sey yapmaz).
     user = update.effective_user
     msg = update.message
+    if msg is None:  # duzenlenmis mesaj vb.
+        return None
     file_id, ext, kind = _ss_media_from_message(msg)
     if not file_id:
-        return ConversationHandler.END
+        return None
+    if db.is_banned(user.id) or db.is_temp_banned(user.id):
+        return None
     chat_id = update.effective_chat.id
-    # allow_reentry=True oldugu icin PTB, akis ACIKKEN gelen fotoyu da (durum
-    # handler'larindan ONCE) bu giris noktasina yollar. Kategori secilmisse yeni
-    # akis baslatma: bilgi adimindaysa fotoyu al ve devam et, "simdi fotoyu
-    # gonder" adimindaysa dogrudan kaydet (giris yolu 2'nin son adimi).
     ss = context.user_data.get("ss")
+    admin = is_authenticated(user.id)
+    # Album (tek seferde secilen birden fazla foto) ayri mesajlar olarak gelir:
+    # ilkini al, 2 sn icinde gelenleri sessizce yok say. Genel flood sayacina
+    # SOKMA (5 fotoluk album 30 dk engel yemesin). Admin de akis acikken ayni.
+    hizli = _cb_throttled(user.id, "ss_photo", 2)
+    if hizli and (ss is not None or not admin):
+        return None
+    # Kategori secilmisse yeni akis baslatma: bilgi adimindaysa fotoyu al ve devam
+    # et, "simdi fotoyu gonder" adimindaysa dogrudan kaydet (giris yolu 2'nin sonu).
     if ss and ss.get("cat") is not None:
         if ss.get("idx", 0) >= len(ss.get("fields") or []):
             return await ss_photo_step(update, context)
         return await ss_photo_midway_field(update, context)
-    if db.is_banned(user.id) or db.is_temp_banned(user.id):
-        return ConversationHandler.END
-    admin = is_authenticated(user.id)
     if _ss_other_flow_open(context):
-        # Acik sikayet akisi / admin sihirbazi varken foto YENI akis baslatmaz;
-        # yoksa yazilan bilgiler once kayitli olan sihirbaza duser.
+        # Acik sikayet / Site ID akisi ya da admin sihirbazi varken foto YENI akis
+        # baslatmaz; yoksa yazilan bilgiler once kayitli olan akisa duser.
         if admin:
             await msg.reply_text(box_message("SIHIRBAZ ACIK",
                 "Foto ISLENMEDI: su an acik bir sihirbaz var. Once onu bitirin ya da /iptal yazin.", "⚠️"),
                 parse_mode=ParseMode.HTML)
         elif screenshots_enabled():
             await msg.reply_text(_SS_ACIK_ISLEM_METNI, parse_mode=ParseMode.HTML)
-        return ConversationHandler.END
+        return None
     if admin:
         if not screenshots_enabled():
             if kind == "photo":
                 await _kutuphaneye_ekle(context, chat_id, user, "photo", file_id, msg.caption)
-            return ConversationHandler.END
+            return None
     else:
         if not screenshots_enabled():
-            return ConversationHandler.END
-        # Album (tek seferde secilen birden fazla foto) ayri mesajlar olarak gelir.
-        # Ilkini al, 2 sn icinde gelenleri sessizce yok say; genel flood sayacina
-        # SOKMA (5 fotoluk album 30 dk engel yemesin).
-        if _cb_throttled(user.id, "ss_photo", 2):
-            return ConversationHandler.END
+            return None
         if _ss_limit_hit(user):
             await _ss_limit_reached(context, chat_id)
-            return ConversationHandler.END
+            return None
         db.add_user(user.id, user.username, user.first_name, user.last_name, getattr(user, "language_code", ""))
         db.inc_msg(user.id)
-    _wizard_lock(context, "ss")
     context.user_data["ss"] = _ss_new_state("photo_first", msg)
     if admin and kind == "photo":
+        # Secenek ekraninda sihirbaz kilidi ALINMAZ: admin butona basmadan video
+        # gonderirse / panel tusuna basarsa engellenmesin. Kilit, "Ekran Goruntusu"
+        # secilince alinir.
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🗂 Kampanya Medyasi Yap (kutuphane)", callback_data="ssact_library")],
             [InlineKeyboardButton("📸 Ekran Goruntusu Olarak Kaydet", callback_data="ssact_screenshot")],
@@ -5808,6 +5835,7 @@ async def ss_photo_entry(update, context):
             "adlandirilip <code>screenshots/</code> klasorune kaydedilir.", "🖼"),
             parse_mode=ParseMode.HTML, reply_markup=kb)
         return SS_ACTION
+    _wizard_lock(context, "ss")
     await msg.reply_text(box_message("EKRAN GÖRÜNTÜSÜ", _ss_prompt_text(), "📸"),
         parse_mode=ParseMode.HTML, reply_markup=_ss_category_kb())
     return SS_CAT
@@ -5838,6 +5866,7 @@ async def ss_action_pick(update, context):
         _ss_reset(context)
         return ConversationHandler.END
     await q.answer()
+    _wizard_lock(context, "ss")
     await q.edit_message_text(box_message("EKRAN GÖRÜNTÜSÜ", _ss_prompt_text(), "📸"),
         parse_mode=ParseMode.HTML, reply_markup=_ss_category_kb())
     return SS_CAT
@@ -5854,6 +5883,9 @@ async def ss_start_cmd(update, context):
         return ConversationHandler.END
     if await guard_flood(update, context, is_command=True, cmd="/ekran"):
         return ConversationHandler.END
+    ss = context.user_data.get("ss")
+    if ss and ss.get("cat") is not None:
+        return await _ss_resume_open_flow(context, user, update.effective_chat.id)
     if _ss_other_flow_open(context):
         await msg.reply_text(box_message("MESGUL", "Once acik sihirbazi /iptal ile kapatin.", "⚠️") if is_authenticated(user.id)
                              else _SS_ACIK_ISLEM_METNI, parse_mode=ParseMode.HTML)
@@ -5881,6 +5913,10 @@ async def ss_start_cb(update, context):
     if not screenshots_enabled():
         await q.answer("Bu özellik şu an kapalı.", show_alert=True)
         return ConversationHandler.END
+    ss = context.user_data.get("ss")
+    if ss and ss.get("cat") is not None:
+        await q.answer()
+        return await _ss_resume_open_flow(context, user, update.effective_chat.id)
     if _ss_other_flow_open(context):
         await q.answer("Önce açık işlemi tamamla ya da /iptal yaz.", show_alert=True)
         return ConversationHandler.END
@@ -6082,6 +6118,8 @@ async def _ss_save(context, user, chat_id):
         await context.bot.send_message(chat_id=chat_id, text=box_message("HATA",
             "Fotoğraf bulunamadı; /ekran ile yeniden başla.", "❌"), parse_mode=ParseMode.HTML)
         return ConversationHandler.END
+    if db.is_banned(user.id) or db.is_temp_banned(user.id):
+        return ConversationHandler.END
     if _ss_limit_hit(user):
         await _ss_limit_reached(context, chat_id)
         return ConversationHandler.END
@@ -6144,10 +6182,11 @@ async def ss_cancel_cb(update, context):
     return ConversationHandler.END
 
 async def ss_timeout(update, context):
+    acikti = bool(context.user_data.get("ss"))
     _ss_reset(context)
     try:
         chat = update.effective_chat
-        if chat is not None:
+        if chat is not None and acikti:
             await context.bot.send_message(chat_id=chat.id, text=box_message("SÜRE DOLDU",
                 "Ekran görüntüsü kaydı zaman aşımına uğradı. Yeniden başlamak için fotoğrafı tekrar gönder "
                 "veya /ekran yaz.", "⌛"), parse_mode=ParseMode.HTML)
@@ -7697,10 +7736,10 @@ def main():
     # serbest foto handler'indan ve um_ callback'inden ONCE.
     app.add_handler(ConversationHandler(
         entry_points=[
-            MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.Document.IMAGE), ss_photo_entry),
+            MessageHandler(filters.UpdateType.MESSAGE & filters.ChatType.PRIVATE & (filters.PHOTO | filters.Document.IMAGE), ss_photo_entry),
             CommandHandler("ekran", ss_start_cmd, filters.ChatType.PRIVATE),
             CallbackQueryHandler(ss_start_cb, pattern="^um_ekran$"),
-            MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND & _EKRAN_ETIKET_FILTRESI, ss_start_cmd),
+            MessageHandler(filters.UpdateType.MESSAGE & filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND & _EKRAN_ETIKET_FILTRESI, ss_start_cmd),
         ],
         states={
             SS_ACTION:[CallbackQueryHandler(ss_action_pick, pattern="^(ssact_|ss_cancel$)")],
@@ -7710,9 +7749,11 @@ def main():
             SS_CAT:[CallbackQueryHandler(ss_cat_pick, pattern="^(sscat_|ss_cancel$)")],
             SS_FIELD:[CallbackQueryHandler(ss_usesite_cb, pattern="^ss_usesite$"),
                       CallbackQueryHandler(ss_cancel_cb, pattern="^ss_cancel$"),
-                      MessageHandler(filters.TEXT & ~filters.COMMAND, ss_field_step)],
+                      MessageHandler(filters.UpdateType.MESSAGE & filters.TEXT & ~filters.COMMAND, ss_field_step)],
+            # Yalniz metin/foto: video-sticker vb. yutulmasin, alttaki handler'lara dussun.
             SS_PHOTO:[CallbackQueryHandler(ss_cancel_cb, pattern="^ss_cancel$"),
-                      MessageHandler(filters.ALL & ~filters.COMMAND, ss_photo_step)],
+                      MessageHandler(filters.UpdateType.MESSAGE & ~filters.COMMAND
+                                     & (filters.TEXT | filters.PHOTO | filters.Document.IMAGE), ss_photo_step)],
             ConversationHandler.TIMEOUT:[MessageHandler(filters.ALL, ss_timeout),
                                          CallbackQueryHandler(ss_timeout)],
         },
