@@ -52,6 +52,13 @@ $GORSEL_KLASOR    = [string](Get-ConfigValue "GORSEL_KLASOR" (Join-Base "gorsell
 # Admin komutlariyla degistirilir: /gyazo_bakim_ac ve /gyazo_bakim_kapat (dosya: gyazo_bakim.txt)
 $GYAZO_BAKIM_VARSAYILAN = [string](Get-ConfigValue "GYAZO_BAKIM" "1")
 $GYAZO_BAKIM_DOSYA = [string](Get-ConfigValue "GYAZO_BAKIM_DOSYA" (Join-Base "gyazo_bakim.txt"))
+# ONEDRIVE / SHAREPOINT WEB LINKI: bot klasoru OneDrive icindeyse Excel'e yerel yol yerine
+# tiklaninca tarayicida acilan web linki yazilir. Ornek:
+#   GORSEL_ONEDRIVE_SITE = https://pipomail-my.sharepoint.com
+#   GORSEL_ONEDRIVE_KOK  = /personal/ozgur_itspark_net/Documents/telegramkant/gorseller
+# Bos birakilirsa Excel'e dosyanin yerel yolu yazilir.
+$GORSEL_ONEDRIVE_SITE = ([string](Get-ConfigValue "GORSEL_ONEDRIVE_SITE" "")).Trim().TrimEnd('/')
+$GORSEL_ONEDRIVE_KOK  = ([string](Get-ConfigValue "GORSEL_ONEDRIVE_KOK" "")).Trim().TrimEnd('/')
 
 $global:AdminSessions = @{}
 $global:AdminLoginPending = @{}
@@ -455,6 +462,20 @@ function Get-GorselDosyaAdi($oturum, [datetime]$tarih) {
     return $ad
 }
 
+# Kaydedilen gorsel icin OneDrive/SharePoint web linki (onedrive.aspx?id=...&parent=...).
+# Ayar bos ise $null doner ve Excel'e yerel yol yazilir.
+function Get-GorselWebLink($projeKlasorAdi, $dosyaAdi) {
+    if (-not $GORSEL_ONEDRIVE_SITE -or -not $GORSEL_ONEDRIVE_KOK) { return $null }
+    $klasor = "$GORSEL_ONEDRIVE_KOK/$projeKlasorAdi"
+    $yol = "$klasor/$dosyaAdi"
+    $id = [System.Uri]::EscapeDataString($yol)
+    $parent = [System.Uri]::EscapeDataString($klasor)
+    # /personal/<kullanici>/ kismindan site-relative "_layouts" adresi turetilir.
+    $m = [regex]::Match($GORSEL_ONEDRIVE_KOK, '^(/personal/[^/]+)')
+    $kisisel = if ($m.Success) { $m.Groups[1].Value } else { "" }
+    return "$GORSEL_ONEDRIVE_SITE$kisisel/_layouts/15/onedrive.aspx?id=$id&parent=$parent"
+}
+
 # Telegram'daki fotoyu indirir, gorseller\<PROJE>\ altina girilen bilgilerle adlandirip kaydeder.
 # Basarili olursa tam dosya yolunu, olmazsa $null dondurur.
 function Save-GorselToDisk($fileId, $oturum, $tarih) {
@@ -833,7 +854,7 @@ function Process-AdminMessage($chatId, $userId, $userName, $firstName, $text) {
         $bakim = if (Is-MaintenanceMode) { "ACIK" } else { "KAPALI" }
         $gyazoBakim = if (Is-GyazoBakim) { "BAKIMDA (gorseller dosyaya kaydediliyor)" } else { "ACIK" }
         $otCount = (Get-Oturumlar).Count
-        $msg = "<b>DURUM</b>`n--------------------`n<b>Excel:</b> $EXCEL_DOSYA`n<b>Excel bagli:</b> $([bool]$global:xlWb)`n<b>Bakim:</b> $bakim`n<b>Gyazo:</b> $gyazoBakim`n<b>Gorsel klasoru:</b> $GORSEL_KLASOR`n<b>Aktif oturum:</b> $otCount`n<b>Son hata:</b> $(Escape-Html $global:LastErrorText)"
+        $msg = "<b>DURUM</b>`n--------------------`n<b>Excel:</b> $EXCEL_DOSYA`n<b>Excel bagli:</b> $([bool]$global:xlWb)`n<b>Bakim:</b> $bakim`n<b>Gyazo:</b> $gyazoBakim`n<b>Gorsel klasoru:</b> $GORSEL_KLASOR`n<b>OneDrive linki:</b> $(if ($GORSEL_ONEDRIVE_SITE -and $GORSEL_ONEDRIVE_KOK) { "$GORSEL_ONEDRIVE_SITE$GORSEL_ONEDRIVE_KOK" } else { "ayarli degil (yerel yol yazilir)" })`n<b>Aktif oturum:</b> $otCount`n<b>Son hata:</b> $(Escape-Html $global:LastErrorText)"
         Send-Message $chatId $msg $null | Out-Null; return $true
     }
 
@@ -1674,6 +1695,7 @@ function Process-Callback($update) {
         $girisTipi = if ($oturum.girisTipi) { [string]$oturum.girisTipi } else { "resim" }
 
         $kayitModu = if ($oturum.kayitModu) { [string]$oturum.kayitModu } else { "gyazo" }
+        $kayitDosyaAdi = ""
         if ($girisTipi -eq "yazili") {
             # YAZILI BASLATMA: Gyazo yukleme yok; Lead ID metni dogrudan Gyazo Linki sutununa yazilir.
             $gyazoUrl = [string]$oturum.leadId
@@ -1689,6 +1711,10 @@ function Process-Callback($update) {
                 Edit-Message $chatId $msgId "$(E '26A0') <b>Gorsel kaydedilemedi.</b>`nNe yapmak istersiniz?" (KB-Hata)
                 return
             }
+            $kayitDosyaAdi = [System.IO.Path]::GetFileName($gyazoUrl)
+            # OneDrive ayarliysa Excel'e yerel yol yerine tiklanabilir web linki yaz.
+            $webLink = Get-GorselWebLink (Get-DosyaParcasi ($oturum.proje.ToUpper()) 10) ([System.IO.Path]::GetFileName($gyazoUrl))
+            if ($webLink) { Write-Log "  OneDrive linki -> $webLink"; $gyazoUrl = $webLink }
         } else {
             if (Is-GyazoBakim) {
                 $oturum.adim = "gyazo_bakim"
@@ -1719,7 +1745,7 @@ function Process-Callback($update) {
         Register-KullaniciKayit $userId $userName $cb.from.first_name $sayfaAdi $oturum.kategori $katLabel
         Remove-Oturum $userId
         if ($kayitModu -eq "dosya" -and $girisTipi -ne "yazili") {
-            Edit-Message $chatId $msgId "$(E '2705') <b>Kanitiniz eklendi, tesekkurler!</b>`n$(E '1F4C1') Dosya: <code>$(Escape-Html ([System.IO.Path]::GetFileName($gyazoUrl)))</code>" $null
+            Edit-Message $chatId $msgId "$(E '2705') <b>Kanitiniz eklendi, tesekkurler!</b>`n$(E '1F4C1') Dosya: <code>$(Escape-Html $kayitDosyaAdi)</code>" $null
         } else {
             Edit-Message $chatId $msgId "$(E '2705') <b>Kanitiniz eklendi, tesekkurler!</b>" $null
         }
