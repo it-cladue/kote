@@ -59,8 +59,8 @@ function Find-BotKlasoru($ilk) {
     if ($ilk) { $adaylar.Add($ilk) }
     $adaylar.Add((Get-Location).Path)
     $profil = $(if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME })
-    foreach ($k in @("OneDrive - Park\telegramkant", "OneDrive\telegramkant", "telegramkant", "Desktop\telegramkant", "Documents\telegramkant")) { $adaylar.Add((Join-Path $profil $k)) }
-    try { foreach ($d in (Get-ChildItem $profil -Directory -Filter "OneDrive*" -ErrorAction SilentlyContinue)) { $adaylar.Add((Join-Path $d.FullName "telegramkant")) } } catch {}
+    foreach ($k in @("OneDrive - Get Mails\telegramkant\telegramkant", "OneDrive - Get Mails\telegramkant", "OneDrive - Park\telegramkant", "OneDrive\telegramkant", "telegramkant", "Desktop\telegramkant", "Documents\telegramkant")) { $adaylar.Add((Join-Path $profil $k)) }
+    try { foreach ($d in (Get-ChildItem $profil -Directory -Filter "OneDrive*" -ErrorAction SilentlyContinue)) { $adaylar.Add((Join-Path $d.FullName "telegramkant")); $adaylar.Add((Join-Path $d.FullName "telegramkant\telegramkant")) } } catch {}
     foreach ($a in $adaylar) { if ($a -and (Test-Path (Join-Path $a "telegram_cache.txt")) -and (Test-Path (Join-Path $a "config.json"))) { return (Resolve-Path $a).Path } }
     try {
         $bulunan = Get-ChildItem $profil -Recurse -Depth 4 -Filter "telegram_cache.txt" -File -ErrorAction SilentlyContinue | Select-Object -First 1

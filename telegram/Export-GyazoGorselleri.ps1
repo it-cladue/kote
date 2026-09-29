@@ -161,12 +161,9 @@ function Get-GyazoId($metin) {
     $m = [regex]::Match($s, 'gyazo\.com/(?:[a-z0-9_-]+/)*([0-9a-f]{32})', 'IgnoreCase')
     if ($m.Success) { return $m.Groups[1].Value.ToLowerInvariant() }
     if ($s -notmatch '^https?://') { return $null }
+    if ($s -notmatch 'gyazo\.com') { return $null }   # OneDrive/SharePoint gibi Gyazo disi linkler: bu script indirmez (gorsel zaten diskte)
     $m = [regex]::Match($s, '([0-9a-f]{32})', 'IgnoreCase')
     if ($m.Success) { return $m.Groups[1].Value.ToLowerInvariant() }
-    $son = (($s -split '\?')[0].TrimEnd('/') -split '/')[-1]
-    $son = [regex]::Replace($son, '\.[A-Za-z0-9]{1,5}$', '')
-    $son = [regex]::Replace($son, '[^A-Za-z0-9_-]', '')
-    if ($son) { return $son.ToLowerInvariant() }
     return $null
 }
 
@@ -344,7 +341,7 @@ $secilenKayitlar = @($kayitlar | Where-Object {
 })
 $gorselKayitlar = @($secilenKayitlar | Where-Object { $_.GyazoId })
 $yaziliKayit = $secilenKayitlar.Count - $gorselKayitlar.Count
-Write-Bilgi "  Aralikta $($secilenKayitlar.Count) kayit; $($gorselKayitlar.Count) tanesi gorsel ($yaziliKayit tanesi Lead ID / yazili, gorsel yok)."
+Write-Bilgi "  Aralikta $($secilenKayitlar.Count) kayit; $($gorselKayitlar.Count) tanesi Gyazo gorseli ($yaziliKayit tanesi Lead ID ya da Gyazo disi link, atlandi)."
 $guvenOzet = $gorselKayitlar | Group-Object KullaniciGuven | ForEach-Object { "$($_.Name)=$($_.Count)" }
 Write-Bilgi "  Kullanici eslesme guveni: $($guvenOzet -join ', ')"
 

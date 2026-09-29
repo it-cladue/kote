@@ -45,11 +45,26 @@ $BAKIM_DOSYA      = [string](Get-ConfigValue "BAKIM_DOSYA" (Join-Base "bakim_mod
 $BACKUP_KLASOR    = [string](Get-ConfigValue "BACKUP_KLASOR" (Join-Base "backups"))
 $KATEGORI_DOSYA   = [string](Get-ConfigValue "KATEGORI_DOSYA" (Join-Base "kategoriler.json"))
 $EXCEL_MOD_DOSYA  = [string](Get-ConfigValue "EXCEL_MOD_DOSYA" (Join-Base "excel_yazma_modu.txt"))
-# Gorseller Gyazo'ya ek olarak yerel klasore de kaydedilir (config.json: "GORSEL_KLASOR", "GORSEL_KAYDET": "false" ile kapatilir)
-$GORSEL_KLASOR    = [string](Get-ConfigValue "GORSEL_KLASOR" (Join-Base "ekran_goruntuleri"))
-$GORSEL_KAYDET    = (([string](Get-ConfigValue "GORSEL_KAYDET" "true")).Trim().ToLower() -ne "false")
-$GORSEL_AD_SABLONU = [string](Get-ConfigValue "GORSEL_AD_SABLONU" "{tarih}_{proje}_{kategori}_{kullanici}_{personel}_{uyeid}_{anaid}_{tip}")
-$global:SonGorselTemp = $null
+# GORSEL KAYIT: Gyazo yerine gorseli dogrudan diske kaydetme secenegi.
+# Dosya adi = kategori + gonderim tarihi + kullanicinin girdigi bilgiler (personel, uye id, ana id, tur).
+$GORSEL_KLASOR    = [string](Get-ConfigValue "GORSEL_KLASOR" (Join-Base "gorseller"))
+# Gyazo bakim modu: 1 = Gyazo secenegi "sunucu bakimda" der; 0 = Gyazo ACIK (varsayilan, Gyazo duzeldi).
+# Admin komutlariyla degistirilir: /gyazo_bakim_ac ve /gyazo_bakim_kapat (dosya: gyazo_bakim.txt, config'i ezer)
+$GYAZO_BAKIM_VARSAYILAN = [string](Get-ConfigValue "GYAZO_BAKIM" "0")
+$GYAZO_BAKIM_DOSYA = [string](Get-ConfigValue "GYAZO_BAKIM_DOSYA" (Join-Base "gyazo_bakim.txt"))
+# Gyazo secildiginde de gorselin bir kopyasi gorseller\<PROJE>\ altina kaydedilir (1 = evet, varsayilan).
+# Boylece Excel'de Gyazo linki olur, link bir gun olse bile gorsel elde kalir. Kapatmak: "GYAZO_YEREL_KOPYA": "0"
+$GYAZO_YEREL_KOPYA = (@("0","false","hayir","kapali") -notcontains ([string](Get-ConfigValue "GYAZO_YEREL_KOPYA" "1")).Trim().ToLower())
+# Foto gelince "Gyazo linkine donustur / direkt kaydet" secenegi sorulsun mu? 1 = sor (varsayilan),
+# 0 = sorma, dogrudan Gyazo linkine donustur (eski akis: foto -> proje -> kategori -> ...).
+$KAYIT_SECIM_SOR = (@("0","false","hayir","kapali") -notcontains ([string](Get-ConfigValue "KAYIT_SECIM_SOR" "1")).Trim().ToLower())
+# ONEDRIVE / SHAREPOINT WEB LINKI: bot klasoru OneDrive icindeyse Excel'e yerel yol yerine
+# tiklaninca tarayicida acilan web linki yazilir. Ornek:
+#   GORSEL_ONEDRIVE_SITE = https://pipomail-my.sharepoint.com
+#   GORSEL_ONEDRIVE_KOK  = /personal/ozgur_itspark_net/Documents/telegramkant/gorseller
+# Bos birakilirsa Excel'e dosyanin yerel yolu yazilir.
+$GORSEL_ONEDRIVE_SITE = ([string](Get-ConfigValue "GORSEL_ONEDRIVE_SITE" "")).Trim().TrimEnd('/')
+$GORSEL_ONEDRIVE_KOK  = ([string](Get-ConfigValue "GORSEL_ONEDRIVE_KOK" "")).Trim().TrimEnd('/')
 
 $global:AdminSessions = @{}
 $global:AdminLoginPending = @{}
@@ -405,6 +420,112 @@ function Parse-SonKullanicilarArgs($argText) {
 
 # ==================== BAKIM / ADMIN ====================
 function Is-MaintenanceMode { return (Test-Path $BAKIM_DOSYA) }
+
+# ==================== GYAZO BAKIM / GORSEL DOSYA KAYDI ====================
+# gyazo_bakim.txt icerigi: "1" = bakimda, "0" = acik. Dosya yoksa config GYAZO_BAKIM gecerli.
+function Is-GyazoBakim {
+    if (Test-Path $GYAZO_BAKIM_DOSYA) {
+        try { $v = ([string](Get-Content $GYAZO_BAKIM_DOSYA -Raw -ErrorAction SilentlyContinue)).Trim() } catch { $v = "1" }
+        return ($v -ne "0")
+    }
+    $d = ([string]$GYAZO_BAKIM_VARSAYILAN).Trim().ToLower()
+    return ($d -ne "0" -and $d -ne "false" -and $d -ne "kapali")
+}
+function Set-GyazoBakim($enabled) {
+    Set-TextFileAtomic $GYAZO_BAKIM_DOSYA ($(if ($enabled) { "1" } else { "0" }))
+}
+
+# Dosya adina girecek parcayi guvenli hale getirir: Turkce harfler cevrilir,
+# izinli olmayan karakterler '-' olur, yol karakterleri ve '..' asla olusmaz.
+function Get-DosyaParcasi($deger, [int]$limit = 40) {
+    if ($null -eq $deger) { return "" }
+    $s = [string]$deger
+    # Hashtable anahtarlari buyuk/kucuk harf duyarsiz oldugu icin cift liste kullanilir.
+    $trFrom = @('ç','Ç','ğ','Ğ','ı','İ','ö','Ö','ş','Ş','ü','Ü')
+    $trTo   = @('c','C','g','G','i','I','o','O','s','S','u','U')
+    for ($i = 0; $i -lt $trFrom.Count; $i++) { $s = $s.Replace([string]$trFrom[$i], [string]$trTo[$i]) }
+    $s = [regex]::Replace($s, '[^A-Za-z0-9._-]+', '-')
+    $s = [regex]::Replace($s, '\.{2,}', '.')
+    $s = [regex]::Replace($s, '-{2,}', '-')
+    $s = $s.Trim('-', '.', '_')
+    if ($s.Length -gt $limit) { $s = $s.Substring(0, $limit).Trim('-', '.', '_') }
+    return $s
+}
+
+# Dosya adi: KATEGORI_yyyy-MM-dd_HH-mm-ss_<girilen bilgiler...>  (bos alanlar atlanir)
+function Get-GorselDosyaAdi($oturum, [datetime]$tarih) {
+    $parcalar = @()
+    $kat = Get-DosyaParcasi ((Get-KategoriLabel $oturum.kategori).ToUpper())
+    if (-not $kat) { $kat = "KAYIT" }
+    $parcalar += $kat
+    $parcalar += $tarih.ToString("yyyy-MM-dd_HH-mm-ss")
+    foreach ($alan in @($oturum.personel, $oturum.uyeid, $oturum.anaid, $oturum.tip)) {
+        $pc = Get-DosyaParcasi $alan
+        if ($pc) { $parcalar += $pc }
+    }
+    $ad = ($parcalar -join "_")
+    if ($ad.Length -gt 180) { $ad = $ad.Substring(0, 180).Trim('-', '.', '_') }
+    return $ad
+}
+
+# Kaydedilen gorsel icin OneDrive/SharePoint web linki (onedrive.aspx?id=...&parent=...).
+# Ayar bos ise $null doner ve Excel'e yerel yol yazilir.
+function Get-GorselWebLink($projeKlasorAdi, $dosyaAdi) {
+    if (-not $GORSEL_ONEDRIVE_SITE -or -not $GORSEL_ONEDRIVE_KOK) { return $null }
+    $klasor = "$GORSEL_ONEDRIVE_KOK/$projeKlasorAdi"
+    $yol = "$klasor/$dosyaAdi"
+    $id = [System.Uri]::EscapeDataString($yol)
+    $parent = [System.Uri]::EscapeDataString($klasor)
+    # /personal/<kullanici>/ kismindan site-relative "_layouts" adresi turetilir.
+    $m = [regex]::Match($GORSEL_ONEDRIVE_KOK, '^(/personal/[^/]+)')
+    $kisisel = if ($m.Success) { $m.Groups[1].Value } else { "" }
+    return "$GORSEL_ONEDRIVE_SITE$kisisel/_layouts/15/onedrive.aspx?id=$id&parent=$parent"
+}
+
+# Telegram'daki fotoyu indirir, gorseller\<PROJE>\ altina girilen bilgilerle adlandirip kaydeder.
+# Basarili olursa tam dosya yolunu, olmazsa $null dondurur.
+function Save-GorselToDisk($fileId, $oturum, $tarih) {
+    try {
+        $fileInfo = Invoke-RestMethod -Uri "https://api.telegram.org/bot$TELEGRAM_TOKEN/getFile?file_id=$fileId" -TimeoutSec 15
+        $maxBytes = 8 * 1024 * 1024
+        if ($fileInfo.result.file_size -and [int64]$fileInfo.result.file_size -gt $maxBytes) {
+            Write-Log "! Dosya cok buyuk, reddedildi: $([int64]$fileInfo.result.file_size) byte"
+            return $null
+        }
+        $uzanti = [System.IO.Path]::GetExtension([string]$fileInfo.result.file_path)
+        if (-not $uzanti -or $uzanti.Length -gt 5) { $uzanti = ".jpg" }
+        $projeKlasor = Join-Path $GORSEL_KLASOR (Get-DosyaParcasi ($oturum.proje.ToUpper()) 10)
+        if (-not (Test-Path $projeKlasor)) { New-Item -ItemType Directory -Path $projeKlasor -Force | Out-Null }
+        $ad = Get-GorselDosyaAdi $oturum $tarih
+        $hedef = Join-Path $projeKlasor ($ad + $uzanti)
+        $n = 2
+        while (Test-Path $hedef) { $hedef = Join-Path $projeKlasor ("{0}_{1}{2}" -f $ad, $n, $uzanti); $n++ }
+        $tempFile = Join-Path $env:TEMP ("tg_" + [System.Guid]::NewGuid().ToString() + $uzanti)
+        Invoke-WebRequest -Uri "https://api.telegram.org/file/bot$TELEGRAM_TOKEN/$($fileInfo.result.file_path)" `
+            -OutFile $tempFile -TimeoutSec 30
+        Move-Item -Path $tempFile -Destination $hedef -Force
+        Write-Log "  Gorsel diske kaydedildi -> $hedef"
+        return (Resolve-Path $hedef).Path
+    } catch { Write-Log "! Gorsel kaydetme hatasi: $_"; return $null }
+}
+
+# Elde (gecici dosyada) bulunan gorseli gorseller\<PROJE>\ altina girilen bilgilerle adlandirip tasir.
+# Gyazo yolu da bunu kullanir: link Excel'e yazilir, dosya da diske kalir. Tam yolu ya da $null doner.
+function Move-GorselToKlasor($tempFile, $uzanti, $oturum, $tarih) {
+    try {
+        if (-not $uzanti -or $uzanti.Length -gt 5) { $uzanti = ".jpg" }
+        if (-not $tarih) { $tarih = Get-Date }
+        $projeKlasor = Join-Path $GORSEL_KLASOR (Get-DosyaParcasi ($oturum.proje.ToUpper()) 10)
+        if (-not (Test-Path $projeKlasor)) { New-Item -ItemType Directory -Path $projeKlasor -Force | Out-Null }
+        $ad = Get-GorselDosyaAdi $oturum $tarih
+        $hedef = Join-Path $projeKlasor ($ad + $uzanti)
+        $n = 2
+        while (Test-Path $hedef) { $hedef = Join-Path $projeKlasor ("{0}_{1}{2}" -f $ad, $n, $uzanti); $n++ }
+        Move-Item -Path $tempFile -Destination $hedef -Force
+        Write-Log "  Gorsel diske kaydedildi -> $hedef"
+        return (Resolve-Path $hedef).Path
+    } catch { Write-Log "! Gorsel kopyasi kaydedilemedi: $_"; return $null }
+}
 function Set-MaintenanceMode($enabled) {
     if ($enabled) { Set-TextFileAtomic $BAKIM_DOSYA (Get-Date -Format "yyyy-MM-dd HH:mm:ss") }
     else { Remove-Item $BAKIM_DOSYA -ErrorAction SilentlyContinue }
@@ -695,6 +816,8 @@ function Get-AdminHelp {
     $m += "/yedekle - Manuel yedek al`n"
     $m += "/bakim_ac - Bakim modunu ac`n"
     $m += "/bakim_kapat - Bakim modunu kapat`n"
+    $m += "/gyazo_bakim_ac - Gyazo secenegi 'sunucu bakimda' desin (gorsel dosyaya kaydedilir)`n"
+    $m += "/gyazo_bakim_kapat - Gyazo secenegini yeniden ac`n"
     $m += "/son_hatalar - Son log satirlari`n"
     $m += "/kapat - Botu guvenli durdur`n"
     $m += "/admin_cikis - Admin oturumunu kapat`n"
@@ -729,7 +852,7 @@ function Process-AdminMessage($chatId, $userId, $userName, $firstName, $text) {
         return $true
     }
 
-    $adminCommands = @('/admin_cikis','/yardim_admin','/durum','/istatistik','/son_kullanicilar','/kullanici_ara','/engelle','/engel_kaldir','/engel_kaldir_sifirla','/engelliler','/oturumlar','/kategori_liste','/kategori_bilgi','/kategori_akislari','/kategori_ekle','/kategori_sil','/kategori_yayinla','/oturum_temizle','/kullanici_durum','/onayli_sil','/excel_son_satir','/excel_mod','/kayit_raporu','/yedekle','/bakim_ac','/bakim_kapat','/son_hatalar','/kapat','/onayla','/vazgec')
+    $adminCommands = @('/admin_cikis','/yardim_admin','/durum','/istatistik','/son_kullanicilar','/kullanici_ara','/engelle','/engel_kaldir','/engel_kaldir_sifirla','/engelliler','/oturumlar','/kategori_liste','/kategori_bilgi','/kategori_akislari','/kategori_ekle','/kategori_sil','/kategori_yayinla','/oturum_temizle','/kullanici_durum','/onayli_sil','/excel_son_satir','/excel_mod','/kayit_raporu','/yedekle','/bakim_ac','/bakim_kapat','/gyazo_bakim_ac','/gyazo_bakim_kapat','/son_hatalar','/kapat','/onayla','/vazgec')
     $isAdminCommand = $false
     foreach ($cmd in $adminCommands) { if ($t -eq $cmd -or $t.StartsWith($cmd + ' ')) { $isAdminCommand = $true; break } }
     if (-not $isAdminCommand) { return $false }
@@ -753,8 +876,9 @@ function Process-AdminMessage($chatId, $userId, $userName, $firstName, $text) {
 
     if ($t -eq "/durum") {
         $bakim = if (Is-MaintenanceMode) { "ACIK" } else { "KAPALI" }
+        $gyazoBakim = if (Is-GyazoBakim) { "BAKIMDA (gorseller dosyaya kaydediliyor)" } else { "ACIK" }
         $otCount = (Get-Oturumlar).Count
-        $msg = "<b>DURUM</b>`n--------------------`n<b>Excel:</b> $EXCEL_DOSYA`n<b>Excel bagli:</b> $([bool]$global:xlWb)`n<b>Bakim:</b> $bakim`n<b>Aktif oturum:</b> $otCount`n<b>Son hata:</b> $(Escape-Html $global:LastErrorText)"
+        $msg = "<b>DURUM</b>`n--------------------`n<b>Excel:</b> $EXCEL_DOSYA`n<b>Excel bagli:</b> $([bool]$global:xlWb)`n<b>Bakim:</b> $bakim`n<b>Gyazo:</b> $gyazoBakim`n<b>Gorsel klasoru:</b> $GORSEL_KLASOR`n<b>OneDrive linki:</b> $(if ($GORSEL_ONEDRIVE_SITE -and $GORSEL_ONEDRIVE_KOK) { "$GORSEL_ONEDRIVE_SITE$GORSEL_ONEDRIVE_KOK" } else { "ayarli degil (yerel yol yazilir)" })`n<b>Aktif oturum:</b> $otCount`n<b>Son hata:</b> $(Escape-Html $global:LastErrorText)"
         Send-Message $chatId $msg $null | Out-Null; return $true
     }
 
@@ -933,6 +1057,8 @@ function Process-AdminMessage($chatId, $userId, $userName, $firstName, $text) {
     if ($t -eq "/yedekle") { $b = Invoke-Backup $true; Send-Message $chatId "$(E '1F4BE') Manuel yedek alindi:`n$(Escape-Html $b)" $null | Out-Null; return $true }
     if ($t -eq "/bakim_ac") { Set-MaintenanceMode $true; Send-Message $chatId "$(E '1F6E0') Bakim modu acildi." $null | Out-Null; return $true }
     if ($t -eq "/bakim_kapat") { Set-MaintenanceMode $false; Send-Message $chatId "$(E '2705') Bakim modu kapatildi." $null | Out-Null; return $true }
+    if ($t -eq "/gyazo_bakim_ac") { Set-GyazoBakim $true; Send-Message $chatId "$(E '1F6E0') Gyazo bakim modu ACILDI. Kullanicilar Gyazo secince 'sunucu bakimda' uyarisi alir; gorseller dosyaya kaydedilir." $null | Out-Null; return $true }
+    if ($t -eq "/gyazo_bakim_kapat") { Set-GyazoBakim $false; Send-Message $chatId "$(E '2705') Gyazo bakim modu KAPATILDI. Gyazo secenegi yeniden calisiyor." $null | Out-Null; return $true }
     if ($t -eq "/son_hatalar") {
         $lines = @(); if (Test-Path $LOG_DOSYA) { $lines = Get-Content $LOG_DOSYA -Encoding UTF8 | Select-Object -Last 25 }
         Send-Message $chatId ("<b>SON LOG SATIRLARI</b>`n--------------------`n" + (Escape-Html ($lines -join "`n"))) $null | Out-Null; return $true
@@ -1056,6 +1182,23 @@ function KB-Kategori {
     return Make-Keyboard $rows
 }
 
+# GORSEL GELINCE SECENEK: Gyazo linkine mi donusturulsun, dogrudan dosyaya mi kaydedilsin?
+function KB-KayitSecim {
+    return Make-Keyboard @(
+        @( @{text="$(E '1F517') Gyazo linkine donustur";callback_data="kayit_gyazo"} ),
+        @( @{text="$(E '1F4BE') Gorseli direkt kaydet";callback_data="kayit_dosya"} ),
+        @( @{text="$(E '274C') Iptal";callback_data="iptal_basa"} )
+    )
+}
+
+# Gyazo bakimdayken: dosyaya kaydet ya da vazgec
+function KB-GyazoBakim {
+    return Make-Keyboard @(
+        @( @{text="$(E '1F4BE') Gorseli direkt kaydet";callback_data="kayit_dosya"} ),
+        @( @{text="$(E '274C') Iptal";callback_data="iptal_basa"} )
+    )
+}
+
 function KB-Sessiz {
     return Make-Keyboard @(
         @( @{text="Sessiz";callback_data="tip_sessiz"}, @{text="Telesekreter";callback_data="tip_telesekreter"} ),
@@ -1127,7 +1270,12 @@ function Get-OzetMetni($oturum) {
     if ($girisTipi -eq "yazili") {
         $ozet += "<b>Lead ID:</b> $(Escape-Html $oturum.leadId)`n"
     } else {
-        $ozet += "<b>Gorsel:</b> Alindi`n"
+        $kayitModu = if ($oturum.kayitModu) { [string]$oturum.kayitModu } else { "gyazo" }
+        if ($kayitModu -eq "dosya") {
+            $ozet += "<b>Gorsel:</b> Alindi (dosyaya kaydedilecek)`n"
+        } else {
+            $ozet += "<b>Gorsel:</b> Alindi (Gyazo linkine donusturulecek)`n"
+        }
     }
     $ozet += "--------------------`n"
     $ozet += "$(E '2705') <b>Bilgiler dogruysa Onayla butonuna basin.</b>`n$(E '270F') Hata varsa Iptal ile duzeltin."
@@ -1165,7 +1313,7 @@ function Upload-ToGyazo($imagePath) {
     } catch { Write-Log "Gyazo hatasi: $_"; return $null }
 }
 
-function Get-GyazoFromFileId($fileId) {
+function Get-GyazoFromFileId($fileId, $oturum = $null, $tarih = $null) {
     try {
         $fileInfo = Invoke-RestMethod -Uri "https://api.telegram.org/bot$TELEGRAM_TOKEN/getFile?file_id=$fileId" -TimeoutSec 15
         # GUVENLIK: Asiri buyuk dosyalari reddet (varsayilan 8 MB). Telegram file_size byte cinsinden verir.
@@ -1178,89 +1326,14 @@ function Get-GyazoFromFileId($fileId) {
         Invoke-WebRequest -Uri "https://api.telegram.org/file/bot$TELEGRAM_TOKEN/$($fileInfo.result.file_path)" `
             -OutFile $tempFile -TimeoutSec 30
         $url = Upload-ToGyazo $tempFile
-        # Yerel kopya icin gecici dosyayi sakla; onay adiminda Save-YerelGorsel tasir.
-        if ($global:SonGorselTemp -and (Test-Path $global:SonGorselTemp)) { Remove-Item $global:SonGorselTemp -ErrorAction SilentlyContinue }
-        $global:SonGorselTemp = $null
-        if ($url -and $GORSEL_KAYDET) { $global:SonGorselTemp = $tempFile } else { Remove-Item $tempFile -ErrorAction SilentlyContinue }
+        # Gyazo basariliysa gorselin bir kopyasini da gorseller\<PROJE>\ altina koy (GYAZO_YEREL_KOPYA).
+        if ($url -and $GYAZO_YEREL_KOPYA -and $oturum -and $oturum.proje) {
+            $uz = [System.IO.Path]::GetExtension([string]$fileInfo.result.file_path)
+            Move-GorselToKlasor $tempFile $uz $oturum $tarih | Out-Null
+        }
+        Remove-Item $tempFile -ErrorAction SilentlyContinue
         return $url
     } catch { Write-Log "! Gorsel indirme hatasi: $_"; return $null }
-}
-
-# ==================== YEREL GORSEL KAYDI ====================
-# Gyazo'ya yuklenen gorselin bir kopyasi, kaydi ekleyen kullanicinin bilgileriyle adlandirilarak
-# $GORSEL_KLASOR\<PROJE>\ altina konur. Ad sablonu Export-GyazoGorselleri.ps1 ile aynidir:
-#   {tarih}_{proje}_{kategori}_{kullanici}_{personel}_{uyeid}_{anaid}_{tip}
-#   orn. 2026-09-15_16-01-18_OF_CVPS_DilekOffice_P263_U490241154.jpg
-function ConvertTo-GuvenliAd($metin, [int]$maksUzunluk = 40) {
-    if ($null -eq $metin) { return "" }
-    $s = ([string]$metin).Trim()
-    if ($s.Length -eq 0) { return "" }
-    $s = $s -replace "'", ""
-    $cift = @{
-        [char]0x00E7 = 'c'; [char]0x00C7 = 'C'; [char]0x011F = 'g'; [char]0x011E = 'G'
-        [char]0x0131 = 'i'; [char]0x0130 = 'I'; [char]0x00F6 = 'o'; [char]0x00D6 = 'O'
-        [char]0x015F = 's'; [char]0x015E = 'S'; [char]0x00FC = 'u'; [char]0x00DC = 'U'
-    }
-    $sb = New-Object System.Text.StringBuilder
-    foreach ($ch in $s.ToCharArray()) {
-        if ($cift.ContainsKey($ch)) { [void]$sb.Append($cift[$ch]) } else { [void]$sb.Append($ch) }
-    }
-    $s = $sb.ToString().Normalize([System.Text.NormalizationForm]::FormD)
-    $s = [regex]::Replace($s, '\p{Mn}', '')
-    $s = [regex]::Replace($s, '\s+', '-')
-    $s = [regex]::Replace($s, '[^A-Za-z0-9._-]', '')
-    $s = [regex]::Replace($s, '-{2,}', '-')
-    $s = $s.Trim('-', '.', '_')
-    if ($s.Length -gt $maksUzunluk) { $s = $s.Substring(0, $maksUzunluk) }
-    return $s
-}
-
-function Get-GorselDosyaAdi($oturum, $userName, $userId, $proje, $katLabel, $kayitTarihi, $gyazoUrl) {
-    $personel = ConvertTo-GuvenliAd $oturum.personel
-    $uyeid    = ConvertTo-GuvenliAd $oturum.uyeid
-    $anaid    = ConvertTo-GuvenliAd $oturum.anaid
-    $tip      = ConvertTo-GuvenliAd $oturum.tip
-    $gyazoId  = ""
-    $gm = [regex]::Match([string]$gyazoUrl, '([0-9a-f]{32})'); if ($gm.Success) { $gyazoId = $gm.Groups[1].Value }
-    $alanlar = @{
-        tarih       = (([string]$kayitTarihi) -replace ' ', '_' -replace ':', '-')
-        proje       = ConvertTo-GuvenliAd $proje
-        kategori    = (ConvertTo-GuvenliAd $katLabel).ToUpperInvariant()
-        kullanici   = $(if ($userName) { ConvertTo-GuvenliAd $userName } else { "bilinmiyor" })
-        kullaniciid = [string]$userId
-        personel    = $(if ($personel) { "P$personel" } else { "" })
-        uyeid       = $(if ($uyeid)    { "U$uyeid" }    else { "" })
-        anaid       = $(if ($anaid)    { "A$anaid" }    else { "" })
-        tip         = $tip
-        gyazoid     = $gyazoId
-    }
-    $ad = [regex]::Replace($GORSEL_AD_SABLONU, '\{(\w+)\}', { param($m) $k = $m.Groups[1].Value.ToLowerInvariant(); if ($alanlar.ContainsKey($k)) { [string]$alanlar[$k] } else { "" } })
-    $ad = [regex]::Replace($ad, '_{2,}', '_').Trim('_', '-', '.')
-    if (-not $ad) { $ad = $(if ($gyazoId) { $gyazoId } else { "gorsel" }) }
-    return $ad
-}
-
-function Save-YerelGorsel($kaynakDosya, $oturum, $userName, $userId, $proje, $katLabel, $kayitTarihi, $gyazoUrl) {
-    # Hata olursa bot akisini bozmaz; sadece loga yazar.
-    try {
-        if (-not $GORSEL_KAYDET) { return $null }
-        if (-not $kaynakDosya -or -not (Test-Path $kaynakDosya)) { Write-Log "! Yerel gorsel kaydi: gecici dosya yok"; return $null }
-        $klasor = Join-Path $GORSEL_KLASOR ((ConvertTo-GuvenliAd $proje).ToUpperInvariant())
-        if (-not (Test-Path $klasor)) { New-Item -ItemType Directory -Path $klasor -Force | Out-Null }
-        $temelAd = Get-GorselDosyaAdi $oturum $userName $userId $proje $katLabel $kayitTarihi $gyazoUrl
-        $hedef = Join-Path $klasor "$temelAd.jpg"
-        $n = 2
-        while (Test-Path $hedef) { $hedef = Join-Path $klasor "$temelAd`_$n.jpg"; $n++ }
-        Move-Item -Path $kaynakDosya -Destination $hedef -Force
-        Write-Log "  Gorsel kaydedildi -> $hedef"
-        return $hedef
-    } catch {
-        Write-Log "! Yerel gorsel kaydedilemedi: $_"
-        return $null
-    } finally {
-        if ($kaynakDosya -and (Test-Path $kaynakDosya)) { Remove-Item $kaynakDosya -ErrorAction SilentlyContinue }
-        $global:SonGorselTemp = $null
-    }
 }
 
 # ==================== RENK ====================
@@ -1483,7 +1556,8 @@ function Add-ExcelRow($sayfaAdi, [array]$degerler, $gyazoUrl) {
                 $hucre = $ws.Cells($sonSatir, $i+1)
                 $deger = [string]$degerler[$i]
                 $hucre.NumberFormat = "@"
-                if ($deger -and $deger -like "http*") {
+                $yerelDosya = ($deger -and $deger -notlike "http*" -and $deger -match '^[A-Za-z]:\\' -and (Test-Path -LiteralPath $deger))
+                if ($deger -and ($deger -like "http*" -or $yerelDosya)) {
                     $hucre.Value2 = $deger
                     $ws.Hyperlinks.Add($hucre, $deger, [System.Type]::Missing, "Gorseli Ac", $deger) | Out-Null
                     $hucre.Font.Color = 0xCC6600
@@ -1548,6 +1622,38 @@ function Process-Callback($update) {
     if ($data -eq "lead_iptal") {
         Remove-Oturum $userId
         Edit-Message $chatId $msgId "$(E '274C') Iptal edildi. Yeni bir Lead ID yazabilir veya gorsel gonderebilirsiniz." $null
+        return
+    }
+
+    # GORSEL KAYIT SECIMI (foto gonderildikten sonra ilk adim)
+    if ($data -eq "kayit_gyazo") {
+        if ($oturum.adim -ne "kayit_secim" -and $oturum.adim -ne "gyazo_bakim") { return }
+        if (Is-GyazoBakim) {
+            $oturum.adim = "gyazo_bakim"
+            Set-Oturum $userId $oturum
+            Edit-Message $chatId $msgId "$(E '26A0') <b>Gyazo sunucusu su anda bakimda.</b>`nGyazo tarafinda sorun oldugu icin link olusturulamiyor.`n`n$(E '1F4BE') <b>Gorseli direkt kaydet</b> secenegiyle devam edebilirsiniz; gorsel, girdiginiz bilgilerle adlandirilip kaydedilir." (KB-GyazoBakim)
+            return
+        }
+        $oturum.kayitModu = "gyazo"
+        $oturum.adim = "proje"
+        Set-Oturum $userId $oturum
+        Edit-Message $chatId $msgId "$(E '1F517') <b>Gyazo linkine donusturulecek.</b>`n`n<b>SIMDI SIZDEN BEKLENEN:</b>`n<b>-> Projeyi secin.</b>" (KB-Proje)
+        return
+    }
+
+    if ($data -eq "kayit_dosya") {
+        if ($oturum.adim -ne "kayit_secim" -and $oturum.adim -ne "gyazo_bakim") { return }
+        $oturum.kayitModu = "dosya"
+        if ($oturum.proje -and $oturum.kategori -and $oturum.personel) {
+            # Ozet/onay adiminda Gyazo bakima takildi: bilgiler duruyor, dogrudan onaya don.
+            $oturum.adim = "ozet"
+            Set-Oturum $userId $oturum
+            Edit-Message $chatId $msgId (Get-OzetMetni $oturum) (KB-Onay)
+            return
+        }
+        $oturum.adim = "proje"
+        Set-Oturum $userId $oturum
+        Edit-Message $chatId $msgId "$(E '1F4BE') <b>Gorsel dosyaya kaydedilecek.</b>`nDosya adi: kategori + tarih + girdiginiz bilgiler.`n`n<b>SIMDI SIZDEN BEKLENEN:</b>`n<b>-> Projeyi secin.</b>" (KB-Proje)
         return
     }
 
@@ -1617,12 +1723,38 @@ function Process-Callback($update) {
     if ($data -eq "onayla") {
         $girisTipi = if ($oturum.girisTipi) { [string]$oturum.girisTipi } else { "resim" }
 
+        $kayitModu = if ($oturum.kayitModu) { [string]$oturum.kayitModu } else { "gyazo" }
+        $kayitDosyaAdi = ""
         if ($girisTipi -eq "yazili") {
             # YAZILI BASLATMA: Gyazo yukleme yok; Lead ID metni dogrudan Gyazo Linki sutununa yazilir.
             $gyazoUrl = [string]$oturum.leadId
+        } elseif ($kayitModu -eq "dosya") {
+            # DIREKT KAYIT: Gyazo'ya gitmez; gorsel girilen bilgilerle adlandirilip diske yazilir,
+            # Excel'in "Gyazo Linki" sutununa dosya yolu (tiklanabilir) yazilir.
+            Edit-Message $chatId $msgId "$(E '23F3') <b>Gorsel kaydediliyor...</b>" $null
+            $fotoTarih = Get-Date
+            if ($oturum.fotoTarih) { try { $fotoTarih = [DateTimeOffset]::FromUnixTimeSeconds([int64]$oturum.fotoTarih).LocalDateTime } catch {} }
+            $gyazoUrl = Save-GorselToDisk $oturum.fileId $oturum $fotoTarih
+
+            if (-not $gyazoUrl) {
+                Edit-Message $chatId $msgId "$(E '26A0') <b>Gorsel kaydedilemedi.</b>`nNe yapmak istersiniz?" (KB-Hata)
+                return
+            }
+            $kayitDosyaAdi = ([string]$gyazoUrl -split '[\\/]')[-1]
+            # OneDrive ayarliysa Excel'e yerel yol yerine tiklanabilir web linki yaz.
+            $webLink = Get-GorselWebLink (Get-DosyaParcasi ($oturum.proje.ToUpper()) 10) $kayitDosyaAdi
+            if ($webLink) { Write-Log "  OneDrive linki -> $webLink"; $gyazoUrl = $webLink }
         } else {
+            if (Is-GyazoBakim) {
+                $oturum.adim = "gyazo_bakim"
+                Set-Oturum $userId $oturum
+                Edit-Message $chatId $msgId "$(E '26A0') <b>Gyazo sunucusu su anda bakimda.</b>`nLink olusturulamiyor. Gorseli direkt kaydetmek ister misiniz? (bilgileriniz korunur)" (KB-GyazoBakim)
+                return
+            }
             Edit-Message $chatId $msgId "$(E '23F3') <b>Yukleniyor...</b>" $null
-            $gyazoUrl = Get-GyazoFromFileId $oturum.fileId
+            $fotoTarih = Get-Date
+            if ($oturum.fotoTarih) { try { $fotoTarih = [DateTimeOffset]::FromUnixTimeSeconds([int64]$oturum.fotoTarih).LocalDateTime } catch {} }
+            $gyazoUrl = Get-GyazoFromFileId $oturum.fileId $oturum $fotoTarih
 
             if (-not $gyazoUrl) {
                 Edit-Message $chatId $msgId "$(E '26A0') <b>Gorsel yuklenemedi.</b>`nNe yapmak istersiniz?" (KB-Hata)
@@ -1641,13 +1773,13 @@ function Process-Callback($update) {
             default      { Add-ExcelRow $sayfaAdi @($oturum.personel, $oturum.uyeid, "", "", $gyazoUrl, $katLabel.ToUpper(), $kayitTarihi) $gyazoUrl }
         }
 
-        if ($girisTipi -ne "yazili" -and $global:SonGorselTemp) {
-            Save-YerelGorsel $global:SonGorselTemp $oturum $userName $userId $sayfaAdi $katLabel $kayitTarihi $gyazoUrl | Out-Null
-        }
-
         Register-KullaniciKayit $userId $userName $cb.from.first_name $sayfaAdi $oturum.kategori $katLabel
         Remove-Oturum $userId
-        Edit-Message $chatId $msgId "$(E '2705') <b>Kanitiniz eklendi, tesekkurler!</b>" $null
+        if ($kayitModu -eq "dosya" -and $girisTipi -ne "yazili") {
+            Edit-Message $chatId $msgId "$(E '2705') <b>Kanitiniz eklendi, tesekkurler!</b>`n$(E '1F4C1') Dosya: <code>$(Escape-Html $kayitDosyaAdi)</code>" $null
+        } else {
+            Edit-Message $chatId $msgId "$(E '2705') <b>Kanitiniz eklendi, tesekkurler!</b>" $null
+        }
         Write-Log "Kaydedildi -> [$sayfaAdi] [$($oturum.kategori.ToUpper())] $gyazoUrl"
         return
     }
@@ -1739,13 +1871,24 @@ function Process-Message($update) {
         if ($message.photo) {
             $fileId = $message.photo[-1].file_id
             $oturum = @{
-                adim="proje"; girisTipi="resim"; fileId=$fileId; leadId=$null; msgId=$null
+                adim="kayit_secim"; girisTipi="resim"; kayitModu=$null; fileId=$fileId; leadId=$null; msgId=$null
+                fotoTarih=$message.date
                 proje=$null; kategori=$null; personel=$null
                 uyeid=$null; anaid=$null; tip=$null
             }
             Set-Oturum $userId $oturum
             Add-Cache $cacheKey
-            $yeniMsgId = Send-Message $chatId "<b>Bilgileriniz alindi.</b>`n`n<b>SIMDI SIZDEN BEKLENEN:</b>`n<b>-> Projeyi secin.</b>" (KB-Proje)
+            if (-not $KAYIT_SECIM_SOR) {
+                # Secim sorulmaz (KAYIT_SECIM_SOR=0): dogrudan Gyazo linkine donustur (eski akis).
+                $oturum.kayitModu = "gyazo"; $oturum.adim = "proje"
+                Set-Oturum $userId $oturum
+                $yeniMsgId = Send-Message $chatId "<b>Bilgileriniz alindi.</b>`n`n<b>SIMDI SIZDEN BEKLENEN:</b>`n<b>-> Projeyi secin.</b>" (KB-Proje)
+                if ($yeniMsgId) { $oturum.msgId = $yeniMsgId; Set-Oturum $userId $oturum }
+                return
+            }
+            # ONCE SECENEK: Gyazo linkine mi donussun, dogrudan dosyaya mi kaydedilsin?
+            # Sonraki adimlar (proje -> kategori -> personel -> ID -> ozet -> onay) iki secenekte de aynidir.
+            $yeniMsgId = Send-Message $chatId "$(E '1F5BC') <b>Gorsel alindi.</b>`n`n<b>SIMDI SIZDEN BEKLENEN:</b>`n<b>-> Ne yapmak istersiniz?</b>`n`n$(E '1F517') <b>Gyazo linkine donustur</b>: gorsel Gyazo'ya yuklenir, Excel'e link yazilir.`n$(E '1F4BE') <b>Gorseli direkt kaydet</b>: gorsel, girdiginiz bilgilerle (kategori, tarih, ID'ler) adlandirilip bilgisayara kaydedilir." (KB-KayitSecim)
             if ($yeniMsgId) {
                 $oturum.msgId = $yeniMsgId
                 Set-Oturum $userId $oturum
@@ -1949,7 +2092,6 @@ Write-Log "========================================"
 Write-Log "  Bot baslatiliyor..."
 Write-Log "  Excel  : $EXCEL_DOSYA"
 Write-Log "  Oturum : $OTURUM_DOSYA"
-Write-Log "  Gorsel : $(if ($GORSEL_KAYDET) { $GORSEL_KLASOR } else { 'KAPALI' })"
 Write-Log "========================================"
 
 if ($TELEGRAM_TOKEN -eq "BURAYA_TELEGRAM_BOT_TOKEN" -or $GYAZO_TOKEN -eq "BURAYA_GYAZO_TOKEN" -or $SIFRE -eq "BURAYA_GUVENLI_SIFRE") {
@@ -1958,6 +2100,8 @@ if ($TELEGRAM_TOKEN -eq "BURAYA_TELEGRAM_BOT_TOKEN" -or $GYAZO_TOKEN -eq "BURAYA
 
 Invoke-Backup $false | Out-Null
 Init-Excel
+if (-not (Test-Path $GORSEL_KLASOR)) { try { New-Item -ItemType Directory -Path $GORSEL_KLASOR -Force | Out-Null } catch {} }
+Write-Log "  Gorsel klasoru: $GORSEL_KLASOR | Gyazo: $(if (Is-GyazoBakim) { 'BAKIMDA' } else { 'ACIK' }) | Gyazo'da yerel kopya: $(if ($GYAZO_YEREL_KOPYA) { 'EVET' } else { 'HAYIR' }) | Kayit secimi sor: $(if ($KAYIT_SECIM_SOR) { 'EVET' } else { 'HAYIR (dogrudan Gyazo)' })"
 
 Write-Log "========================================"
 Write-Log "  Hazir! Hizli butonlu akis aktif."

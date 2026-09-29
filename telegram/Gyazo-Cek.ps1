@@ -52,8 +52,8 @@ function Find-BotKlasoru($ilk) {
     if ($ilk) { $adaylar.Add($ilk) }
     $adaylar.Add((Get-Location).Path)
     $profil = $(if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME })
-    foreach ($k in @("OneDrive - Park\telegramkant", "OneDrive\telegramkant", "telegramkant", "Desktop\telegramkant", "Documents\telegramkant")) { $adaylar.Add((Join-Path $profil $k)) }
-    try { foreach ($d in (Get-ChildItem $profil -Directory -Filter "OneDrive*" -ErrorAction SilentlyContinue)) { $adaylar.Add((Join-Path $d.FullName "telegramkant")) } } catch {}
+    foreach ($k in @("OneDrive - Get Mails\telegramkant\telegramkant", "OneDrive - Get Mails\telegramkant", "OneDrive - Park\telegramkant", "OneDrive\telegramkant", "telegramkant", "Desktop\telegramkant", "Documents\telegramkant")) { $adaylar.Add((Join-Path $profil $k)) }
+    try { foreach ($d in (Get-ChildItem $profil -Directory -Filter "OneDrive*" -ErrorAction SilentlyContinue)) { $adaylar.Add((Join-Path $d.FullName "telegramkant")); $adaylar.Add((Join-Path $d.FullName "telegramkant\telegramkant")) } } catch {}
     foreach ($a in $adaylar) { if ($a -and (Test-Path (Join-Path $a "bot_log.txt")) -and (Test-Path (Join-Path $a "telegrambot_gyazo.xlsx"))) { return (Resolve-Path $a).Path } }
     try {
         $bulunan = Get-ChildItem $profil -Recurse -Depth 4 -Filter "bot_log.txt" -File -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.DirectoryName "telegrambot_gyazo.xlsx") } | Select-Object -First 1
@@ -128,12 +128,9 @@ function Get-GyazoId($metin) {
     $m = [regex]::Match($s, 'gyazo\.com/(?:[a-z0-9_-]+/)*([0-9a-f]{32})', 'IgnoreCase')
     if ($m.Success) { return $m.Groups[1].Value.ToLowerInvariant() }
     if ($s -notmatch '^https?://') { return $null }
+    if ($s -notmatch 'gyazo\.com') { return $null }   # OneDrive/SharePoint gibi Gyazo disi linkler: bu script indirmez (gorsel zaten diskte)
     $m = [regex]::Match($s, '([0-9a-f]{32})', 'IgnoreCase')
     if ($m.Success) { return $m.Groups[1].Value.ToLowerInvariant() }
-    $son = (($s -split '\?')[0].TrimEnd('/') -split '/')[-1]
-    $son = [regex]::Replace($son, '\.[A-Za-z0-9]{1,5}$', '')
-    $son = [regex]::Replace($son, '[^A-Za-z0-9_-]', '')
-    if ($son) { return $son.ToLowerInvariant() }
     return $null
 }
 
@@ -311,7 +308,7 @@ $secilenKayitlar = @($kayitlar | Where-Object {
 })
 $gorselKayitlar = @($secilenKayitlar | Where-Object { $_.GyazoId })
 $yaziliKayit = $secilenKayitlar.Count - $gorselKayitlar.Count
-Write-Bilgi "  Aralikta $($secilenKayitlar.Count) kayit; $($gorselKayitlar.Count) tanesi gorsel ($yaziliKayit tanesi Lead ID / yazili, gorsel yok)."
+Write-Bilgi "  Aralikta $($secilenKayitlar.Count) kayit; $($gorselKayitlar.Count) tanesi Gyazo gorseli ($yaziliKayit tanesi Lead ID ya da Gyazo disi link, atlandi)."
 $guvenOzet = $gorselKayitlar | Group-Object KullaniciGuven | ForEach-Object { "$($_.Name)=$($_.Count)" }
 Write-Bilgi "  Kullanici eslesme guveni: $($guvenOzet -join ', ')"
 
