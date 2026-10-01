@@ -52,3 +52,21 @@ Gereken bot scope'ları: `channels:history`, `channels:read`, `groups:history`, 
 
 Seçenekler: `--tz` (varsayılan Europe/Istanbul), `--json yedek.json` (ham veri), `--include-system`
 (katıldı/ayrıldı mesajları), `--page-size 15` ve `--delay 2` (rate limit düşük app'ler için).
+
+## slack/Build-MemnuniyetReport.py
+
+`Export-SlackChannel.py` çıktısını okuyup "yatırımsız oyuncu" bildirim kanalı için
+kim-hangi-bildirime-yanıt-verdi raporu üretir. Bot mesajındaki `PC:` kodunun numarası sorumlu
+TS'yi belirler; thread'deki ilk yanıt o bildirimin cevabı sayılır.
+
+```powershell
+python .\slack\Build-MemnuniyetReport.py slack_p-ft-memnuniyet_2026-09-16_2026-09-30.xlsx
+```
+
+| Sayfa | İçerik |
+|---|---|
+| Rapor | Her bildirim bir satır: oyuncu ID, PC, sorumlu TS, durum, yanıtlayan, yanıt zamanı ve süresi, yanıt metni. Yanıtsız kırmızı, yanlış kişi turuncu |
+| TS Performans | TS bazında atanan / yanıtlanan / yanıtsız / oran / ortalama ve medyan süre |
+| Yanıtsızlar | Sadece yanıtlanmamış bildirimler |
+| Günlük, Günlük x TS, Gün Tipi | Gün, gün x TS ve 8/15/21. gün kırılımları |
+| Ham Mesajlar, Bilgi | Kaynak veri ve uyarılar (Slack'in göstermediği bot mesajları dahil) |
