@@ -645,7 +645,8 @@ def main():
                        "messages": parents, "threads": threads}, f, ensure_ascii=False, indent=1)
         log(f"Ham veri yazıldı: {args.json}")
 
-    out = args.output or f"slack_{channel_name}_{datetime.now(tz).strftime('%Y%m%d_%H%M')}.xlsx"
+    out = args.output or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   f"slack_{channel_name}_{datetime.now(tz).strftime('%Y%m%d_%H%M')}.xlsx")
     info = {
         "team": auth.get("team", ""), "channel_id": channel_id, "channel_name": channel_name,
         "tz_name": args.tz, "start": args.start, "end": args.end, "include_system": args.include_system,
@@ -653,7 +654,8 @@ def main():
     }
     write_excel(out, rows, parents, threads, users, info, tz)
     total_replies = sum(len(v) for v in threads.values())
-    log(f"Bitti: {len(parents)} ana mesaj + {total_replies} thread yanıtı -> {out}")
+    log(f"Bitti: {len(parents)} ana mesaj + {total_replies} thread yanıtı")
+    log(f"Excel dosyası: {os.path.abspath(out)}")
 
 
 if __name__ == "__main__":
