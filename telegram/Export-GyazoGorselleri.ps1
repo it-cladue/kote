@@ -674,30 +674,42 @@ function Find-MevcutGorsel($hedef) {
     }
     return $null
 }
+# Gyazo'nun gorsel sunucusu (i.gyazo.com) tarayici olmayan istekleri 503/403 ile reddedebiliyor;
+# istekleri normal bir tarayici gibi tanitiriz.
+$script:TarayiciUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+$script:TarayiciBaslik = @{ "Accept" = "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"; "Accept-Language" = "tr-TR,tr;q=0.9,en;q=0.8"; "Referer" = "https://gyazo.com/" }
 function Invoke-GorselIndir($url, $hedef) {
-    # Donus: @{ Durum = "indirildi" | "indirildi_jpg" | "gyazo_silinmis" | "hata: ..."; Yol = son dosya yolu }
+    # Donus: @{ Durum = "indirildi" | "indirildi_jpg" | "gyazo_silinmis" | "gyazo_503" (gecici/engel) | "hata: ..."; Yol = son dosya yolu; Kod = HTTP kodu }
     $gecici = "$hedef.indiriliyor"
     for ($deneme = 1; $deneme -le $DenemeSayisi; $deneme++) {
         try {
             Remove-Item $gecici -Force -ErrorAction SilentlyContinue
-            Invoke-WebRequest -Uri $url -OutFile $gecici -UseBasicParsing -TimeoutSec $ZamanAsimiSn | Out-Null
+            Invoke-WebRequest -Uri $url -OutFile $gecici -UseBasicParsing -TimeoutSec $ZamanAsimiSn -UserAgent $script:TarayiciUA -Headers $script:TarayiciBaslik | Out-Null
             if (-not (Test-GorselDosyasi $gecici)) { throw "indirilen dosya gorsel degil (bos ya da HTML sayfasi)" }
             $son = Complete-GorselDosyasi $gecici $hedef
-            return @{ Durum = $(if ($son -ne $hedef) { "indirildi_jpg" } else { "indirildi" }); Yol = $son }
+            return @{ Durum = $(if ($son -ne $hedef) { "indirildi_jpg" } else { "indirildi" }); Yol = $son; Kod = 200 }
         } catch {
             $kod = Get-HttpDurumKodu $_
             Remove-Item $gecici -Force -ErrorAction SilentlyContinue
-            if ($kod -eq 404 -or $kod -eq 410) { return @{ Durum = "gyazo_silinmis"; Yol = $null } }
-            if ($deneme -ge $DenemeSayisi) { return @{ Durum = "hata: $($_.Exception.Message)"; Yol = $null } }
+            if ($kod -eq 404 -or $kod -eq 410) { return @{ Durum = "gyazo_silinmis"; Yol = $null; Kod = $kod } }
+            if ($kod -eq 503 -or $kod -eq 502 -or $kod -eq 429 -or $kod -eq 403) {
+                # Sunucu gecici olarak vermiyor ya da engelliyor: biraz bekle, olmazsa bu kodu bildir (ust uste gelirse tarama durur)
+                if ($deneme -ge 2) { return @{ Durum = "gyazo_$kod"; Yol = $null; Kod = $kod } }
+                Start-Sleep -Seconds 4
+                continue
+            }
+            if ($deneme -ge $DenemeSayisi) { return @{ Durum = "hata: $($_.Exception.Message)"; Yol = $null; Kod = $kod } }
             Start-Sleep -Seconds (2 * $deneme)
         }
     }
-    return @{ Durum = "hata: bilinmeyen"; Yol = $null }
+    return @{ Durum = "hata: bilinmeyen"; Yol = $null; Kod = 0 }
 }
 
 Write-Bilgi "Indirme basliyor: $($plan.Count) gorsel"
 $sayac = @{ indirildi = 0; kopyalandi = 0; zaten_var = 0; gyazo_silinmis = 0; hata = 0 }
 $inmisDosya = @{}   # gyazoId -> yerel dosya (ayni gorsel birden fazla kayitta kullanilmissa bir kez indir, digerlerine kopyala)
+$ardisikGecici = 0  # ust uste 503/403 gibi "sunucu vermiyor" cevabi; 5 olunca saatlerce bosuna denemek yerine durulur
+$erkenDurdu = $false
 $i = 0
 foreach ($p in $plan) {
     $i++
@@ -719,9 +731,18 @@ foreach ($p in $plan) {
     } else {
         $sonuc = Invoke-GorselIndir $p.GyazoLinki $p.DosyaYolu
         $p.Durum = $sonuc.Durum
-        if ($sonuc.Yol) { $sayac.indirildi++; $p.DosyaYolu = $sonuc.Yol; $p.DosyaAdi = Split-Path $sonuc.Yol -Leaf; $inmisDosya[$p.GyazoId] = $sonuc.Yol }
-        elseif ($sonuc.Durum -eq "gyazo_silinmis") { $sayac.gyazo_silinmis++; Write-Bilgi "  ! Gyazo'da yok (404): $($p.GyazoLinki)" }
+        if ($sonuc.Yol) { $sayac.indirildi++; $p.DosyaYolu = $sonuc.Yol; $p.DosyaAdi = Split-Path $sonuc.Yol -Leaf; $inmisDosya[$p.GyazoId] = $sonuc.Yol; $ardisikGecici = 0 }
+        elseif ($sonuc.Durum -eq "gyazo_silinmis") { $sayac.gyazo_silinmis++; $ardisikGecici = 0; Write-Bilgi "  ! Gyazo'da yok (404): $($p.GyazoLinki)" }
+        elseif ($sonuc.Durum -like "gyazo_*") { $sayac.hata++; $ardisikGecici++; Write-Bilgi "  ! $($p.GyazoLinki) -> Gyazo sunucusu vermedi (HTTP $($sonuc.Kod))" }
         else { $sayac.hata++; Write-Bilgi "  ! $($p.GyazoLinki) -> $($sonuc.Durum)" }
+        if ($ardisikGecici -ge 5) {
+            Write-Bilgi "========================================"
+            Write-Bilgi "DURDURULDU: Gyazo gorsel sunucusu (i.gyazo.com) ust uste $ardisikGecici istege HTTP $($sonuc.Kod) dondu."
+            Write-Bilgi "Gyazo su anda scriptlere gorsel vermiyor (bakim ya da bot korumasi). Bir sure sonra tekrar calistirin;"
+            Write-Bilgi "inmis olanlar atlanir. Gyazo'ya bagimli olmadan almak icin Telegram surumunu (Gorselleri-Cek.ps1) kullanin."
+            $erkenDurdu = $true
+            break
+        }
         if ($BeklemeMs -gt 0) { Start-Sleep -Milliseconds $BeklemeMs }
     }
     if (($i % 25) -eq 0 -or $i -eq $plan.Count) {
@@ -731,7 +752,7 @@ foreach ($p in $plan) {
 }
 Save-Indeks
 Write-Bilgi "========================================"
-Write-Bilgi "BITTI. indirildi=$($sayac.indirildi) kopyalandi=$($sayac.kopyalandi) zaten_var=$($sayac.zaten_var) gyazo_silinmis=$($sayac.gyazo_silinmis) hata=$($sayac.hata)"
+Write-Bilgi "$(if ($erkenDurdu) { 'YARIM KALDI (Gyazo vermedi).' } else { 'BITTI.' }) indirildi=$($sayac.indirildi) kopyalandi=$($sayac.kopyalandi) zaten_var=$($sayac.zaten_var) gyazo_silinmis=$($sayac.gyazo_silinmis) hata=$($sayac.hata)"
 Write-Bilgi "Klasor : $CiktiKlasoru"
 Write-Bilgi "Indeks : $IndeksDosyasi  (Durum ve KullaniciGuven sutunlarina bakin)"
 if ($sayac.hata -gt 0) { Write-Bilgi "Hatali olanlar icin scripti tekrar calistirin; inmis olanlar atlanir." }
