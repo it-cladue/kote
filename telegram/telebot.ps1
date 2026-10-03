@@ -73,7 +73,7 @@ $global:StopRequested = $false
 $global:LastErrorText = ""
 # ===================================================
 
-$PROJELER = @("pp","pa","of","hi","vi","ga")
+$PROJELER = @("pp","pa","of","hi","vi","ga","beta")
 
 # ==================== PERFORMANS ====================
 # Long polling: Telegram yeni mesaj gelene kadar istegi acik tutar, mesaj gelince hemen doner.
@@ -90,6 +90,7 @@ $PROJE_RENK = @{
     "hi" = 0xFF0000
     "vi" = 0x7030A0
     "ga" = 0x00B050
+    "beta" = 0xFFA500   # turuncu
 }
 
 $HEADERS = @("Personel Kodu","Uye ID","Ana Uye ID","Sessiz / Telesekreter","Gyazo Linki","Kategori","Tarih / Saat")
@@ -1166,7 +1167,8 @@ function Delete-Message($chatId, $messageId) {
 function KB-Proje {
     return Make-Keyboard @(
         @( @{text="$(E '26AB') PP";callback_data="proje_pp"}, @{text="$(E '1F535') PA";callback_data="proje_pa"}, @{text="$(E '1F7E1') OF";callback_data="proje_of"} ),
-        @( @{text="$(E '1F534') HI";callback_data="proje_hi"}, @{text="$(E '1F7E3') VI";callback_data="proje_vi"}, @{text="$(E '1F7E2') GA";callback_data="proje_ga"} )
+        @( @{text="$(E '1F534') HI";callback_data="proje_hi"}, @{text="$(E '1F7E3') VI";callback_data="proje_vi"}, @{text="$(E '1F7E2') GA";callback_data="proje_ga"} ),
+        @( @{text="$(E '1F7E0') BETA";callback_data="proje_beta"} )
     )
 }
 
