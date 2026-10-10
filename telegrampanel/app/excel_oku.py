@@ -22,25 +22,61 @@ def _kol(harf):
     return openpyxl.utils.column_index_from_string(harf) - 1
 
 
-def kopyala(kaynak, hedef_klasor, deneme=3):
+BOT_KOPYA_ADI = "panel_excel_kopya.xlsx"   # botun SaveCopyAs ile yazdigi kopya (bot acikken ana dosya Excel tarafindan kilitli)
+
+
+def _win_kopyala(kaynak, hedef):
+    """Windows CopyFileW: Excel'in acik tuttugu dosyayi Gezgin gibi kopyalamayi dener (paylasim kipi farkli)."""
+    if os.name != "nt":
+        raise OSError("sadece Windows")
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CopyFileW.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.BOOL)
+    k32.CopyFileW.restype = wintypes.BOOL
+    if not k32.CopyFileW(kaynak, hedef, False):
+        raise OSError(ctypes.get_last_error(), "CopyFileW basarisiz")
+
+
+def _kaynak_kopyala(kaynak, gecici):
+    """Once normal kopya; 'Permission denied' (Excel acik) ise Windows CopyFileW."""
+    try:
+        shutil.copyfile(kaynak, gecici)
+    except PermissionError:
+        _win_kopyala(kaynak, gecici)
+
+
+def kopyala(kaynak, hedef_klasor, deneme=2):
+    """Ana Excel'i yerel onbellege kopyalar. Ana dosya kilitliyse (bot acik) botun yazdigi panel_excel_kopya.xlsx kullanilir.
+    -> (kopya_yolu, uyari|None)"""
     os.makedirs(hedef_klasor, exist_ok=True)
     hedef = os.path.join(hedef_klasor, "excel_kopya.xlsx")
     gecici = hedef + ".tmp"
-    son_hata = None
-    for i in range(deneme):
+    bot_kopya = os.path.join(os.path.dirname(kaynak), BOT_KOPYA_ADI)
+    adaylar = [(kaynak, None)]
+    if os.path.exists(bot_kopya):
         try:
-            shutil.copyfile(kaynak, gecici)
-            with zipfile.ZipFile(gecici) as z:
-                if z.testzip() is not None:
-                    raise IOError("zip bozuk")
-            os.replace(gecici, hedef)
-            return hedef, None
-        except Exception as e:
-            son_hata = e
-            time.sleep(2)
+            fark = os.path.getmtime(kaynak) - os.path.getmtime(bot_kopya)
+        except OSError:
+            fark = 0
+        uyari = None if fark < 180 else f"botun panel kopyasi ana dosyadan {int(fark // 60)} dk eski (bot kopyayi yenilemiyor olabilir)"
+        adaylar.append((bot_kopya, uyari))
+    son_hata = None
+    for yol, uyari in adaylar:
+        for i in range(deneme):
+            try:
+                _kaynak_kopyala(yol, gecici)
+                with zipfile.ZipFile(gecici) as z:
+                    if z.testzip() is not None:
+                        raise IOError("zip bozuk")
+                os.replace(gecici, hedef)
+                return hedef, uyari
+            except Exception as e:
+                son_hata = e
+                time.sleep(1)
     if os.path.exists(hedef):
         return hedef, f"kopyalanamadi ({son_hata}); onceki kopya kullaniliyor"
-    raise IOError(f"Excel kopyalanamadi: {son_hata}")
+    raise IOError(f"Excel kopyalanamadi: {son_hata}. Bot acikken ana dosya kilitli olur; yeni telebot.ps1 panel icin {BOT_KOPYA_ADI} yazar.")
 
 
 def _metin(v):

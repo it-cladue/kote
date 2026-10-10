@@ -112,6 +112,8 @@ Kayit rozetleri:
   panel_kuyruk\*.jsonl        her bilgisayarin bota gonderdigi islemler (panel yazar, bot okur)
   panel_kuyruk_sonuc.jsonl    botun cevaplari (bot yazar, paneller okur)
   panel_kuyruk_offset.json    botun nereye kadar okudugu
+  panel_excel_kopya.xlsx      botun panel icin yazdigi Excel kopyasi (bot acikken ana Excel kilitlidir; panel
+                              bunu okur, yazma yine bot uzerinden ana dosyaya yapilir)
   kayitlar.jsonl              bot: her kaydi kim ekledi (panelde "Ekleyen" kesinlesir)
   heartbeat.txt               bot her dakika yazar ("Bot: calisiyor" gostergesi)
 Panelin kendi verisi (silinebilir, yeniden olusur): %LOCALAPPDATA%\KanitPaneli

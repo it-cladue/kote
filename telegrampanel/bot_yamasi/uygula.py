@@ -10,7 +10,8 @@ ANCHOR_FONK = '# ==================== CALLBACK ===================='
 ANCHOR_KAYIT = '        Register-KullaniciKayit $userId $userName $cb.from.first_name $sayfaAdi $oturum.kategori $katLabel'
 ANCHOR_DONGU = '        Start-Sleep -Milliseconds $NORMAL_SLEEP_MS'
 EK_KAYIT = '        Write-PanelKayit $userId $userName $sayfaAdi $oturum.kategori $katLabel $oturum $gyazoUrl $kayitDosyaAdi $girisTipi'
-EK_DONGU = '        try { Process-PanelKuyrugu; Write-Heartbeat } catch { Write-Log "! Panel koprusu: $_" }'
+EK_DONGU = '        try { Process-PanelKuyrugu; Update-PanelExcelKopyasi; Write-Heartbeat } catch { Write-Log "! Panel koprusu: $_" }'
+EK_DONGU_ESKI = ['        try { Process-PanelKuyrugu; Write-Heartbeat } catch { Write-Log "! Panel koprusu: $_" }']
 
 
 def kopru_surumu(metin):
@@ -39,8 +40,10 @@ def kaldir(m):
         if j < 0:
             raise SystemExit("Eski kopru fonksiyon blogunun sonu bulunamadi")
         m = m[:i].rstrip("\n") + "\n\n" + m[j:]
-    # 3-4) tek satirlik eklemeler
+    # 3-4) tek satirlik eklemeler (eski surumlerin satirlari dahil)
     m = m.replace(EK_KAYIT + "\n", "").replace(EK_DONGU + "\n", "")
+    for e in EK_DONGU_ESKI:
+        m = m.replace(e + "\n", "")
     return m
 
 

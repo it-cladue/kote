@@ -13,6 +13,12 @@ $global:PanelIslenenler = $null
 $PANEL_KAYIT_DOSYA  = [string](Get-ConfigValue "PANEL_KAYIT_DOSYA" (Join-Base "kayitlar.jsonl"))
 $HEARTBEAT_DOSYA    = [string](Get-ConfigValue "HEARTBEAT_DOSYA" (Join-Base "heartbeat.txt"))
 $PANEL_KUYRUK_SN    = [int](Get-ConfigValue "PANEL_KUYRUK_SN" 5)
+# Panel icin Excel kopyasi: bot calisirken Excel COM dosyayi kilitli tutar, panel ana dosyayi kopyalayamaz (Permission denied).
+# Bot, dosya degistikce (en sik PANEL_KOPYA_SN saniyede bir) SaveCopyAs ile bu kopyayi yazar; panel ana dosya kilitliyse bunu okur.
+$PANEL_EXCEL_KOPYA  = [string](Get-ConfigValue "PANEL_EXCEL_KOPYA" (Join-Base "panel_excel_kopya.xlsx"))
+$PANEL_KOPYA_SN     = [int](Get-ConfigValue "PANEL_KOPYA_SN" 60)
+$global:PanelSonKopya = [datetime]::MinValue
+$global:PanelKopyaYazma = $null
 $global:PanelSonKontrol = [datetime]::MinValue
 $global:PanelSonNabiz   = [datetime]::MinValue
 $script:PanelUtf8 = New-Object System.Text.UTF8Encoding $false
@@ -31,6 +37,25 @@ function Write-PanelAtomik($yol, $metin) {
     $tmp = "$yol.tmp"
     [System.IO.File]::WriteAllText($tmp, $metin, $script:PanelUtf8)
     Move-Item -LiteralPath $tmp -Destination $yol -Force   # ayni surucude yerine koyma (botun Set-TextFileAtomic kalibi)
+}
+
+# Excel'in panel kopyasi (bot acikken ana dosya kilitli). Dosya degismediyse ya da sure dolmadiysa hicbir sey yapmaz.
+function Update-PanelExcelKopyasi([bool]$zorla = $false) {
+    try {
+        if (-not $global:xlWb) { return }
+        if (-not $zorla -and ((Get-Date) - $global:PanelSonKopya).TotalSeconds -lt $PANEL_KOPYA_SN) { return }
+        $global:PanelSonKopya = Get-Date
+        $anaYazma = $null
+        try { $anaYazma = (Get-Item -LiteralPath $EXCEL_DOSYA).LastWriteTime } catch { $anaYazma = $null }
+        if (-not $zorla -and $anaYazma -and $global:PanelKopyaYazma -and $anaYazma -le $global:PanelKopyaYazma -and (Test-Path -LiteralPath $PANEL_EXCEL_KOPYA)) { return }
+        $gecici = $PANEL_EXCEL_KOPYA + ".yeni.xlsx"
+        if (Test-Path -LiteralPath $gecici) { Remove-Item -LiteralPath $gecici -Force -ErrorAction SilentlyContinue }
+        $global:xlWb.SaveCopyAs($gecici)
+        Move-Item -LiteralPath $gecici -Destination $PANEL_EXCEL_KOPYA -Force
+        $global:PanelKopyaYazma = if ($anaYazma) { $anaYazma } else { Get-Date }
+    } catch {
+        Write-Log "! Panel Excel kopyasi yazilamadi: $_"
+    }
 }
 
 function Write-Heartbeat {
@@ -440,6 +465,7 @@ function Process-PanelKuyrugu {
         $global:PanelSonKontrol = Get-Date
         $dosyalar = Get-PanelKuyrukDosyalari
         if ($dosyalar.Count -eq 0) { return }
+        $uygulanan = 0
         $offsetler = Get-PanelOffsetler
         foreach ($dosya in $dosyalar) {
             $ad = [string]$dosya.Ad
@@ -482,6 +508,7 @@ function Process-PanelKuyrugu {
                         break
                     }
                     Add-PanelIslenen $is.id
+                    $uygulanan++
                 }
                 # Her kalemden sonra offset + son islenen id (parmak izi)
                 $offsetler[$ad] = @{ ofs = [int64]$kalem.SonrakiOffset; son_id = $(if ($is -and $is.id) { [string]$is.id } else { $sonId }) }
@@ -494,6 +521,7 @@ function Process-PanelKuyrugu {
                 Set-PanelOffsetler $offsetler
             }
         }
+        if ($uygulanan -gt 0) { Update-PanelExcelKopyasi $true }   # panel kendi degisikligini hemen gorsun
     } catch {
         Write-Log "! Panel kuyrugu islenemedi: $_"
     }

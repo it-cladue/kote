@@ -6,7 +6,7 @@
     {% if durum.bot.canli %}<b class="yesil">çalışıyor</b>{% elif durum.bot.canli is none %}<b class="gri">bilinmiyor</b>{% else %}<b class="kirmizi">ÇALIŞMIYOR</b>{% endif %}
     {% if durum.log_son %}<small>(son log: {{ durum.log_son }})</small>{% endif %}
   </span>
-  <span class="durum-parca">Excel: <b>{{ durum.excel_mtime or '-' }}</b></span>
+  <span class="durum-parca">Excel: <b>{{ durum.excel_mtime or '-' }}</b>{% if durum.excel_kopya_mtime %} <small>(panel kopyası {{ durum.excel_kopya_mtime }})</small>{% endif %}</span>
   <span class="durum-parca">Son okuma:
     {% if durum.son_ice_aktarim %}<b>{{ durum.son_ice_aktarim.zaman }}</b>{% if durum.son_ice_aktarim.hata %} <span class="kirmizi">HATA: {{ durum.son_ice_aktarim.hata }}</span>{% endif %}{% else %}<b>henüz yok</b>{% endif %}
   </span>

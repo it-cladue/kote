@@ -33,7 +33,8 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False):
     rapor = {"zaman": _simdi(), "sayfalar": {}, "yeni": 0, "degisen": 0, "silinen": 0, "hata": None, "uyari": None}
     try:
         # Excel (ve bot logu) degismediyse yeniden okumaya gerek yok: sadece bot sonuclarini isle (30 sn'de bir ucuz kontrol)
-        imza = _imza(ayar["EXCEL"]) + "|" + _imza(ayar.get("LOG_DOSYA") or "") + "|" + _imza(os.path.join(ayar["BOT_KLASOR"], "kayitlar.jsonl"))
+        bot_kopya = os.path.join(ayar["BOT_KLASOR"], excel_oku.BOT_KOPYA_ADI)
+        imza = _imza(ayar["EXCEL"]) + "|" + _imza(bot_kopya) + "|" + _imza(ayar.get("LOG_DOSYA") or "") + "|" + _imza(os.path.join(ayar["BOT_KLASOR"], "kayitlar.jsonl"))
         if not zorla and db.ayar_al(conn, "kaynak_imza") == imza and conn.execute("SELECT COUNT(*) FROM kayitlar").fetchone()[0] > 0:
             islenen = sonuc_isle(ayar, conn)
             if islenen:
@@ -49,6 +50,8 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False):
             excel_zaman = datetime.fromtimestamp(os.path.getmtime(ayar["EXCEL"]))
         except OSError:
             excel_zaman = datetime.now()
+        if uyari is None and os.path.exists(bot_kopya) and os.path.getmtime(bot_kopya) >= os.path.getmtime(ayar["EXCEL"]) - 1:
+            pass  # ana dosya kopyalanabildi ya da bot kopyasi guncel; excel_zaman ana dosyanin zamani kalir
         korunan = set()
         sayfalar = excel_oku.oku(kopya, ayar.get("SUTUN_HARITASI") or {})
         # ekleyen eslemesi

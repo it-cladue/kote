@@ -395,7 +395,12 @@ def durum_bilgisi():
         excel_mtime = datetime.fromtimestamp(os.path.getmtime(AYAR["EXCEL"])).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         pass
-    return {"son_ice_aktarim": son, "excel_mtime": excel_mtime, "log_son": log_oku.son_satir_zamani(AYAR["LOG_DOSYA"]),
+    bot_kopya = os.path.join(AYAR["BOT_KLASOR"], excel_oku.BOT_KOPYA_ADI)
+    try:
+        kopya_mtime = datetime.fromtimestamp(os.path.getmtime(bot_kopya)).strftime("%Y-%m-%d %H:%M:%S") if os.path.exists(bot_kopya) else None
+    except Exception:
+        kopya_mtime = None
+    return {"son_ice_aktarim": son, "excel_mtime": excel_mtime, "excel_kopya_mtime": kopya_mtime, "log_son": log_oku.son_satir_zamani(AYAR["LOG_DOSYA"]),
             "bot": bot_yonetim.bot_calisiyor_mu(AYAR), "kuyruk_bekleyen": kuyruk.bekleyen_sayisi(c),
             "bekleyen_islem": c.execute("SELECT COUNT(*) FROM kayitlar WHERE bekleyen_islem IS NOT NULL").fetchone()[0],
             "istemci": kuyruk.istemci_adi(AYAR), "bot_klasor": AYAR["BOT_KLASOR"], "surum": SURUM}
