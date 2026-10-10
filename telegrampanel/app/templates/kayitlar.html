@@ -97,9 +97,9 @@
 
 {% if sayfa_sayisi > 1 %}
 <div class="sayfalama">
-  {% if sayfa > 1 %}<a class="btn" href="{{ url_degistir() }}&s={{ sayfa - 1 }}">‹ Önceki</a>{% endif %}
+  {% if sayfa > 1 %}<a class="btn" href="{{ url_degistir(s=sayfa - 1) }}">‹ Önceki</a>{% endif %}
   <span>{{ sayfa }} / {{ sayfa_sayisi }}</span>
-  {% if sayfa < sayfa_sayisi %}<a class="btn" href="{{ url_degistir() }}&s={{ sayfa + 1 }}">Sonraki ›</a>{% endif %}
+  {% if sayfa < sayfa_sayisi %}<a class="btn" href="{{ url_degistir(s=sayfa + 1) }}">Sonraki ›</a>{% endif %}
 </div>
 {% endif %}
 

@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS kayitlar (
   aciklama TEXT, gorsel2 TEXT, ek_not TEXT,
   ekleyen_id TEXT, ekleyen_ad TEXT, ekleyen_guven TEXT,
   silindi INTEGER DEFAULT 0, silen TEXT, silme_zamani TEXT,
-  bekleyen_islem TEXT, bekleyen_id TEXT, bekleyen_hata TEXT,
+  bekleyen_islem TEXT, bekleyen_id TEXT, bekleyen_hata TEXT, panel_uygulama TEXT,
   ilk_gorulme TEXT, son_gorulme TEXT, guncelleme TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_kayit_proje ON kayitlar(proje, silindi, kt);
@@ -55,6 +55,11 @@ def baglan(yol):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.executescript(SEMA)
+    # eski veritabanlarina yeni sutun
+    try:
+        conn.execute("ALTER TABLE kayitlar ADD COLUMN panel_uygulama TEXT")
+    except sqlite3.OperationalError:
+        pass
     return conn
 
 

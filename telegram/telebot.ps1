@@ -45,7 +45,7 @@ $BAKIM_DOSYA      = [string](Get-ConfigValue "BAKIM_DOSYA" (Join-Base "bakim_mod
 $BACKUP_KLASOR    = [string](Get-ConfigValue "BACKUP_KLASOR" (Join-Base "backups"))
 $KATEGORI_DOSYA   = [string](Get-ConfigValue "KATEGORI_DOSYA" (Join-Base "kategoriler.json"))
 $EXCEL_MOD_DOSYA  = [string](Get-ConfigValue "EXCEL_MOD_DOSYA" (Join-Base "excel_yazma_modu.txt"))
-# ==================== WEB PANELI KOPRUSU ====================
+# ==================== WEB PANELI KOPRUSU (surum 3) ====================
 # Web paneli (telegrampanel) Excel'e dogrudan yazmaz. Panelde yapilan onay (KT), duzenleme, silme ve geri alma
 # islemleri panel_kuyruk.jsonl dosyasina satir satir eklenir; bot bu dosyayi dongude okur, KENDI Excel
 # baglantisiyla uygular ve sonucu panel_kuyruk_sonuc.jsonl'a yazar. Boylece Excel'e tek yazan yine bottur.
@@ -55,12 +55,15 @@ $PANEL_KUYRUK_DOSYA = [string](Get-ConfigValue "PANEL_KUYRUK_DOSYA" (Join-Base "
 $PANEL_SONUC_DOSYA  = [string](Get-ConfigValue "PANEL_SONUC_DOSYA" (Join-Base "panel_kuyruk_sonuc.jsonl"))
 $PANEL_KUYRUK_KLASOR = [string](Get-ConfigValue "PANEL_KUYRUK_KLASOR" (Join-Base "panel_kuyruk"))   # her bilgisayar kendi dosyasina yazar
 $PANEL_OFFSET_DOSYA = [string](Get-ConfigValue "PANEL_OFFSET_DOSYA" (Join-Base "panel_kuyruk_offset.json"))
+$PANEL_ISLENEN_DOSYA = [string](Get-ConfigValue "PANEL_ISLENEN_DOSYA" (Join-Base "panel_kuyruk_islenen.txt"))   # islenen is kimlikleri (OneDrive catisma kopyasi / tekrar okuma korumasi)
+$global:PanelIslenenler = $null
 $PANEL_KAYIT_DOSYA  = [string](Get-ConfigValue "PANEL_KAYIT_DOSYA" (Join-Base "kayitlar.jsonl"))
 $HEARTBEAT_DOSYA    = [string](Get-ConfigValue "HEARTBEAT_DOSYA" (Join-Base "heartbeat.txt"))
 $PANEL_KUYRUK_SN    = [int](Get-ConfigValue "PANEL_KUYRUK_SN" 5)
 $global:PanelSonKontrol = [datetime]::MinValue
 $global:PanelSonNabiz   = [datetime]::MinValue
 $script:PanelUtf8 = New-Object System.Text.UTF8Encoding $false
+# --- WEB PANELI KOPRUSU: AYAR SONU ---
 # GORSEL KAYIT: Gyazo yerine gorseli dogrudan diske kaydetme secenegi.
 # Dosya adi = kategori + gonderim tarihi + kullanicinin girdigi bilgiler (personel, uye id, ana id, tur).
 $GORSEL_KLASOR    = [string](Get-ConfigValue "GORSEL_KLASOR" (Join-Base "gorseller"))
@@ -1581,11 +1584,18 @@ function Add-ExcelRow($sayfaAdi, [array]$degerler, $gyazoUrl) {
 }
 
 
-# ==================== WEB PANELI KOPRUSU: FONKSIYONLAR ====================
+# ==================== WEB PANELI KOPRUSU: FONKSIYONLAR (surum 3) ====================
 function Write-JsonSatir($dosya, $nesne) {
     # BOM'suz UTF-8, CRLF satir sonu; panel (Python) satir satir okur.
     $json = ($nesne | ConvertTo-Json -Compress -Depth 6)
     [System.IO.File]::AppendAllText($dosya, ($json + "`r`n"), $script:PanelUtf8)
+}
+
+# Kucuk durum dosyalarini atomik yazar (tmp + Replace): elektrik kesilirse yarim dosya kalmaz.
+function Write-PanelAtomik($yol, $metin) {
+    $tmp = "$yol.tmp"
+    [System.IO.File]::WriteAllText($tmp, $metin, $script:PanelUtf8)
+    Move-Item -LiteralPath $tmp -Destination $yol -Force   # ayni surucude yerine koyma (botun Set-TextFileAtomic kalibi)
 }
 
 function Write-Heartbeat {
@@ -1602,7 +1612,7 @@ function Write-PanelKayit($userId, $userName, $sayfaAdi, $katKodu, $katEtiket, $
         $o = [ordered]@{
             zaman    = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
             proje    = [string]$sayfaAdi
-            kategori = ([string]$katEtiket).ToUpper()
+            kategori = ([string]$katEtiket).ToUpperInvariant()
             kat_kodu = [string]$katKodu
             personel = [string]$oturum.personel
             uyeid    = [string]$oturum.uyeid
@@ -1619,24 +1629,91 @@ function Write-PanelKayit($userId, $userName, $sayfaAdi, $katKodu, $katEtiket, $
 }
 
 # Offset sozlugu: { "<dosya adi>": <bayt> }  (panel_kuyruk_offset.json). Eski tek dosyali surumun .txt offseti de tasinir.
+# Offset sozlugu: { "<dosya>": { "ofs": <bayt>, "son_id": "<son islenen satirin id'si>" } }
+# son_id parmak izi: dosya ayni adla yeniden olusturulduysa (OneDrive geri yukleme, elle silme) bastan okunur.
 function Get-PanelOffsetler {
     $h = @{}
-    try {
-        if (Test-Path -LiteralPath $PANEL_OFFSET_DOSYA) {
-            $o = (Get-Content -LiteralPath $PANEL_OFFSET_DOSYA -Raw) | ConvertFrom-Json
-            foreach ($p in $o.PSObject.Properties) { $h[[string]$p.Name] = [int64]$p.Value }
-        } else {
-            $eski = Join-Path (Split-Path -Parent $PANEL_OFFSET_DOSYA) "panel_kuyruk_offset.txt"
-            if (Test-Path -LiteralPath $eski) { $h["panel_kuyruk.jsonl"] = [int64](([string](Get-Content -LiteralPath $eski -Raw)).Trim()) }
+    if (Test-Path -LiteralPath $PANEL_OFFSET_DOSYA) {
+        try {
+            $ham = [string](Get-Content -LiteralPath $PANEL_OFFSET_DOSYA -Raw)
+            if ($ham.Trim()) {
+                $o = $ham | ConvertFrom-Json
+                foreach ($p in $o.PSObject.Properties) {
+                    $v = $p.Value
+                    if ($v -is [System.Management.Automation.PSCustomObject]) { $h[[string]$p.Name] = @{ ofs = [int64]$v.ofs; son_id = [string]$v.son_id } }
+                    else { $h[[string]$p.Name] = @{ ofs = [int64]$v; son_id = "" } }
+                }
+            }
+        } catch {
+            # Bozuk/yarim dosya: kenara al, bastan oku (islenen kimlik listesi tekrar uygulamayi engeller)
+            Write-Log "! Panel offset dosyasi okunamadi, bastan okunacak: $_"
+            try { Move-Item -LiteralPath $PANEL_OFFSET_DOSYA -Destination ($PANEL_OFFSET_DOSYA + ".bozuk-" + (Get-Date -Format 'yyyyMMdd-HHmmss')) -Force } catch {}
+            $h = @{}
         }
-    } catch { $h = @{} }
+    } else {
+        $eski = Join-Path (Split-Path -Parent $PANEL_OFFSET_DOSYA) "panel_kuyruk_offset.txt"
+        if (Test-Path -LiteralPath $eski) { try { $h["panel_kuyruk.jsonl"] = @{ ofs = [int64](([string](Get-Content -LiteralPath $eski -Raw)).Trim()); son_id = "" } } catch {} }
+    }
     return $h
 }
 
 function Set-PanelOffsetler($h) {
     $o = [ordered]@{}
-    foreach ($k in ($h.Keys | Sort-Object)) { $o[[string]$k] = [int64]$h[$k] }
-    [System.IO.File]::WriteAllText($PANEL_OFFSET_DOSYA, ($o | ConvertTo-Json), $script:PanelUtf8)
+    foreach ($k in ($h.Keys | Sort-Object)) { $o[[string]$k] = [ordered]@{ ofs = [int64]$h[$k].ofs; son_id = [string]$h[$k].son_id } }
+    Write-PanelAtomik $PANEL_OFFSET_DOSYA ($o | ConvertTo-Json -Depth 4)
+}
+
+# Offset'ten hemen onceki satirin id'si beklenen son_id mi? Degilse dosya degismis demektir.
+function Test-PanelOffsetUyumlu($fs, [int64]$offset, [string]$sonId) {
+    if ($offset -le 0 -or -not $sonId) { return $true }
+    $bas = [math]::Max(0, $offset - 65536)
+    $fs.Seek($bas, [System.IO.SeekOrigin]::Begin) | Out-Null
+    $buf = New-Object byte[] ($offset - $bas)
+    $n = $fs.Read($buf, 0, $buf.Length)
+    $metin = $script:PanelUtf8.GetString($buf, 0, $n)
+    if (-not $metin.EndsWith("`n")) { return $false }
+    # Offset'ten geriye dogru ilk JSON satirini bul (bozuk/bos satirlar atlanir) ve id'sini karsilastir
+    $satirlar = $metin.TrimEnd("`r", "`n") -split "`n"
+    for ($k = $satirlar.Count - 1; $k -ge 0; $k--) {
+        $t = $satirlar[$k].Trim()
+        if (-not $t) { continue }
+        try { $o = ConvertFrom-Json $t } catch { continue }
+        if ($o -and $o.id) { return (([string]$o.id) -eq $sonId) }
+    }
+    return $true   # dogrulanacak satir yok
+}
+
+# Islenen is kimlikleri: ayni is (OneDrive catisma kopyasi "pc_a-DESKTOP.jsonl", yeniden yuklenen eski surum, offset sifirlanmasi) ikinci kez uygulanmaz.
+# (PowerShell bir koleksiyonu fonksiyondan dondururken acar; bos HashSet $null olur. O yuzden set donmez, global degisken dogrudan kullanilir.)
+function Initialize-PanelIslenenler {
+    if ($null -eq $global:PanelIslenenler) {
+        $global:PanelIslenenler = New-Object System.Collections.Generic.HashSet[string]
+        try {
+            if (Test-Path -LiteralPath $PANEL_ISLENEN_DOSYA) {
+                foreach ($satir in [System.IO.File]::ReadAllLines($PANEL_ISLENEN_DOSYA)) { $t = $satir.Trim(); if ($t) { [void]$global:PanelIslenenler.Add($t) } }
+            }
+        } catch {}
+    }
+}
+
+function Test-PanelIslendi($id) {
+    Initialize-PanelIslenenler
+    return $global:PanelIslenenler.Contains([string]$id)
+}
+
+function Add-PanelIslenen($id) {
+    Initialize-PanelIslenenler
+    [void]$global:PanelIslenenler.Add([string]$id)
+    try {
+        [System.IO.File]::AppendAllText($PANEL_ISLENEN_DOSYA, ([string]$id + "`r`n"), $script:PanelUtf8)
+        if ($global:PanelIslenenler.Count -gt 100000) {
+            # dosyayi kucult: son 50000 kimlik kalsin
+            $hepsi = [System.IO.File]::ReadAllLines($PANEL_ISLENEN_DOSYA)
+            $kalan = $hepsi[[math]::Max(0, $hepsi.Count - 50000)..($hepsi.Count - 1)]
+            [System.IO.File]::WriteAllLines($PANEL_ISLENEN_DOSYA, $kalan, $script:PanelUtf8)
+            $global:PanelIslenenler = $null
+        }
+    } catch {}
 }
 
 # Okunacak kuyruk dosyalari: eski tek dosya + panel_kuyruk\*.jsonl (bilgisayar basina bir dosya; OneDrive catismasi olmaz)
@@ -1653,13 +1730,17 @@ function Get-PanelKuyrukDosyalari {
 
 # Bir kuyruk dosyasini verilen bayttan itibaren okur; yalnizca tam satirlari isler.
 # Donus: @{ Isler = @( @{ Is=<json>; SonrakiOffset=<bayt> } ... ); Degisti; SonOffset }
-function Read-PanelKuyrukDosyasi($yol, [int64]$offset) {
+function Read-PanelKuyrukDosyasi($yol, [int64]$offset, [string]$sonId = "") {
     $bos = @{ Isler = @(); Degisti = $false; SonOffset = $offset }
     $fs = [System.IO.File]::Open($yol, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
     try {
         $uzunluk = [int64]$fs.Length
         if ($offset -gt $uzunluk) { $offset = [int64]0 }   # dosya sifirlanmis/kucultulmus
-        if ($offset -eq $uzunluk) { return $bos }
+        if ($offset -gt 0 -and -not (Test-PanelOffsetUyumlu $fs $offset $sonId)) {
+            Write-Log "  Panel kuyruk dosyasi degismis, bastan okunuyor: $yol"
+            $offset = [int64]0
+        }
+        if ($offset -eq $uzunluk) { return @{ Isler = @(); Degisti = $false; SonOffset = $offset } }
         $fs.Seek($offset, [System.IO.SeekOrigin]::Begin) | Out-Null
         $buf = New-Object byte[] ($uzunluk - $offset)
         $okunan = $fs.Read($buf, 0, $buf.Length)
@@ -1846,7 +1927,7 @@ function Invoke-PanelIslem($is) {
                 $hucre = $ws.Cells($satir, $k)
                 $hucre.NumberFormat = "@"
                 $v = [string]$yaz[$k]
-                if ($k -eq 6) { $v = $v.ToUpper() }
+                if ($k -eq 6) { $v = $v.ToUpperInvariant() }
                 $hucre.Value2 = (Protect-ExcelValue $v)
             }
             if ($null -ne $deger.aciklama) {
@@ -1874,14 +1955,17 @@ function Process-PanelKuyrugu {
         $offsetler = Get-PanelOffsetler
         foreach ($dosya in $dosyalar) {
             $ad = [string]$dosya.Ad
-            $offset = [int64]0
-            if ($offsetler.ContainsKey($ad)) { $offset = [int64]$offsetler[$ad] }
+            $offset = [int64]0; $sonId = ""
+            if ($offsetler.ContainsKey($ad)) { $offset = [int64]$offsetler[$ad].ofs; $sonId = [string]$offsetler[$ad].son_id }
             $okuma = $null
-            try { $okuma = Read-PanelKuyrukDosyasi $dosya.Yol $offset } catch { Write-Log "! Panel kuyrugu okunamadi ($ad): $_"; continue }
+            try { $okuma = Read-PanelKuyrukDosyasi $dosya.Yol $offset $sonId } catch { Write-Log "! Panel kuyrugu okunamadi ($ad): $_"; continue }
             if (-not $okuma.Degisti) { continue }
+            $dosyaTamam = $true
             foreach ($kalem in @($okuma.Isler)) {
                 $is = $kalem.Is
-                if ($is -and $is.id) {
+                if ($is -and $is.id -and (Test-PanelIslendi $is.id)) {
+                    Write-Log "  Panel islemi atlandi (daha once islendi): $($is.op) $($is.id)"
+                } elseif ($is -and $is.id) {
                     $sonuc = $null
                     try {
                         $sonuc = Invoke-PanelIslem $is
@@ -1895,17 +1979,32 @@ function Process-PanelKuyrugu {
                         }
                     }
                     Write-Log "  Panel islemi: $($is.op) [$($is.sayfa)] $($is.kullanici) -> $($sonuc.durum) $($sonuc.mesaj)"
-                    try {
-                        Write-JsonSatir $PANEL_SONUC_DOSYA ([ordered]@{ id = [string]$is.id; durum = [string]$sonuc.durum; mesaj = [string]$sonuc.mesaj; satir = $sonuc.satir; op = [string]$is.op; zaman = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') })
-                    } catch { Write-Log "! Panel sonucu yazilamadi: $_" }
+                    # Sonuc satiri yazilmadan is "islendi" sayilmaz; OneDrive dosyayi kisa sure kilitlerse birkac kez denenir.
+                    $yazildi = $false
+                    for ($deneme = 1; $deneme -le 5 -and -not $yazildi; $deneme++) {
+                        try {
+                            Write-JsonSatir $PANEL_SONUC_DOSYA ([ordered]@{ id = [string]$is.id; durum = [string]$sonuc.durum; mesaj = [string]$sonuc.mesaj; satir = $sonuc.satir; op = [string]$is.op; zaman = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') })
+                            $yazildi = $true
+                        } catch { Start-Sleep -Milliseconds 300 }
+                    }
+                    if (-not $yazildi) {
+                        # Bu is bir sonraki turda yeniden denenir (offset ilerletilmez); KT/duzenle tekrarina dayanikli.
+                        Write-Log "! Panel sonucu yazilamadi ($($is.op) $($is.id)); sonraki turda tekrar denenecek"
+                        $dosyaTamam = $false
+                        break
+                    }
+                    Add-PanelIslenen $is.id
                 }
-                # Her kalemden sonra offset: bot kesilirse en fazla 1 islem tekrar denenir (KT/duzenle tekrarina dayanikli).
-                $offsetler[$ad] = [int64]$kalem.SonrakiOffset
+                # Her kalemden sonra offset + son islenen id (parmak izi)
+                $offsetler[$ad] = @{ ofs = [int64]$kalem.SonrakiOffset; son_id = $(if ($is -and $is.id) { [string]$is.id } else { $sonId }) }
+                if ($is -and $is.id) { $sonId = [string]$is.id }
                 Set-PanelOffsetler $offsetler
             }
-            # Okunan tum tam satirlar (bozuk/bos olanlar dahil) gecildi; ayni satir tekrar tekrar okunmasin.
-            $offsetler[$ad] = [int64]$okuma.SonOffset
-            Set-PanelOffsetler $offsetler
+            if ($dosyaTamam) {
+                # Okunan tum tam satirlar (bozuk/bos olanlar dahil) gecildi; ayni satir tekrar tekrar okunmasin.
+                $offsetler[$ad] = @{ ofs = [int64]$okuma.SonOffset; son_id = $sonId }
+                Set-PanelOffsetler $offsetler
+            }
         }
     } catch {
         Write-Log "! Panel kuyrugu islenemedi: $_"

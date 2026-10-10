@@ -4,9 +4,13 @@
 <div class="kart dar">
   <h2>İlk süper admin</h2>
   <p>Bot klasörü: <code>{{ bot_klasor }}</code><br>Henüz panel kullanıcısı yok. Süper admin hesabını oluşturun; diğer kullanıcıları sonra "Kullanıcılar" sayfasından açarsınız. Bu kullanıcı listesi bot klasöründe <code>panel_kullanicilar.json</code> olarak tutulur ve OneDrive ile tüm bilgisayarlarda geçerli olur.</p>
+  {% if bekle %}
+  <div class="uyari-serit" style="margin-bottom:12px;border-radius:8px">Bu klasörde panel daha önce kullanılmış ama <code>{{ dosya }}</code> bu bilgisayarda henüz yok. Büyük olasılıkla OneDrive kullanıcı dosyasını henüz getirmedi: <b>birkaç dakika bekleyip sayfayı yenileyin</b>. Yeni bir süper admin oluşturmak dosyayı <u>sıfırlar</u>; bunu yalnızca bot sahibi, botun admin şifresini girerek yapabilir.</div>
+  {% endif %}
   {% if hata %}<div class="hata">{{ hata }}</div>{% endif %}
   <form method="post" autocomplete="off">
     <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if bekle %}<label>Bot admin şifresi (config.json içindeki ADMIN_PASSWORD)<input name="bot_admin_sifre" type="password"></label>{% endif %}
     <label>Kullanıcı adı<input name="kullanici" required autofocus autocapitalize="off" pattern="[A-Za-z0-9_.]+"></label>
     <label>Görünen ad<input name="ad"></label>
     <label>Şifre (en az 8 karakter)<input name="sifre" type="password" minlength="8" required></label>

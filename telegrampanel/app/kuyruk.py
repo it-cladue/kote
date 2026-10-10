@@ -46,33 +46,59 @@ def ekle(ayar, op, sayfa, link, parmak, deger=None, kullanici=None, anahtar=None
         raise IOError(f"kuyruk dosyasina yazilamadi ({y}): {son}")
 
 
-def sonuclari_oku(ayar, offset):
-    """offset'ten itibaren yeni sonuc satirlari -> (liste, yeni_offset)"""
+def _offset_uyumlu(f, offset, son_id):
+    """offset'ten hemen onceki satirin id'si son_id mi? (dosya yeniden olusturulduysa degildir -> bastan oku)"""
+    if offset <= 0 or not son_id:
+        return True
+    bas = max(0, offset - 65536)
+    f.seek(bas)
+    veri = f.read(offset - bas)
+    if not veri.endswith(b"\n"):
+        return False
+    for satir in reversed(veri.decode("utf-8", errors="replace").splitlines()):
+        satir = satir.strip().lstrip("\ufeff")
+        if not satir:
+            continue
+        try:
+            d = json.loads(satir)
+        except Exception:
+            continue   # bozuk satir: geriye devam
+        if d.get("id"):
+            return str(d["id"]) == str(son_id)
+    return True
+
+
+def sonuclari_oku(ayar, offset, son_id=None):
+    """offset'ten itibaren yeni sonuc satirlari -> (liste, yeni_offset, yeni_son_id).
+    Dosya (OneDrive geri yukleme vb.) ayni adla yeniden olusturulduysa parmak izi uymaz, bastan okunur (sonuclar tekrar islenebilir; zararsiz)."""
     yol = sonuc_yolu(ayar)
     if not os.path.exists(yol):
-        return [], offset
+        return [], offset, son_id
     sonuclar = []
     with open(yol, "rb") as f:
         f.seek(0, 2)
         n = f.tell()
-        if offset > n:
-            offset = 0
+        if offset > n or not _offset_uyumlu(f, offset, son_id):
+            offset, son_id = 0, None
         f.seek(offset)
         veri = f.read()
     # satir sonunda kesilmis olabilir: son tam satira kadar al
     son_nl = veri.rfind(b"\n")
     if son_nl < 0:
-        return [], offset
+        return [], offset, son_id
     yeni_offset = offset + son_nl + 1
     for ln in veri[:son_nl].decode("utf-8", errors="replace").splitlines():
         ln = ln.strip().lstrip("\ufeff")
         if not ln:
             continue
         try:
-            sonuclar.append(json.loads(ln))
+            d = json.loads(ln)
+            sonuclar.append(d)
+            if d.get("id"):
+                son_id = str(d["id"])
         except Exception:
             pass
-    return sonuclar, yeni_offset
+    return sonuclar, yeni_offset, son_id
 
 
 def bekleyen_sayisi(conn):

@@ -193,7 +193,7 @@ def metin_rengi(hex_renk):
 
 
 def url_degistir(**kw):
-    """Mevcut sorgu parametrelerini koruyarak bazilarini degistir (sayfa numarasi sifirlanir)."""
+    """Mevcut sorgu parametrelerini koruyarak bazilarini degistir (sayfa numarasi, s= verilmediyse sifirlanir)."""
     a = request.args.to_dict(flat=False)
     a.pop("s", None)
     for k, v in kw.items():
@@ -292,17 +292,27 @@ def kurulum():
     return render_template("kurulum.html", adaylar=bot_klasoru_adaylari(AYAR.get("BOT_KLASOR")), mevcut=AYAR.get("BOT_KLASOR") or "", hata=hata, excel_adi=EXCEL_ADI, veri_kok=VERI_KOK, ayar_yol=AYAR_YOL)
 
 
+def kullanici_adi_gecerli(ad):
+    return bool(ad) and len(ad) <= 40 and ad.replace("_", "").replace(".", "").isalnum()
+
+
 @app.route("/kurulum/admin", methods=["GET", "POST"])
 def kurulum_admin():
     if not bot_klasoru_mu(AYAR.get("BOT_KLASOR")):
         return redirect(url_for("kurulum"))
     if kullanicilar.var_mi(AYAR):
         return redirect(url_for("giris"))
+    # Kullanici dosyasi yok ama klasorde panel daha once kullanilmis: buyuk olasilikla OneDrive dosyayi henuz
+    # getirmedi (ya da biri sildi). Bot bilgisayari degilse yeni "ilk admin" olusturulmaz; botun admin sifresiyle
+    # (config.json ADMIN_PASSWORD) acilabilir. Boylece iki bilgisayarin ayri ayri ilk admin yaratmasi onlenir.
+    bekle = kullanicilar.once_kullanilmis(AYAR) and not bot_yonetim.yerel_bot_sureci()
     hata = None
     if request.method == "POST":
         ad = (request.form.get("kullanici") or "").strip().lower()
         s1, s2 = request.form.get("sifre") or "", request.form.get("sifre2") or ""
-        if not ad or not ad.replace("_", "").replace(".", "").isalnum():
+        if bekle and not bot_yonetim.admin_sifresi_dogru(AYAR, request.form.get("bot_admin_sifre")):
+            hata = "Bot admin sifresi hatali. Kullanici dosyasi OneDrive ile gelene kadar bekleyin ya da botun ADMIN_PASSWORD degerini girin."
+        elif not kullanici_adi_gecerli(ad):
             hata = "Kullanici adi harf/rakam olmali."
         elif len(s1) < 8:
             hata = "Sifre en az 8 karakter olmali."
@@ -314,7 +324,7 @@ def kurulum_admin():
             db.denetim_yaz(baglanti(), ad, "ilk_admin", ip=ip())
             flash("Super admin olusturuldu. Simdi giris yapin.")
             return redirect(url_for("giris"))
-    return render_template("kurulum_admin.html", hata=hata, bot_klasor=AYAR["BOT_KLASOR"])
+    return render_template("kurulum_admin.html", hata=hata, bot_klasor=AYAR["BOT_KLASOR"], bekle=bekle, dosya=kullanicilar.yol(AYAR))
 
 
 # ==================== giris ====================
@@ -616,6 +626,8 @@ def yonetim_kullanicilar():
             if islem == "ekle":
                 ad = (request.form.get("kullanici") or "").strip().lower()
                 yk = (request.form.get("yetki") or "").strip()
+                if not kullanici_adi_gecerli(ad):
+                    raise ValueError("Kullanici adi harf/rakam olmali (en fazla 40 karakter).")
                 sifre = request.form.get("sifre") or _rastgele_sifre()
                 kullanicilar.ekle(AYAR, ad, yk, sifre, gorunen_ad=request.form.get("ad") or ad, olusturan=g.k["kullanici_adi"])
                 db.denetim_yaz(c, g.k["kullanici_adi"], "kullanici_ekle", yeni=f"{ad} [{yk}]", ip=ip())

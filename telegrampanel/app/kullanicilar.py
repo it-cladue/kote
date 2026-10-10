@@ -43,11 +43,49 @@ def yukle(ayar):
                 d = json.load(f)
             if not (isinstance(d, dict) and isinstance(d.get("kullanicilar"), list)):
                 d = {"surum": 1, "kullanicilar": []}
+            d = _catisma_kopyalarini_birlestir(ayar, d)
             _onbellek["imza"], _onbellek["veri"] = imza, copy.deepcopy(d)
             return d
         except (PermissionError, OSError, json.JSONDecodeError):
             time.sleep(0.3)
     return {"surum": 1, "kullanicilar": []}
+
+
+def _catisma_kopyalarini_birlestir(ayar, d):
+    """OneDrive iki bilgisayardan ayni anda yazilinca 'panel_kullanicilar-<PC>.json' kopyasi birakir.
+    Kopyalardaki kullanicilar kaybolmasin: kullanici adina gore birlestir, her kullanicinin en yeni 'guncelleme'si kazanir."""
+    import glob
+    kok = ayar["BOT_KLASOR"]
+    kopyalar = [k for k in glob.glob(os.path.join(kok, "panel_kullanicilar*.json")) if os.path.basename(k).lower() != DOSYA_ADI and not k.endswith(".tmp")]
+    if not kopyalar:
+        return d
+    mevcut = {(u.get("kullanici_adi") or "").lower(): u for u in d["kullanicilar"]}
+    degisti = False
+    for k in kopyalar:
+        try:
+            with open(k, encoding="utf-8-sig") as f:
+                dk = json.load(f)
+            for u in dk.get("kullanicilar", []):
+                ad = (u.get("kullanici_adi") or "").lower()
+                if not ad:
+                    continue
+                if ad not in mevcut or (u.get("guncelleme") or "") > (mevcut[ad].get("guncelleme") or ""):
+                    mevcut[ad] = u
+                    degisti = True
+        except Exception:
+            continue
+    if degisti:
+        d["kullanicilar"] = list(mevcut.values())
+    return d
+
+
+def once_kullanilmis(ayar):
+    """Bu bot klasorunde panel daha once kurulmus mu (kullanici dosyasi OneDrive'dan henuz gelmemis olabilir)?"""
+    kok = ayar["BOT_KLASOR"]
+    for ad in ("panel_kuyruk", "panel_kuyruk_sonuc.jsonl", "panel_kuyruk_islenen.txt", "panel_kuyruk_offset.json", "heartbeat.txt", "kayitlar.jsonl"):
+        if os.path.exists(os.path.join(kok, ad)):
+            return True
+    return False
 
 
 def kaydet(ayar, veri):
@@ -93,8 +131,9 @@ def ekle(ayar, ad, yetki, sifre, gorunen_ad=None, olusturan=None):
         veri = yukle(ayar)
         if _bul(veri, ad):
             raise ValueError("Bu kullanici adi zaten var.")
+        simdi = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         veri["kullanicilar"].append({"kullanici_adi": ad, "ad": gorunen_ad or ad, "sifre_hash": generate_password_hash(sifre), "yetki": yetki,
-                                     "aktif": True, "sifre_degistir": True, "olusturma": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "olusturan": olusturan or ""})
+                                     "aktif": True, "sifre_degistir": True, "olusturma": simdi, "guncelleme": simdi, "olusturan": olusturan or ""})
         kaydet(ayar, veri)
 
 
@@ -108,6 +147,7 @@ def guncelle(ayar, ad, **alanlar):
         if "sifre" in alanlar:
             u["sifre_hash"] = generate_password_hash(alanlar.pop("sifre"))
         u.update(alanlar)
+        u["guncelleme"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         kaydet(ayar, veri)
         return u
 

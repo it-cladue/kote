@@ -16,7 +16,7 @@
 
 <div class="buton-satir">
   {% macro islem_btn(islem, etiket, sinif='', onay='') -%}
-  <form method="post" class="satir-form" {% if onay %}onsubmit="return confirm('{{ onay }}')"{% endif %}>
+  <form method="post" class="satir-form" {% if onay %}data-onay="{{ onay }}"{% endif %}>
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="{{ islem }}">
     <button class="btn {{ sinif }}">{{ etiket }}</button>
   </form>
@@ -90,7 +90,7 @@
     <tbody>
     {% for kat in kategoriler %}
     <tr><td><code>{{ kat.code }}</code></td><td>{{ kat.label }}</td><td>{{ kat.mode }}</td>
-      <td><form method="post" class="satir-form" onsubmit="return confirm('{{ kat.code }} kategorisi silinsin mi?')"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="kategori_sil"><input type="hidden" name="code" value="{{ kat.code }}"><button class="btn kucuk tehlike">Sil</button></form></td></tr>
+      <td><form method="post" class="satir-form" data-onay="{{ kat.code }} kategorisi silinsin mi?"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="kategori_sil"><input type="hidden" name="code" value="{{ kat.code }}"><button class="btn kucuk tehlike">Sil</button></form></td></tr>
     {% endfor %}
     </tbody>
   </table>

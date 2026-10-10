@@ -8,7 +8,7 @@ Kurallar:
   - Excel'de artik gorunmeyen anahtar silinmez, excel_durum='silinmis' olur (elle silinmis olabilir).
 """
 import os, json, time, threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from . import excel_oku, log_oku, kuyruk, db
 
 _kilit = threading.Lock()
@@ -42,6 +42,14 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False):
             return rapor
         kopya, uyari = excel_oku.kopyala(ayar["EXCEL"], onbellek_klasor)
         rapor["uyari"] = uyari
+        # Kaynak Excel'in yazilma zamani (OneDrive bot bilgisayarinin saatini korur). Bot bir panel islemini
+        # uyguladiktan sonra sonuc dosyasi (kucuk) Excel'den (buyuk) once gelir; o arada eski kopya panelin
+        # degisikligini ezmesin: panel_uygulama'dan eski kopyada o kaydin alanlarina dokunulmaz.
+        try:
+            excel_zaman = datetime.fromtimestamp(os.path.getmtime(ayar["EXCEL"]))
+        except OSError:
+            excel_zaman = datetime.now()
+        korunan = set()
         sayfalar = excel_oku.oku(kopya, ayar.get("SUTUN_HARITASI") or {})
         # ekleyen eslemesi
         bot_kl = ayar["BOT_KLASOR"]
@@ -82,15 +90,21 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False):
                         guncel.update({"ekleyen_id": ek["ekleyen_id"], "ekleyen_ad": ek["ekleyen_ad"], "ekleyen_guven": ek["guven"]})
                     # bekleyen panel islemi varsa, o alanlari Excel'den ezme
                     bekleyen = mevcut["bekleyen_islem"]
-                    if bekleyen == "duzenle":
+                    try:
+                        if mevcut["panel_uygulama"] and excel_zaman < datetime.strptime(mevcut["panel_uygulama"], "%Y-%m-%d %H:%M:%S") - timedelta(seconds=2):
+                            bekleyen = bekleyen or "eski_kopya"   # Excel kopyasi botun uygulamasindan eski
+                            korunan.add(mevcut["id"])
+                    except ValueError:
+                        pass
+                    if bekleyen in ("duzenle", "eski_kopya"):
                         for k in ("kategori", "personel", "uye_id", "ana_uye_id", "tip", "aciklama"):
                             guncel.pop(k, None)
                     if bekleyen in ("kt",):
                         pass  # kt asagida ayri
-                    if bekleyen == "sil" or mevcut["silindi"]:
+                    if bekleyen in ("sil", "eski_kopya") or mevcut["silindi"]:
                         guncel.pop("excel_durum", None)
                     # KT: panelden isaretlendiyse ve bot henuz islemediyse Excel ezmesin
-                    if bekleyen != "kt":
+                    if bekleyen not in ("kt", "eski_kopya"):
                         if mevcut["kt_kaynak"] == "panel" and mevcut["kt"] != s["kt"] and mevcut["kt_zaman"] and (datetime.now() - datetime.strptime(mevcut["kt_zaman"], "%Y-%m-%d %H:%M:%S")).total_seconds() < 600:
                             pass  # 10 dk icinde panelden degisti; Excel daha eski kopya olabilir
                         else:
@@ -110,7 +124,7 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False):
         # Excel'de artik olmayanlar
         if gorulen:
             for r in conn.execute("SELECT id, anahtar, bekleyen_islem FROM kayitlar WHERE excel_durum='var'").fetchall():
-                if r["anahtar"] not in gorulen and r["bekleyen_islem"] != "sil":
+                if r["anahtar"] not in gorulen and r["bekleyen_islem"] != "sil" and r["id"] not in korunan:
                     conn.execute("UPDATE kayitlar SET excel_durum='silinmis', guncelleme=? WHERE id=?", (_simdi(), r["id"]))
                     rapor["silinen"] += 1
         # bot sonuclari
@@ -136,7 +150,8 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False):
 def sonuc_isle(ayar, conn):
     """panel_kuyruk_sonuc.jsonl -> bekleyen islemleri kapat. -> islenen (bu panele ait) sonuc sayisi"""
     offset = int(db.ayar_al(conn, "kuyruk_sonuc_offset", "0") or 0)
-    sonuclar, yeni_offset = kuyruk.sonuclari_oku(ayar, offset)
+    son_id = db.ayar_al(conn, "kuyruk_sonuc_son_id")
+    sonuclar, yeni_offset, yeni_son_id = kuyruk.sonuclari_oku(ayar, offset, son_id)
     islenen = 0
     for s in sonuclar:
         kid = s.get("id")
@@ -150,16 +165,18 @@ def sonuc_isle(ayar, conn):
             continue
         islenen += 1
         if s.get("durum") == "ok":
-            conn.execute("UPDATE kayitlar SET bekleyen_islem=NULL, bekleyen_id=NULL, bekleyen_hata=NULL, excel_satir=COALESCE(?, excel_satir), guncelleme=? WHERE id=?",
-                         (s.get("satir"), _simdi(), r["id"]))
+            uygulama = str(s.get("zaman") or _simdi())[:19]
+            conn.execute("UPDATE kayitlar SET bekleyen_islem=NULL, bekleyen_id=NULL, bekleyen_hata=NULL, excel_satir=COALESCE(?, excel_satir), panel_uygulama=?, guncelleme=? WHERE id=?",
+                         (s.get("satir"), uygulama, _simdi(), r["id"]))
             if r["bekleyen_islem"] == "sil":
                 conn.execute("UPDATE kayitlar SET excel_durum='silinmis' WHERE id=?", (r["id"],))
             if r["bekleyen_islem"] == "geri_al":
                 conn.execute("UPDATE kayitlar SET excel_durum='var' WHERE id=?", (r["id"],))
         else:
             conn.execute("UPDATE kayitlar SET bekleyen_hata=?, guncelleme=? WHERE id=?", (str(s.get("mesaj") or s.get("durum") or "hata")[:500], _simdi(), r["id"]))
-    if yeni_offset != offset:
+    if yeni_offset != offset or yeni_son_id != son_id:
         db.ayar_yaz(conn, "kuyruk_sonuc_offset", yeni_offset)
+        db.ayar_yaz(conn, "kuyruk_sonuc_son_id", yeni_son_id or "")
     # 15 dakikadir bot cevap vermediyse kullaniciya soyle (islem kuyrukta durur; bot acilinca yine uygulanir)
     conn.execute("""UPDATE kayitlar SET bekleyen_hata='bot 15 dakikadir yanit vermedi (bot kapali olabilir); islem kuyrukta bekliyor'
                     WHERE bekleyen_islem IS NOT NULL AND bekleyen_hata IS NULL AND guncelleme < datetime('now','localtime','-15 minutes')""")

@@ -120,7 +120,7 @@ window.Panel = (function () {
       document.getElementById('m-alanlar').innerHTML = alanlar.filter(function (a) { return a[1] !== null && a[1] !== undefined && a[1] !== ''; })
         .map(function (a) { return '<dt>' + esc(a[0]) + '</dt><dd class="' + (a[2] || '') + '">' + esc(a[1]) + '</dd>'; }).join('');
       document.getElementById('m-link').innerHTML = k.dis_link
-        ? 'Link: <a href="' + esc(k.dis_link) + '" target="_blank" rel="noopener">' + esc(k.dis_link) + '</a> <button class="btn kucuk" type="button" onclick="Panel.kopyala(' + JSON.stringify(k.dis_link) + ')">kopyala</button>'
+        ? 'Link: <a href="' + esc(k.dis_link) + '" target="_blank" rel="noopener">' + esc(k.dis_link) + '</a> <button class="btn kucuk" type="button" data-kopyala="' + esc(k.dis_link) + '">kopyala</button>'
         : (k.link ? 'Link alanı: ' + esc(k.link) : '');
 
       var b = [];
@@ -289,6 +289,10 @@ window.Panel = (function () {
     }
     setInterval(yenile, 10000);
   }
+
+  // Satir ici JS kullanilmaz: onay sorulari data-onay, kopyalama data-kopyala ile
+  document.addEventListener('submit', function (ev) { var f = ev.target; if (f && f.getAttribute && f.getAttribute('data-onay') && !confirm(f.getAttribute('data-onay'))) ev.preventDefault(); });
+  document.addEventListener('click', function (ev) { var b = ev.target.closest ? ev.target.closest('[data-kopyala]') : null; if (b) { ev.preventDefault(); kopyala(b.getAttribute('data-kopyala')); } });
 
   return { kayitSayfasi: kayitSayfasi, botSayfasi: botSayfasi, bildirimler: bildirimler, toast: toast, kopyala: kopyala };
 })();

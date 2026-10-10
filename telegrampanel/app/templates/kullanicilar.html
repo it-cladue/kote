@@ -48,7 +48,7 @@
     <td class="nowrap">{{ (u.olusturma or '')[:10] }}{% if u.olusturan %} <small>({{ u.olusturan }})</small>{% endif %}</td>
     <td>{% if u.aktif %}aktif{% else %}<b>pasif</b>{% endif %}{% if u.sifre_degistir %} <small>(geçici şifre)</small>{% endif %}</td>
     <td class="nowrap">
-      <form method="post" class="satir-form" onsubmit="return confirm('{{ u.kullanici_adi }} için yeni geçici şifre üretilsin mi?')">
+      <form method="post" class="satir-form" data-onay="{{ u.kullanici_adi }} için yeni geçici şifre üretilsin mi?">
         <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="sifre"><input type="hidden" name="kullanici_adi" value="{{ u.kullanici_adi }}">
         <button class="btn kucuk">Şifre sıfırla</button>
       </form>

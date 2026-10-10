@@ -189,6 +189,33 @@ def son_log(ayar, n=200, sadece_hata=False):
     return satirlar[-n:]
 
 
+def yerel_bot_sureci():
+    """Bu bilgisayarda telebot.ps1 calisiyor mu? (Windows: Win32_Process). Bot bilgisayarini tanimak icin."""
+    if platform.system() != "Windows":
+        return False
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                              "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object { $_.CommandLine -like '*telebot.ps1*' } | Measure-Object | Select-Object -ExpandProperty Count"],
+                             capture_output=True, text=True, timeout=15)
+        return int((out.stdout or "0").strip() or 0) > 0
+    except Exception:
+        return False
+
+
+def admin_sifresi_dogru(ayar, sifre):
+    """Botun ADMIN_PASSWORD'u (config.json ya da TELEBOT_ADMIN_PASSWORD) ile eslesiyor mu? Ilk-admin yeniden olusturma kapisi."""
+    if not sifre:
+        return False
+    beklenen = os.environ.get("TELEBOT_ADMIN_PASSWORD")
+    if not beklenen:
+        try:
+            with open(_yol(ayar, "config.json"), encoding="utf-8-sig") as f:
+                beklenen = (json.load(f) or {}).get("ADMIN_PASSWORD")
+        except Exception:
+            beklenen = None
+    return bool(beklenen) and str(beklenen) == str(sifre)
+
+
 def bot_calisiyor_mu(ayar):
     """heartbeat.txt (bot yamasi) varsa yasi; yoksa Windows'ta telebot.ps1 sureci var mi"""
     hb = _yol(ayar, "heartbeat.txt")

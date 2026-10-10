@@ -43,9 +43,16 @@ f) Giris yapin. "Kullanicilar" sayfasindan takim adminlerini acin (yetki ornekle
   Bot klasoru otomatik bulunur. Baska bir sey kurmaz.
 - Her bilgisayarda panelin kendi onbellegi (%LOCALAPPDATA%\KanitPaneli) olusur; bot klasorunde
   ise sadece o bilgisayara ait panel_kuyruk\<bilgisayar>.jsonl dosyasi olusur.
+- Yeni bir bilgisayarda "Ilk super admin" ekrani cikarsa ve panel daha once kurulduysa: OneDrive
+  panel_kullanicilar.json dosyasini henuz getirmemistir; birkac dakika bekleyip sayfayi yenileyin.
+  (Bu ekran o durumda botun admin sifresini ister; kullanici listesinin yanlislikla sifirlanmasini onler.)
+- Iki bilgisayar ayni dakikada kullanici degistirirse OneDrive "panel_kullanicilar-<PC>.json" kopyasi
+  birakabilir; panel bu kopyalari okuyup birlestirir, kullanici kaybolmaz.
 
 DIKKAT: Klasoru paylasmak, klasordeki HER SEYI (config.json icindeki bot token'lari dahil)
-paylasmak demektir. Yalnizca guvendiginiz kisilerle paylasin. Daha guvenlisi: token ve sifreleri
+paylasmak demektir. Klasore erisen herkes Excel'i ve panel dosyalarini dogrudan da degistirebilir;
+panelin yetki sistemi "duzgun kullanim" icindir, kotu niyetli bir ortaga karsi koruma degildir.
+Yalnizca guvendiginiz kisilerle paylasin. Daha guvenlisi: token ve sifreleri
 config.json'dan cikarip bot bilgisayarinda TELEBOT_TELEGRAM_TOKEN, TELEBOT_GYAZO_TOKEN,
 TELEBOT_BOT_PASSWORD, TELEBOT_ADMIN_PASSWORD ortam degiskenlerine tasimak (bot bunu destekler),
 sonra config.json'u silmek. Isterseniz bunu birlikte yapariz.
