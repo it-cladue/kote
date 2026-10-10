@@ -8,6 +8,7 @@ from werkzeug.datastructures import MultiDict
 
 from . import db, yetki, excel_oku, ice_aktar, gorsel, kuyruk, bot_yonetim, log_oku
 
+SURUM = "1.1.0"
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AYAR_YOL = os.environ.get("PANEL_AYAR", os.path.join(KOK, "panel_ayar.json"))
 VARSAYILAN_RENK = {"PP": "#A6A6A6", "PA": "#4472C4", "OF": "#FFFF00", "HI": "#FF0000", "VI": "#7030A0", "GA": "#00B050", "BETA": "#FFA500"}

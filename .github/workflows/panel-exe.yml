@@ -1,0 +1,30 @@
+name: panel-exe
+on:
+  workflow_dispatch:
+  push:
+    branches: ["claude/busy-feynman-cibo22"]
+    paths: ["telegrampanel/**", ".github/workflows/panel-exe.yml"]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Paketler
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r telegrampanel/requirements.txt "pyinstaller>=6.10"
+      - name: Exe derle
+        working-directory: telegrampanel
+        run: pyinstaller --noconfirm --clean KanitPaneli.spec
+      - name: Duman testi
+        working-directory: telegrampanel
+        run: |
+          dist\KanitPaneli.exe --surum
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KanitPaneli-exe
+          path: telegrampanel/dist/KanitPaneli.exe
+          if-no-files-found: error
