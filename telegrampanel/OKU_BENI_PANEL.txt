@@ -69,9 +69,11 @@ Isterseniz bunu birlikte yapariz.
 ------------------------------------------------------------------------------
 Bot klasorunu (token'lar, yedekler, arsivler) paylasmak istemiyorsaniz:
 a) OneDrive'da yeni bir klasor acin, ornek: OneDrive - Get Mails\KanitPaneli
-b) Bot klasorundeki config.json'u Not Defteri ile acip en uste su satiri ekleyin (ters boluler CIFT):
-      "PANEL_KLASOR": "C:\\Users\\KULLANICI\\OneDrive - Get Mails\\KanitPaneli",
-   (Ilk satirdaki { isaretinden sonra, diger satirlarin arasina; satir sonundaki virgule dikkat.)
+b) Bot klasorunde (telebot.ps1'in yaninda) Not Defteri ile "panel_klasor.txt" adli bir dosya olusturun ve icine
+   SADECE klasorun yolunu yazin, baska hicbir sey yazmayin:
+      C:\Users\KULLANICI\OneDrive - Get Mails\KanitPaneli
+   (Yolu Dosya Gezgini'nin adres cubugundan kopyalayin. config.json'a DOKUNMAYIN; orada tek bir yanlis karakter
+   botun token'lari okuyamamasina ve Telegram'dan "404 Not Found" hatasina yol acar.)
 c) Botu yeniden baslatin. Bot bir dakika icinde bu klasore kendisi koyar: panel_excel_kopya.xlsx (Excel'in
    panel kopyasi), gorseller ve ekran_goruntuleri kopyalari, onaylilar/engellenenler/kategoriler/kullanicilar/
    oturumlar/bot_log kopyalari, panel_bot_ayarlari.json (token'lar AYIKLANMIS ayarlar), heartbeat.txt.

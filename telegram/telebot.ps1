@@ -55,7 +55,17 @@ $EXCEL_MOD_DOSYA  = [string](Get-ConfigValue "EXCEL_MOD_DOSYA" (Join-Base "excel
 # dosyalari (kuyruk, sonuc, Excel kopyasi, kayitlar.jsonl, heartbeat) o klasorde tutulur ve bot kucuk durum dosyalarini
 # (onaylilar, engellenenler, kategoriler, kullanicilar, oturumlar, bakim bayraklari, bot_log) ile gorselleri oraya kopyalar.
 # Boylece token'larin oldugu bot klasoru paylasilmaz; yalnizca PANEL_KLASOR paylasilir. Yazilmazsa her sey bot klasorundedir.
-$PANEL_KLASOR       = [string](Get-ConfigValue "PANEL_KLASOR" $SCRIPT_DIR)
+# Kolay yol: config.json'a dokunmadan, bot klasorune "panel_klasor.txt" adli bir metin dosyasi koyup icine
+# SADECE paylasim klasorunun yolunu yazin (ornek: C:\Users\Ad\OneDrive - Get Mails\KanitPaneli). Bos/yoksa config, o da yoksa bot klasoru.
+$PANEL_KLASOR       = [string](Get-ConfigValue "PANEL_KLASOR" "")
+try {
+    $pkDosya = Join-Base "panel_klasor.txt"
+    if (Test-Path -LiteralPath $pkDosya) {
+        $pkYol = ([string](Get-Content -LiteralPath $pkDosya -Raw -Encoding UTF8)).Trim().Trim('"').Trim()
+        if ($pkYol) { $PANEL_KLASOR = $pkYol }
+    }
+} catch {}
+if (-not $PANEL_KLASOR) { $PANEL_KLASOR = $SCRIPT_DIR }
 function Join-Panel($f) { return (Join-Path $PANEL_KLASOR $f) }
 $PANEL_KUYRUK_DOSYA = [string](Get-ConfigValue "PANEL_KUYRUK_DOSYA" (Join-Panel "panel_kuyruk.jsonl"))
 $PANEL_SONUC_DOSYA  = [string](Get-ConfigValue "PANEL_SONUC_DOSYA" (Join-Panel "panel_kuyruk_sonuc.jsonl"))
@@ -1640,10 +1650,10 @@ function Update-PanelExcelKopyasi([bool]$zorla = $false) {
 # PANEL_KLASOR'e kopyalar (yalnizca degisenler). Tek klasor modunda (PANEL_KLASOR = bot klasoru) hicbir sey yapmaz.
 function Sync-PanelDurumu([bool]$zorla = $false) {
     try {
+        if (-not (Test-Path -LiteralPath $PANEL_KLASOR)) { New-Item -ItemType Directory -Path $PANEL_KLASOR -Force | Out-Null }
         if ((Resolve-Path -LiteralPath $PANEL_KLASOR -ErrorAction SilentlyContinue).Path -eq (Resolve-Path -LiteralPath $SCRIPT_DIR).Path) { return }
         if (-not $zorla -and ((Get-Date) - $global:PanelSonDurum).TotalSeconds -lt $PANEL_DURUM_SN) { return }
         $global:PanelSonDurum = Get-Date
-        if (-not (Test-Path -LiteralPath $PANEL_KLASOR)) { New-Item -ItemType Directory -Path $PANEL_KLASOR -Force | Out-Null }
         # 1) kucuk durum dosyalari (ayni adla)
         foreach ($yol in @($ONAYLILAR_DOSYA, $ENGELLENEN_DOSYA, $KATEGORI_DOSYA, $KULLANICI_DOSYA, $OTURUM_DOSYA, $BAKIM_DOSYA, $GYAZO_BAKIM_DOSYA, $LOG_DOSYA)) {
             if (-not $yol) { continue }
