@@ -1,14 +1,26 @@
 # -*- coding: utf-8 -*-
 """Panel -> bot is kuyrugu. Panel Excel'e ASLA dogrudan yazmaz; islemi kuyruga ekler,
 bot kendi Excel baglantisiyla uygular ve sonucu panel_kuyruk_sonuc.jsonl'a yazar."""
-import os, json, uuid, threading
+import os, re, json, uuid, socket, getpass, threading
 from datetime import datetime
 
 _kilit = threading.Lock()
 
 
+def istemci_adi(ayar):
+    """Her bilgisayar kendi kuyruk dosyasina yazar (OneDrive'da ayni dosyaya iki kisi yazmasin):
+    panel_kuyruk\<bilgisayar>_<windows kullanicisi>.jsonl"""
+    if ayar.get("ISTEMCI"):
+        return str(ayar["ISTEMCI"])
+    try:
+        ham = f"{socket.gethostname()}_{getpass.getuser()}"
+    except Exception:
+        ham = "panel"
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", ham).strip("_")[:60] or "panel"
+
+
 def kuyruk_yolu(ayar):
-    return os.path.join(ayar["BOT_KLASOR"], "panel_kuyruk.jsonl")
+    return os.path.join(ayar["BOT_KLASOR"], "panel_kuyruk", istemci_adi(ayar) + ".jsonl")
 
 
 def sonuc_yolu(ayar):
@@ -19,9 +31,19 @@ def ekle(ayar, op, sayfa, link, parmak, deger=None, kullanici=None, anahtar=None
     kayit = {"id": uuid.uuid4().hex, "zaman": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "op": op, "sayfa": sayfa,
              "link": link or "", "parmak": parmak or {}, "deger": deger or {}, "kullanici": kullanici or "", "anahtar": anahtar or ""}
     with _kilit:
-        with open(kuyruk_yolu(ayar), "a", encoding="utf-8") as f:
-            f.write(json.dumps(kayit, ensure_ascii=False) + "\n")
-    return kayit["id"]
+        y = kuyruk_yolu(ayar)
+        os.makedirs(os.path.dirname(y), exist_ok=True)
+        son = None
+        for deneme in range(5):
+            try:
+                with open(y, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(kayit, ensure_ascii=False) + "\n")
+                return kayit["id"]
+            except (PermissionError, OSError) as e:
+                son = e
+                import time
+                time.sleep(0.3)
+        raise IOError(f"kuyruk dosyasina yazilamadi ({y}): {son}")
 
 
 def sonuclari_oku(ayar, offset):
@@ -53,10 +75,19 @@ def sonuclari_oku(ayar, offset):
     return sonuclar, yeni_offset
 
 
-def bekleyen_sayisi(ayar):
+def bekleyen_sayisi(conn):
+    """Bu bilgisayardan gonderilip botun henuz cevaplamadigi islem sayisi (kayit + bot islemleri)."""
     try:
-        k = sum(1 for _ in open(kuyruk_yolu(ayar), encoding="utf-8")) if os.path.exists(kuyruk_yolu(ayar)) else 0
-        s = sum(1 for _ in open(sonuc_yolu(ayar), encoding="utf-8")) if os.path.exists(sonuc_yolu(ayar)) else 0
-        return max(0, k - s)
+        a = conn.execute("SELECT COUNT(*) FROM kayitlar WHERE bekleyen_islem IS NOT NULL").fetchone()[0]
+        b = conn.execute("SELECT COUNT(*) FROM islem_sonuclari WHERE durum='bekliyor'").fetchone()[0]
+        return a + b
     except Exception:
         return 0
+
+
+def bot_islemi(ayar, conn, op, deger, kullanici, ozet):
+    """Super adminin bot komutlari da kuyruktan gider; sonucu islem_sonuclari tablosunda izlenir."""
+    qid = ekle(ayar, op, "", "", {}, deger, kullanici, "")
+    conn.execute("INSERT OR REPLACE INTO islem_sonuclari(id,zaman,op,ozet,kullanici,durum) VALUES(?,?,?,?,?,'bekliyor')",
+                 (qid, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), op, ozet, kullanici))
+    return qid

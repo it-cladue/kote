@@ -13,11 +13,21 @@ def _indeks_oku(yol):
         return h
     try:
         with open(yol, encoding="utf-8-sig", newline="") as f:
+            kok = os.path.dirname(yol)
             for r in csv.DictReader(f, delimiter=";"):
                 gid = (r.get("GyazoId") or "").lower()
                 yol_d = r.get("DosyaYolu") or ""
-                if gid and yol_d and os.path.exists(yol_d):
+                if not gid:
+                    continue
+                if yol_d and os.path.exists(yol_d):
                     h[gid] = yol_d
+                    continue
+                # Baska bilgisayarda (OneDrive ile gelen kopya): mutlak yol tutmaz; klasor + proje + dosya adi ile bul
+                ad = r.get("DosyaAdi") or os.path.basename(yol_d.replace("\\", "/"))
+                for aday in (os.path.join(kok, (r.get("Proje") or "").upper(), ad), os.path.join(kok, r.get("Proje") or "", ad), os.path.join(kok, ad)):
+                    if ad and os.path.exists(aday):
+                        h[gid] = aday
+                        break
     except Exception:
         pass
     return h

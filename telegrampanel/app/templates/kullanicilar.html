@@ -2,6 +2,7 @@
 {% block baslik %}Panel kullanıcıları{% endblock %}
 {% block icerik %}
 <h2>Panel kullanıcıları</h2>
+<p class="kucukyazi">Ortak dosya: <code>{{ dosya }}</code> (OneDrive ile tüm bilgisayarlara dağılır; bir kez açılan kullanıcı her yerde geçerlidir.)</p>
 {% if mesaj %}<div class="bilgi">{{ mesaj }}</div>{% endif %}
 
 <div class="iki-kolon">
@@ -31,7 +32,7 @@
 </div>
 
 <table class="tablo">
-  <thead><tr><th>Kullanıcı</th><th>Ad</th><th>Yetki</th><th>Son giriş</th><th>Durum</th><th></th></tr></thead>
+  <thead><tr><th>Kullanıcı</th><th>Ad</th><th>Yetki</th><th>Oluşturma</th><th>Durum</th><th></th></tr></thead>
   <tbody>
   {% for u in kullanicilar %}
   <tr class="{{ 'soluk' if not u.aktif }}">
@@ -39,20 +40,20 @@
     <td>{{ u.ad or '' }}</td>
     <td>
       <form method="post" class="satir-form">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="yetki"><input type="hidden" name="id" value="{{ u.id }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="yetki"><input type="hidden" name="kullanici_adi" value="{{ u.kullanici_adi }}">
         <input name="yetki" value="{{ u.yetki }}" title="{{ u.ozet }}"> <button class="btn kucuk">Kaydet</button>
       </form>
       <div class="kucukyazi">{{ u.ozet }}</div>
     </td>
-    <td class="nowrap">{{ u.son_giris or '-' }}</td>
-    <td>{% if u.aktif %}aktif{% else %}<b>pasif</b>{% endif %}{% if u.sifre_degistir %} <small>(geçici şifre)</small>{% endif %}{% if u.kilit_bitis and u.kilit_bitis > simdi() %} <small class="kirmizi">(kilitli)</small>{% endif %}</td>
+    <td class="nowrap">{{ (u.olusturma or '')[:10] }}{% if u.olusturan %} <small>({{ u.olusturan }})</small>{% endif %}</td>
+    <td>{% if u.aktif %}aktif{% else %}<b>pasif</b>{% endif %}{% if u.sifre_degistir %} <small>(geçici şifre)</small>{% endif %}</td>
     <td class="nowrap">
       <form method="post" class="satir-form" onsubmit="return confirm('{{ u.kullanici_adi }} için yeni geçici şifre üretilsin mi?')">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="sifre"><input type="hidden" name="id" value="{{ u.id }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="sifre"><input type="hidden" name="kullanici_adi" value="{{ u.kullanici_adi }}">
         <button class="btn kucuk">Şifre sıfırla</button>
       </form>
       <form method="post" class="satir-form">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="pasif"><input type="hidden" name="id" value="{{ u.id }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="pasif"><input type="hidden" name="kullanici_adi" value="{{ u.kullanici_adi }}">
         <button class="btn kucuk {{ 'tehlike' if u.aktif }}">{{ 'Pasife al' if u.aktif else 'Aktif et' }}</button>
       </form>
     </td>

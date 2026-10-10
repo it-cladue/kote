@@ -1,41 +1,123 @@
 # -*- coding: utf-8 -*-
-"""Telegram kanit botu - web paneli (Flask). Calistirma: python -m app.panel  (ya da BASLAT.bat)"""
-import os, sys, json, secrets, threading, time, functools, string, random
+"""Telegram kanit botu - web paneli (Flask).
+
+Calistirma: KanitPaneli.exe (cift tik) ya da kaynaktan  python -m app.panel
+Panel her bilgisayarda yerel calisir (127.0.0.1). Bot klasoru OneDrive ile esitlenen klasordur;
+panel oradan Excel'i (kopyalayarak) okur, islemleri panel_kuyruk\\<bilgisayar>.jsonl'a yazar,
+bot uygular. Excel'e yalnizca bot yazar.
+"""
+import os, sys, json, secrets, threading, time, functools, string, random, glob, webbrowser, urllib.request
 from datetime import datetime, timedelta
-from flask import Flask, g, request, session, redirect, url_for, render_template, jsonify, abort, send_file, flash, Response
-from werkzeug.security import generate_password_hash, check_password_hash
+from flask import Flask, g, request, session, redirect, url_for, render_template, jsonify, abort, send_file, flash
 from werkzeug.datastructures import MultiDict
 
-from . import db, yetki, excel_oku, ice_aktar, gorsel, kuyruk, bot_yonetim, log_oku
+from . import db, yetki, excel_oku, ice_aktar, gorsel, kuyruk, bot_yonetim, log_oku, kullanicilar
 
 SURUM = "1.1.0"
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-AYAR_YOL = os.environ.get("PANEL_AYAR", os.path.join(KOK, "panel_ayar.json"))
+DONMUS = bool(getattr(sys, "frozen", False))
+KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))          # kaynak kodu koku
+KAYNAK_KOK = getattr(sys, "_MEIPASS", None) or KOK                            # sablon / statik (exe icinde)
+EXE_KLASOR = os.path.dirname(os.path.abspath(sys.executable)) if DONMUS else KOK
 VARSAYILAN_RENK = {"PP": "#A6A6A6", "PA": "#4472C4", "OF": "#FFFF00", "HI": "#FF0000", "VI": "#7030A0", "GA": "#00B050", "BETA": "#FFA500"}
+EXCEL_ADI = "telegrambot_gyazo.xlsx"
+
+
+def _veri_koku():
+    k = os.environ.get("PANEL_VERI")
+    if not k:
+        if DONMUS:
+            k = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "KanitPaneli")
+        else:
+            k = KOK
+    os.makedirs(k, exist_ok=True)
+    return k
+
+
+VERI_KOK = _veri_koku()
+AYAR_YOL = os.environ.get("PANEL_AYAR") or os.path.join(VERI_KOK, "panel_ayar.json")
+
+
+def bot_klasoru_mu(k):
+    try:
+        return bool(k) and os.path.isfile(os.path.join(k, EXCEL_ADI))
+    except Exception:
+        return False
+
+
+def bot_klasoru_adaylari(mevcut=None):
+    """Exe'nin bulundugu klasor (OneDrive'daki bot klasorune konmussa), ust klasoru ve OneDrive altindaki klasorler."""
+    adaylar = []
+
+    def ekle(k):
+        try:
+            k = os.path.abspath(k)
+        except Exception:
+            return
+        if bot_klasoru_mu(k) and k not in adaylar:
+            adaylar.append(k)
+
+    if mevcut:
+        ekle(mevcut)
+    ekle(EXE_KLASOR)
+    ekle(os.path.dirname(EXE_KLASOR))
+    home = os.path.expanduser("~")
+    kokler = glob.glob(os.path.join(home, "OneDrive*")) + [os.path.join(home, "Desktop"), os.path.join(home, "Documents")]
+    for od in kokler:
+        if not os.path.isdir(od):
+            continue
+        derinlik0 = od.rstrip("\\/").count(os.sep)
+        for root, dirs, files in os.walk(od):
+            if root.count(os.sep) - derinlik0 >= 3:
+                dirs[:] = []
+            if EXCEL_ADI in files:
+                ekle(root)
+                dirs[:] = []
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d.lower() not in ("gorseller", "backups", "ekran_goruntuleri", "telegram_gorseller", "node_modules")]
+    return adaylar
 
 
 def ayar_yukle():
     ham = {}
     if os.path.exists(AYAR_YOL):
-        with open(AYAR_YOL, encoding="utf-8-sig") as f:
-            ham = json.load(f)
-    if not ham.get("GIZLI_ANAHTAR"):
-        # Dosyaya yalnizca kullanicinin yazdigi alanlar + gizli anahtar yazilir; turetilen yollar (EXCEL vb.) yazilmaz,
-        # yoksa BOT_KLASOR sonradan degistirilince eski turetilmis yollar dosyada kalir.
-        ham["GIZLI_ANAHTAR"] = secrets.token_hex(32)
         try:
-            with open(AYAR_YOL, "w", encoding="utf-8") as f:
-                json.dump(ham, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+            with open(AYAR_YOL, encoding="utf-8-sig") as f:
+                ham = json.load(f)
+        except Exception as e:
+            print("panel_ayar.json okunamadi:", e)
+    degisti = False
+    if not ham.get("GIZLI_ANAHTAR"):
+        ham["GIZLI_ANAHTAR"] = secrets.token_hex(32)
+        degisti = True
+    if not bot_klasoru_mu(ham.get("BOT_KLASOR")):
+        adaylar = bot_klasoru_adaylari(ham.get("BOT_KLASOR"))
+        if adaylar:
+            ham["BOT_KLASOR"] = adaylar[0]
+            degisti = True
+    if degisti:
+        ayar_dosyaya_yaz(ham)
+    return ayar_turet(ham)
+
+
+def ayar_dosyaya_yaz(ham):
+    # Dosyaya yalnizca kullanicinin yazdigi alanlar + gizli anahtar yazilir; turetilen yollar (EXCEL vb.) yazilmaz.
+    try:
+        os.makedirs(os.path.dirname(AYAR_YOL), exist_ok=True)
+        with open(AYAR_YOL, "w", encoding="utf-8") as f:
+            json.dump({k: v for k, v in ham.items() if not k.startswith("_t_")}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("panel_ayar.json yazilamadi:", e)
+
+
+def ayar_turet(ham):
     a = dict(ham)
-    a.setdefault("BOT_KLASOR", os.path.dirname(KOK))
-    a.setdefault("EXCEL", os.path.join(a["BOT_KLASOR"], "telegrambot_gyazo.xlsx"))
-    a.setdefault("LOG_DOSYA", os.path.join(a["BOT_KLASOR"], "bot_log.txt"))
-    a.setdefault("GORSEL_KLASOR", os.path.join(a["BOT_KLASOR"], "gorseller"))
-    a.setdefault("DB", os.path.join(KOK, "panel.db"))
-    a.setdefault("ONBELLEK", os.path.join(KOK, "tmp"))
-    a.setdefault("YENILEME_DK", 3)
+    a.setdefault("BOT_KLASOR", "")
+    bk = a["BOT_KLASOR"] or EXE_KLASOR
+    a["EXCEL"] = ham.get("EXCEL") or os.path.join(bk, EXCEL_ADI)
+    a["LOG_DOSYA"] = ham.get("LOG_DOSYA") or os.path.join(bk, "bot_log.txt")
+    a["GORSEL_KLASOR"] = ham.get("GORSEL_KLASOR") or os.path.join(bk, "gorseller")
+    a["DB"] = ham.get("DB") or os.path.join(VERI_KOK, "panel.db")
+    a["ONBELLEK"] = ham.get("ONBELLEK") or os.path.join(VERI_KOK, "tmp")
+    a.setdefault("YENILEME_DK", 2)
     a.setdefault("DINLE", "127.0.0.1")
     a.setdefault("PORT", 8080)
     a.setdefault("PROJE_RENK", VARSAYILAN_RENK)
@@ -48,6 +130,25 @@ AYAR = ayar_yukle()
 _yerel = threading.local()
 
 
+def ayar_degistir(**degisiklik):
+    """Calisirken ayar degistir (kurulum sayfasi): dosyaya yaz, AYAR'i ve gorsel cozucuyu yenile."""
+    ham = {}
+    if os.path.exists(AYAR_YOL):
+        try:
+            with open(AYAR_YOL, encoding="utf-8-sig") as f:
+                ham = json.load(f)
+        except Exception:
+            ham = {}
+    ham["GIZLI_ANAHTAR"] = AYAR.get("GIZLI_ANAHTAR") or ham.get("GIZLI_ANAHTAR") or secrets.token_hex(32)
+    ham.update(degisiklik)
+    ayar_dosyaya_yaz(ham)
+    yeni = ayar_turet(ham)
+    AYAR.clear()
+    AYAR.update(yeni)
+    global COZUCU
+    COZUCU = gorsel.GorselCozucu(AYAR, AYAR["ONBELLEK"])
+
+
 def baglanti():
     c = getattr(_yerel, "conn", None)
     if c is None:
@@ -57,7 +158,7 @@ def baglanti():
 
 
 COZUCU = gorsel.GorselCozucu(AYAR, AYAR["ONBELLEK"])
-app = Flask(__name__, template_folder=os.path.join(KOK, "app", "templates"), static_folder=os.path.join(KOK, "app", "static"))
+app = Flask(__name__, template_folder=os.path.join(KAYNAK_KOK, "app", "templates"), static_folder=os.path.join(KAYNAK_KOK, "app", "static"))
 app.secret_key = AYAR["GIZLI_ANAHTAR"]
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=timedelta(hours=12), MAX_CONTENT_LENGTH=4 * 1024 * 1024)
 if str(AYAR.get("HTTPS", "0")).lower() in ("1", "true"):
@@ -79,26 +180,6 @@ def projeler():
 
 def renk(proje):
     return AYAR["PROJE_RENK"].get((proje or "").upper(), "#999999")
-
-
-def kullanici_yukle():
-    kid = session.get("kid")
-    if not kid:
-        return None
-    r = baglanti().execute("SELECT * FROM panel_kullanicilari WHERE id=? AND aktif=1", (kid,)).fetchone()
-    return dict(r) if r else None
-
-
-@app.before_request
-def _on():
-    g.k = kullanici_yukle()
-    g.yk = yetki.coz(g.k["yetki"]) if g.k else yetki.coz("")
-    if "csrf" not in session:
-        session["csrf"] = secrets.token_hex(16)
-    if request.method == "POST" and request.endpoint not in ("giris",):
-        tok = request.form.get("csrf") or request.headers.get("X-CSRF")
-        if not tok or tok != session.get("csrf"):
-            abort(400, "CSRF")
 
 
 def metin_rengi(hex_renk):
@@ -125,10 +206,43 @@ def url_degistir(**kw):
     return url_for(request.endpoint or "kayitlar", **a)
 
 
+def kullanici_yukle():
+    kad = session.get("kad")
+    if not kad:
+        return None
+    u = kullanicilar.bul(AYAR, kad)
+    if not u or not u.get("aktif", True):
+        return None
+    return u
+
+
+KURULUM_SERBEST = {"kurulum", "kurulum_admin", "static", "saglik", "cikis"}
+
+
+@app.before_request
+def _on():
+    g.k = kullanici_yukle()
+    g.yk = yetki.coz(g.k["yetki"]) if g.k else yetki.coz("")
+    if "csrf" not in session:
+        session["csrf"] = secrets.token_hex(16)
+    if request.method == "POST" and request.endpoint not in ("giris",):
+        tok = request.form.get("csrf") or request.headers.get("X-CSRF")
+        if not tok or tok != session.get("csrf"):
+            abort(400, "CSRF")
+    ep = request.endpoint or ""
+    if ep in KURULUM_SERBEST:
+        return None
+    if not bot_klasoru_mu(AYAR.get("BOT_KLASOR")):
+        return redirect(url_for("kurulum"))
+    if not kullanicilar.var_mi(AYAR):
+        return redirect(url_for("kurulum_admin"))
+    return None
+
+
 @app.context_processor
 def _ctx():
     return {"k": g.get("k"), "yk": g.get("yk"), "renk": renk, "metin_rengi": metin_rengi, "url_degistir": url_degistir, "csrf": session.get("csrf", ""),
-            "projeler": projeler, "izin": lambda p, e: yetki.izin(g.yk, p, e), "AYAR": AYAR, "simdi": simdi}
+            "projeler": projeler, "izin": lambda p, e: yetki.izin(g.yk, p, e), "AYAR": AYAR, "simdi": simdi, "SURUM": SURUM}
 
 
 def giris_gerekli(f):
@@ -159,6 +273,50 @@ def kayit_izin(kayit, eylem):
     return yetki.izin(g.yk, kayit["proje"], eylem)
 
 
+# ==================== kurulum (ilk calisma) ====================
+@app.route("/kurulum", methods=["GET", "POST"])
+def kurulum():
+    gecerli = bot_klasoru_mu(AYAR.get("BOT_KLASOR"))
+    if gecerli and not (g.k and g.yk["admin"]):
+        return redirect(url_for("ana"))
+    hata = None
+    if request.method == "POST":
+        k = (request.form.get("klasor") or "").strip().strip('"')
+        if not bot_klasoru_mu(k):
+            hata = f"Bu klasorde {EXCEL_ADI} bulunamadi: {k or '(bos)'}"
+        else:
+            ayar_degistir(BOT_KLASOR=os.path.abspath(k))
+            threading.Thread(target=_ice_aktar_bir_kez, daemon=True).start()
+            flash("Bot klasoru kaydedildi: " + AYAR["BOT_KLASOR"])
+            return redirect(url_for("kurulum_admin") if not kullanicilar.var_mi(AYAR) else url_for("ana"))
+    return render_template("kurulum.html", adaylar=bot_klasoru_adaylari(AYAR.get("BOT_KLASOR")), mevcut=AYAR.get("BOT_KLASOR") or "", hata=hata, excel_adi=EXCEL_ADI, veri_kok=VERI_KOK, ayar_yol=AYAR_YOL)
+
+
+@app.route("/kurulum/admin", methods=["GET", "POST"])
+def kurulum_admin():
+    if not bot_klasoru_mu(AYAR.get("BOT_KLASOR")):
+        return redirect(url_for("kurulum"))
+    if kullanicilar.var_mi(AYAR):
+        return redirect(url_for("giris"))
+    hata = None
+    if request.method == "POST":
+        ad = (request.form.get("kullanici") or "").strip().lower()
+        s1, s2 = request.form.get("sifre") or "", request.form.get("sifre2") or ""
+        if not ad or not ad.replace("_", "").replace(".", "").isalnum():
+            hata = "Kullanici adi harf/rakam olmali."
+        elif len(s1) < 8:
+            hata = "Sifre en az 8 karakter olmali."
+        elif s1 != s2:
+            hata = "Sifreler ayni degil."
+        else:
+            kullanicilar.ekle(AYAR, ad, "admin", s1, gorunen_ad=request.form.get("ad") or ad, olusturan="kurulum")
+            kullanicilar.guncelle(AYAR, ad, sifre_degistir=False)
+            db.denetim_yaz(baglanti(), ad, "ilk_admin", ip=ip())
+            flash("Super admin olusturuldu. Simdi giris yapin.")
+            return redirect(url_for("giris"))
+    return render_template("kurulum_admin.html", hata=hata, bot_klasor=AYAR["BOT_KLASOR"])
+
+
 # ==================== giris ====================
 @app.route("/giris", methods=["GET", "POST"])
 def giris():
@@ -166,30 +324,23 @@ def giris():
     if request.method == "POST":
         ad = (request.form.get("kullanici") or "").strip().lower()
         sifre = request.form.get("sifre") or ""
+        u, hata = kullanicilar.dogrula(AYAR, ad, sifre)
         c = baglanti()
-        u = c.execute("SELECT * FROM panel_kullanicilari WHERE lower(kullanici_adi)=?", (ad,)).fetchone()
-        kilitli = u and u["kilit_bitis"] and u["kilit_bitis"] > simdi()
-        if u and u["aktif"] and not kilitli and check_password_hash(u["sifre_hash"], sifre):
+        if u:
             session.clear()
             session.permanent = True
-            session["kid"] = u["id"]
+            session["kad"] = u["kullanici_adi"]
             session["csrf"] = secrets.token_hex(16)
-            c.execute("UPDATE panel_kullanicilari SET hatali_giris=0, kilit_bitis=NULL, son_giris=? WHERE id=?", (simdi(), u["id"]))
             db.denetim_yaz(c, u["kullanici_adi"], "giris", ip=ip())
             return redirect(request.args.get("sonraki") or url_for("ana"))
-        hata = "Kullanici adi veya sifre hatali."
-        if u:
-            n = (u["hatali_giris"] or 0) + 1
-            kb = (datetime.now() + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S") if n >= 5 else u["kilit_bitis"]
-            c.execute("UPDATE panel_kullanicilari SET hatali_giris=?, kilit_bitis=? WHERE id=?", (0 if n >= 5 else n, kb, u["id"]))
-            db.denetim_yaz(c, u["kullanici_adi"], "giris_hata", ip=ip())
+        db.denetim_yaz(c, ad, "giris_hata", ip=ip())
         time.sleep(0.8)
     return render_template("giris.html", hata=hata)
 
 
 @app.route("/cikis")
 def cikis():
-    if g.k:
+    if g.get("k"):
         db.denetim_yaz(baglanti(), g.k["kullanici_adi"], "cikis", ip=ip())
     session.clear()
     return redirect(url_for("giris"))
@@ -201,17 +352,16 @@ def sifre_degistir():
     hata = None
     if request.method == "POST":
         eski, yeni, yeni2 = request.form.get("eski", ""), request.form.get("yeni", ""), request.form.get("yeni2", "")
-        c = baglanti()
-        u = c.execute("SELECT * FROM panel_kullanicilari WHERE id=?", (g.k["id"],)).fetchone()
-        if not check_password_hash(u["sifre_hash"], eski):
+        u, _ = kullanicilar.dogrula(AYAR, g.k["kullanici_adi"], eski)
+        if not u:
             hata = "Eski sifre hatali."
         elif len(yeni) < 8:
             hata = "Yeni sifre en az 8 karakter olmali."
         elif yeni != yeni2:
             hata = "Yeni sifreler ayni degil."
         else:
-            c.execute("UPDATE panel_kullanicilari SET sifre_hash=?, sifre_degistir=0 WHERE id=?", (generate_password_hash(yeni), g.k["id"]))
-            db.denetim_yaz(c, g.k["kullanici_adi"], "sifre_degisti", ip=ip())
+            kullanicilar.guncelle(AYAR, g.k["kullanici_adi"], sifre=yeni, sifre_degistir=False)
+            db.denetim_yaz(baglanti(), g.k["kullanici_adi"], "sifre_degisti", ip=ip())
             flash("Sifre degistirildi.")
             return redirect(url_for("ana"))
     return render_template("sifre.html", hata=hata)
@@ -228,8 +378,9 @@ def durum_bilgisi():
     except Exception:
         pass
     return {"son_ice_aktarim": son, "excel_mtime": excel_mtime, "log_son": log_oku.son_satir_zamani(AYAR["LOG_DOSYA"]),
-            "bot": bot_yonetim.bot_calisiyor_mu(AYAR), "kuyruk_bekleyen": kuyruk.bekleyen_sayisi(AYAR),
-            "bekleyen_islem": c.execute("SELECT COUNT(*) FROM kayitlar WHERE bekleyen_islem IS NOT NULL").fetchone()[0]}
+            "bot": bot_yonetim.bot_calisiyor_mu(AYAR), "kuyruk_bekleyen": kuyruk.bekleyen_sayisi(c),
+            "bekleyen_islem": c.execute("SELECT COUNT(*) FROM kayitlar WHERE bekleyen_islem IS NOT NULL").fetchone()[0],
+            "istemci": kuyruk.istemci_adi(AYAR), "bot_klasor": AYAR["BOT_KLASOR"], "surum": SURUM}
 
 
 @app.route("/")
@@ -429,7 +580,7 @@ def _gorsel_yolu(kid, kucuk=False):
 def gorsel_goster(kid):
     yol, d = _gorsel_yolu(kid)
     if not yol:
-        if d.get("link", "").startswith("http"):
+        if (d.get("link") or "").startswith("http"):
             return redirect(d["link"])
         abort(404)
     db.denetim_yaz(baglanti(), g.k["kullanici_adi"], "gorsel_ac", d["proje"], d["anahtar"], ip=ip())
@@ -461,43 +612,41 @@ def yonetim_kullanicilar():
     mesaj = None
     if request.method == "POST":
         islem = request.form.get("islem")
-        if islem == "ekle":
-            ad = (request.form.get("kullanici") or "").strip().lower()
-            yk = (request.form.get("yetki") or "").strip()
-            if not ad or not yk:
-                mesaj = "Kullanici adi ve yetki gerekli."
-            elif c.execute("SELECT 1 FROM panel_kullanicilari WHERE lower(kullanici_adi)=?", (ad,)).fetchone():
-                mesaj = "Bu kullanici adi zaten var."
-            else:
+        try:
+            if islem == "ekle":
+                ad = (request.form.get("kullanici") or "").strip().lower()
+                yk = (request.form.get("yetki") or "").strip()
                 sifre = request.form.get("sifre") or _rastgele_sifre()
-                c.execute("INSERT INTO panel_kullanicilari(kullanici_adi,ad,sifre_hash,yetki,aktif,sifre_degistir,olusturma) VALUES(?,?,?,?,1,1,?)",
-                          (ad, request.form.get("ad") or ad, generate_password_hash(sifre), yk, simdi()))
+                kullanicilar.ekle(AYAR, ad, yk, sifre, gorunen_ad=request.form.get("ad") or ad, olusturan=g.k["kullanici_adi"])
                 db.denetim_yaz(c, g.k["kullanici_adi"], "kullanici_ekle", yeni=f"{ad} [{yk}]", ip=ip())
                 mesaj = f"Kullanici acildi: {ad}  gecici sifre: {sifre}"
-        else:
-            uid = int(request.form.get("id") or 0)
-            u = c.execute("SELECT * FROM panel_kullanicilari WHERE id=?", (uid,)).fetchone()
-            if u:
-                if islem == "yetki":
+            else:
+                ad = (request.form.get("kullanici_adi") or "").strip().lower()
+                u = kullanicilar.bul(AYAR, ad)
+                if not u:
+                    mesaj = "Kullanici bulunamadi."
+                elif islem == "yetki":
                     yk = (request.form.get("yetki") or "").strip()
-                    c.execute("UPDATE panel_kullanicilari SET yetki=? WHERE id=?", (yk, uid))
-                    db.denetim_yaz(c, g.k["kullanici_adi"], "yetki_degisti", eski=f"{u['kullanici_adi']} [{u['yetki']}]", yeni=yk, ip=ip())
+                    kullanicilar.guncelle(AYAR, ad, yetki=yk)
+                    db.denetim_yaz(c, g.k["kullanici_adi"], "yetki_degisti", eski=f"{ad} [{u['yetki']}]", yeni=yk, ip=ip())
                     mesaj = "Yetki guncellendi."
                 elif islem == "sifre":
                     sifre = _rastgele_sifre()
-                    c.execute("UPDATE panel_kullanicilari SET sifre_hash=?, sifre_degistir=1, hatali_giris=0, kilit_bitis=NULL WHERE id=?", (generate_password_hash(sifre), uid))
-                    db.denetim_yaz(c, g.k["kullanici_adi"], "sifre_sifirla", yeni=u["kullanici_adi"], ip=ip())
-                    mesaj = f"{u['kullanici_adi']} icin gecici sifre: {sifre}"
+                    kullanicilar.guncelle(AYAR, ad, sifre=sifre, sifre_degistir=True)
+                    db.denetim_yaz(c, g.k["kullanici_adi"], "sifre_sifirla", yeni=ad, ip=ip())
+                    mesaj = f"{ad} icin gecici sifre: {sifre}"
                 elif islem == "pasif":
-                    yeni = 0 if u["aktif"] else 1
-                    if uid == g.k["id"]:
+                    if ad == g.k["kullanici_adi"]:
                         mesaj = "Kendi hesabinizi pasife alamazsiniz."
                     else:
-                        c.execute("UPDATE panel_kullanicilari SET aktif=? WHERE id=?", (yeni, uid))
-                        db.denetim_yaz(c, g.k["kullanici_adi"], "kullanici_aktif" if yeni else "kullanici_pasif", yeni=u["kullanici_adi"], ip=ip())
+                        yeni = not u.get("aktif", True)
+                        kullanicilar.guncelle(AYAR, ad, aktif=yeni)
+                        db.denetim_yaz(c, g.k["kullanici_adi"], "kullanici_aktif" if yeni else "kullanici_pasif", yeni=ad, ip=ip())
                         mesaj = "Hesap " + ("aktif." if yeni else "pasif.")
-    kullanicilar = [dict(r) | {"ozet": yetki.ozet(r["yetki"])} for r in c.execute("SELECT * FROM panel_kullanicilari ORDER BY kullanici_adi").fetchall()]
-    return render_template("kullanicilar.html", kullanicilar=kullanicilar, mesaj=mesaj, tum_projeler=projeler())
+        except (ValueError, IOError) as e:
+            mesaj = f"Hata: {e}"
+    liste = [dict(u) | {"ozet": yetki.ozet(u.get("yetki", ""))} for u in kullanicilar.hepsi(AYAR)]
+    return render_template("kullanicilar.html", kullanicilar=liste, mesaj=mesaj, tum_projeler=projeler(), dosya=kullanicilar.yol(AYAR))
 
 
 # ==================== yonetim: bot ====================
@@ -510,42 +659,55 @@ def bot_sayfasi():
         islem = request.form.get("islem")
         tg = (request.form.get("tg_id") or "").strip()
         ad = (request.form.get("ad") or "").strip()
+        kim = g.k["kullanici_adi"]
         try:
+            kuyrukta = True
             if islem == "onayla":
-                bot_yonetim.onayla(AYAR, tg, ad or tg); mesaj = f"{tg} onaylandi."
+                bot_yonetim.onayla(AYAR, c, tg, ad or tg, kim)
             elif islem == "onay_kaldir":
-                bot_yonetim.onay_kaldir(AYAR, tg); mesaj = f"{tg} onaylilardan cikarildi."
+                bot_yonetim.onay_kaldir(AYAR, c, tg, kim)
             elif islem == "engelle":
-                bot_yonetim.engelle(AYAR, tg, ad, request.form.get("sebep") or "panel", g.k["kullanici_adi"]); mesaj = f"{tg} engellendi."
+                bot_yonetim.engelle(AYAR, c, tg, ad, request.form.get("sebep") or "panel", kim)
             elif islem == "engel_kaldir":
-                bot_yonetim.engel_kaldir(AYAR, tg); mesaj = f"{tg} engeli kaldirildi."
+                bot_yonetim.engel_kaldir(AYAR, c, tg, kim)
             elif islem == "bakim_ac":
-                bot_yonetim.bakim_modu_ayarla(AYAR, True); mesaj = "Bakim modu ACILDI."
+                bot_yonetim.bakim_modu_ayarla(AYAR, c, True, kim)
             elif islem == "bakim_kapat":
-                bot_yonetim.bakim_modu_ayarla(AYAR, False); mesaj = "Bakim modu kapatildi."
+                bot_yonetim.bakim_modu_ayarla(AYAR, c, False, kim)
             elif islem == "gyazo_bakim_ac":
-                bot_yonetim.gyazo_bakim_ayarla(AYAR, True); mesaj = "Gyazo bakim modu ACILDI (gorseller diske kaydedilir)."
+                bot_yonetim.gyazo_bakim_ayarla(AYAR, c, True, kim)
             elif islem == "gyazo_bakim_kapat":
-                bot_yonetim.gyazo_bakim_ayarla(AYAR, False); mesaj = "Gyazo bakim modu kapatildi (Gyazo acik)."
+                bot_yonetim.gyazo_bakim_ayarla(AYAR, c, False, kim)
             elif islem == "oturum_temizle":
-                bot_yonetim.oturum_temizle(AYAR, tg or None); mesaj = "Oturum temizlendi."
+                bot_yonetim.oturum_temizle(AYAR, c, tg or None, kim)
             elif islem == "kategori_ekle":
-                liste = [k for k in bot_yonetim.kategoriler(AYAR) if k.get("code") != request.form.get("code")]
-                liste.append({"code": (request.form.get("code") or "").strip().lower(), "label": (request.form.get("label") or "").strip(), "mode": request.form.get("mode") or "tek_uye"})
-                bot_yonetim.kategorileri_yaz(AYAR, liste); mesaj = "Kategori kaydedildi."
+                bot_yonetim.kategori_kaydet(AYAR, c, (request.form.get("code") or "").strip().lower(), (request.form.get("label") or "").strip(), request.form.get("mode") or "tek_uye", kim)
             elif islem == "kategori_sil":
-                bot_yonetim.kategorileri_yaz(AYAR, [k for k in bot_yonetim.kategoriler(AYAR) if k.get("code") != request.form.get("code")]); mesaj = "Kategori silindi."
+                bot_yonetim.kategori_sil(AYAR, c, request.form.get("code") or "", kim)
             elif islem == "yedek":
-                hedef, kop = bot_yonetim.yedek_al(AYAR); mesaj = f"Yedek alindi: {hedef} ({len(kop)} dosya)"
+                bot_yonetim.yedek_al(AYAR, c, kim)
             elif islem == "yenile":
-                rapor = ice_aktar.calistir(AYAR, c, AYAR["ONBELLEK"], COZUCU); mesaj = f"Excel yeniden okundu: {rapor.get('sayfalar')} yeni={rapor.get('yeni')} degisen={rapor.get('degisen')} {('HATA: ' + rapor['hata']) if rapor.get('hata') else ''}"
-            db.denetim_yaz(c, g.k["kullanici_adi"], f"bot_{islem}", yeni=f"{tg} {ad}".strip() or None, ip=ip())
+                kuyrukta = False
+                rapor = ice_aktar.calistir(AYAR, c, AYAR["ONBELLEK"], COZUCU)
+                mesaj = f"Excel yeniden okundu: {rapor.get('sayfalar')} yeni={rapor.get('yeni')} degisen={rapor.get('degisen')} {('HATA: ' + rapor['hata']) if rapor.get('hata') else ''}"
+            else:
+                kuyrukta = False
+                mesaj = "Bilinmeyen islem."
+            if kuyrukta:
+                mesaj = "Islem bota iletildi; bot uygulayinca asagidaki 'Son islemler' listesinde 'ok' olur (bot acikken birkac saniye, OneDrive uzerinden 1-2 dakika)."
+            db.denetim_yaz(c, kim, f"bot_{islem}", yeni=f"{tg} {ad}".strip() or None, ip=ip())
         except Exception as e:
             mesaj = f"Hata: {e}"
     return render_template("bot.html", mesaj=mesaj, durum=durum_bilgisi(), tg_kullanicilar=bot_yonetim.telegram_kullanicilari(AYAR),
                            kategoriler=bot_yonetim.kategoriler(AYAR), bakim=bot_yonetim.bakim_modu(AYAR), gyazo_bakim=bot_yonetim.gyazo_bakim(AYAR),
                            oturumlar=bot_yonetim.oturumlar(AYAR), log=bot_yonetim.son_log(AYAR, 150), hatalar=bot_yonetim.son_log(AYAR, 40, True),
-                           cfg=bot_yonetim.config(AYAR))
+                           cfg=bot_yonetim.config(AYAR), islemler=bot_yonetim.son_islemler(c))
+
+
+@app.route("/bot/islemler.json")
+@admin_gerekli
+def bot_islemler_json():
+    return jsonify({"islemler": bot_yonetim.son_islemler(baglanti()), "bekleyen": kuyruk.bekleyen_sayisi(baglanti())})
 
 
 @app.route("/denetim")
@@ -565,7 +727,9 @@ def durum_json():
 
 @app.route("/saglik")
 def saglik():
-    return "OK"
+    resp = app.make_response("OK")
+    resp.headers["X-Kanit-Paneli"] = SURUM
+    return resp
 
 
 @app.errorhandler(403)
@@ -579,60 +743,112 @@ def _404(e):
 
 
 # ==================== arka plan ice aktarim ====================
+def _ice_aktar_bir_kez():
+    try:
+        conn = db.baglan(AYAR["DB"])
+        ice_aktar.calistir(AYAR, conn, AYAR["ONBELLEK"], COZUCU)
+    except Exception as e:
+        print("ice aktarim hatasi:", e)
+
+
 def _arka_plan():
     conn = db.baglan(AYAR["DB"])
     while True:
-        try:
-            ice_aktar.calistir(AYAR, conn, AYAR["ONBELLEK"], COZUCU)
-        except Exception as e:
-            print("ice aktarim hatasi:", e)
-        time.sleep(max(30, int(float(AYAR.get("YENILEME_DK", 3)) * 60)))
+        if bot_klasoru_mu(AYAR.get("BOT_KLASOR")):
+            try:
+                ice_aktar.calistir(AYAR, conn, AYAR["ONBELLEK"], COZUCU)
+            except Exception as e:
+                print("ice aktarim hatasi:", e)
+            time.sleep(max(30, int(float(AYAR.get("YENILEME_DK", 2)) * 60)))
+        else:
+            time.sleep(10)
 
 
 # ==================== komut satiri ====================
 def komut(argv):
-    c = db.baglan(AYAR["DB"])
-    if not argv:
+    if not argv or argv[0] in ("--ac",):
         return False
+    if argv[0] == "--surum":
+        print("KanitPaneli", SURUM)
+        return True
+    if not bot_klasoru_mu(AYAR.get("BOT_KLASOR")):
+        print(f"Bot klasoru bulunamadi ({AYAR.get('BOT_KLASOR') or '-'}). Once paneli acip kurulum sayfasindan klasoru secin ya da {AYAR_YOL} icine BOT_KLASOR yazin.")
+        return True
     if argv[0] == "kullanici-ekle" and len(argv) >= 3:
         ad, yk = argv[1].strip().lower(), argv[2]
         sifre = argv[3] if len(argv) > 3 else _rastgele_sifre()
-        if c.execute("SELECT 1 FROM panel_kullanicilari WHERE lower(kullanici_adi)=?", (ad,)).fetchone():
-            c.execute("UPDATE panel_kullanicilari SET yetki=?, aktif=1 WHERE lower(kullanici_adi)=?", (yk, ad))
+        if kullanicilar.bul(AYAR, ad):
+            kullanicilar.guncelle(AYAR, ad, yetki=yk, aktif=True)
             print(f"Kullanici zaten vardi; yetkisi guncellendi: {ad} [{yk}]")
         else:
-            c.execute("INSERT INTO panel_kullanicilari(kullanici_adi,ad,sifre_hash,yetki,aktif,sifre_degistir,olusturma) VALUES(?,?,?,?,1,1,?)", (ad, ad, generate_password_hash(sifre), yk, simdi()))
+            kullanicilar.ekle(AYAR, ad, yk, sifre, olusturan="komut")
             print(f"Kullanici acildi: {ad}   yetki: {yk}   gecici sifre: {sifre}")
         return True
     if argv[0] == "sifre-sifirla" and len(argv) >= 2:
         ad = argv[1].strip().lower()
         sifre = argv[2] if len(argv) > 2 else _rastgele_sifre()
-        n = c.execute("UPDATE panel_kullanicilari SET sifre_hash=?, sifre_degistir=1, hatali_giris=0, kilit_bitis=NULL, aktif=1 WHERE lower(kullanici_adi)=?", (generate_password_hash(sifre), ad)).rowcount
-        print(f"Yeni gecici sifre ({ad}): {sifre}" if n else f"Kullanici bulunamadi: {ad}")
+        if kullanicilar.bul(AYAR, ad):
+            kullanicilar.guncelle(AYAR, ad, sifre=sifre, sifre_degistir=True, aktif=True)
+            print(f"Yeni gecici sifre ({ad}): {sifre}")
+        else:
+            print(f"Kullanici bulunamadi: {ad}")
         return True
     if argv[0] == "ice-aktar":
+        c = db.baglan(AYAR["DB"])
         r = ice_aktar.calistir(AYAR, c, AYAR["ONBELLEK"], COZUCU)
         print(json.dumps(r, ensure_ascii=False, indent=1))
         return True
     if argv[0] == "kullanicilar":
-        for r in c.execute("SELECT kullanici_adi, yetki, aktif, son_giris FROM panel_kullanicilari ORDER BY 1"):
-            print(f"{r['kullanici_adi']:20} {('aktif' if r['aktif'] else 'PASIF'):6} {r['son_giris'] or '-':20} {r['yetki']}")
+        for u in kullanicilar.hepsi(AYAR):
+            print(f"{u['kullanici_adi']:20} {('aktif' if u.get('aktif', True) else 'PASIF'):6} {u.get('yetki', '')}")
         return True
     return False
+
+
+def panel_calisiyor_mu(port):
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/saglik", timeout=2) as r:
+            return r.headers.get("X-Kanit-Paneli") is not None
+    except Exception:
+        return False
 
 
 def calistir():
     if len(sys.argv) > 1 and komut(sys.argv[1:]):
         return
-    db.baglan(AYAR["DB"])
-    t = threading.Thread(target=_arka_plan, daemon=True)
-    t.start()
-    print(f"Panel: http://{AYAR['DINLE']}:{AYAR['PORT']}/   bot klasoru: {AYAR['BOT_KLASOR']}")
+    port = int(AYAR["PORT"])
+    url = f"http://127.0.0.1:{port}/"
+    if panel_calisiyor_mu(port):
+        print(f"Panel zaten acik: {url}  (tarayici aciliyor)")
+        webbrowser.open(url)
+        return
+    conn = db.baglan(AYAR["DB"])
+    if bot_klasoru_mu(AYAR.get("BOT_KLASOR")):
+        try:
+            n = kullanicilar.sqlite_tasi(AYAR, conn)
+            if n:
+                print(f"{n} kullanici ortak dosyaya tasindi: {kullanicilar.yol(AYAR)}")
+        except Exception as e:
+            print("kullanici tasima hatasi:", e)
+    threading.Thread(target=_arka_plan, daemon=True).start()
+    print("=" * 60)
+    print(f"  KANIT PANELI {SURUM}")
+    print(f"  Adres      : {url}")
+    print(f"  Bot klasoru: {AYAR.get('BOT_KLASOR') or '(bulunamadi - tarayicida secilecek)'}")
+    print(f"  Veri       : {VERI_KOK}")
+    print("  Bu pencere acik kaldigi surece panel calisir. Kapatmak icin pencereyi kapatin.")
+    print("=" * 60)
+    if DONMUS or "--ac" in sys.argv:
+        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     try:
         from waitress import serve
-        serve(app, host=AYAR["DINLE"], port=int(AYAR["PORT"]), threads=8)
+        serve(app, host=AYAR["DINLE"], port=port, threads=8)
     except ImportError:
-        app.run(host=AYAR["DINLE"], port=int(AYAR["PORT"]))
+        app.run(host=AYAR["DINLE"], port=port)
+    except OSError as e:
+        print(f"! Port {port} kullanilamiyor ({e}). Baska bir program kullaniyor olabilir; {AYAR_YOL} icinde PORT degistirin.")
+        if DONMUS:
+            input("Kapatmak icin Enter...")
 
 
 if __name__ == "__main__":

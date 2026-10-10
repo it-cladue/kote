@@ -1,100 +1,113 @@
-KANIT PANELI (web paneli) - KURULUM VE KULLANIM
-================================================
+KANIT PANELI - KURULUM VE KULLANIM (exe + OneDrive)
+===================================================
 
-Bu panel, Telegram kanit botunun Excel'ine yazilan kayitlari tarayicidan gosterir:
-takim adminleri kendi projelerini (OF, PA, GA ...) acar, onay bekleyenleri kucuk resim
-kartlari halinde gorur, karta tiklayinca buyuyen pencerede ONAYLA / DUZENLE / SIL yapar,
-personel koduyla arar. Super admin tum projeleri gorur ve botun admin komutlarini
-(onayla, engelle, bakim modu, gyazo bakimi, kategori, yedek) panelden kullanir.
+Panel, Telegram kanit botunun Excel'ine yazilan kayitlari tarayicida gosterir. Takim adminleri
+kendi projelerini (OF, PA, GA, BETA ...) acar, onay bekleyenleri kucuk resimli kartlar halinde
+gorur, karta tiklayinca acilan pencerede ONAYLA / DUZENLE / SIL yapar, personel koduyla arar.
+Super admin tum projeleri gorur ve botun admin komutlarini (onayla, engelle, bakim modu,
+Gyazo bakimi, kategori, yedek) panelden kullanir.
 
-ONEMLI KURAL: Panel Excel'e kendisi YAZMAZ. Yaptiginiz islem bir kuyruga yazilir,
-Excel'e yazan yine BOT olur (ayni anda iki program Excel'e dokunmasin diye).
-Bu yuzden botun yeni telebot.ps1 ile calisiyor olmasi gerekir. Bot kapaliyken
-panelde yaptiginiz onay/duzenleme "Excel'e yaziliyor..." diye bekler, bot acilinca uygulanir.
-
-
-1) GEREKENLER
--------------
-- Botun calistigi bilgisayar (Excel'in oldugu PC). Panel de oraya kurulur.
-- Python 3.11 veya 3.12: https://www.python.org/downloads/windows/
-  Kurulumda "Add python.exe to PATH" kutusunu ISARETLEYIN.
-- Yeni telebot.ps1 (bu paketteki). Eski dosyanin yerine koyun, botu yeniden baslatin.
-  (Yeni surum eskisiyle ayni calisir; sadece panel kuyrugunu okur ve heartbeat.txt yazar.)
+NASIL CALISIR (ozet)
+- Program tek dosyadir: KanitPaneli.exe. Python ya da kurulum gerekmez.
+- Exe, OneDrive ile paylasilan bot klasorune (telegramkant) konur. Klasoru bilgisayarinda
+  esitlenmis (senkron) olan herkes exe'ye cift tiklayinca panel KENDI bilgisayarinda acilir
+  (tarayicida http://127.0.0.1:8080). Disaridan erisim yoktur, sunucu yoktur.
+- Panel Excel'e KENDISI YAZMAZ. Yaptiginiz islem bot klasorunde panel_kuyruk\<bilgisayar>.jsonl
+  dosyasina yazilir, OneDrive bunu botun bilgisayarina tasir, Excel'e yazan yine BOT olur.
+  Bot acikken bu 1-2 dakika surer (OneDrive esitleme). Panelde kayit "Excel'e yaziliyor..."
+  gorunur, bot uygulayinca kaybolur. Bot kapaliysa islem bekler, bot acilinca uygulanir.
+- Bu yuzden bot bilgisayarinda YENI telebot.ps1 (bu paketteki) calisiyor olmali.
 
 
-2) KURULUM (bir kez)
---------------------
-a) telegrampanel klasorunu C:\telegrampanel gibi OneDrive DISINDA bir yere koyun.
-b) KUR.bat'a cift tiklayin. Paketleri kurar, panel_ayar.json olusturur ve
-   ilk super admin kullanicisini sorar (ornek: admin). Verilen GECICI SIFREYI not edin.
-c) panel_ayar.json dosyasini Not Defteri ile acin, BOT_KLASOR satirini botun klasoru yapin:
-      "BOT_KLASOR": "C:\\Users\\KULLANICI\\OneDrive - Get Mails\\telegramkant"
-   (ters bolu isaretleri CIFT yazilir.)
-d) BASLAT.bat'a cift tiklayin. Tarayicida  http://127.0.0.1:8080  adresini acin.
-e) Ilk giriste Sifre menusunden kendi sifrenizi belirleyin.
+1) ILK KURULUM (bot sahibi, bir kez)
+------------------------------------
+a) Eski telebot.ps1'in yerine bu paketteki telebot.ps1'i koyun, botu yeniden baslatin.
+   (Ayni bot; ek olarak panel kuyrugunu okur, heartbeat.txt ve kayitlar.jsonl yazar.)
+b) KanitPaneli.exe dosyasini bot klasorune (OneDrive - Get Mails\telegramkant) kopyalayin.
+c) Exe'ye cift tiklayin. Windows "Bilgisayariniz korundu" derse: "Daha fazla bilgi" -> "Yine de calistir"
+   (exe imzali degildir; bir kez onaylanir). Siyah bir pencere acilir ve tarayici kendiliginden gelir.
+   Siyah pencere acik kaldigi surece panel calisir; kapatinca panel kapanir.
+d) Ilk ekran: bot klasoru. Exe bot klasorunun icindeyse otomatik bulunur; "Kaydet ve devam et".
+e) Sonraki ekran: ILK SUPER ADMIN. Kullanici adi ve sifre belirleyin. Bu liste bot klasorunde
+   panel_kullanicilar.json dosyasinda tutulur; OneDrive ile herkese gider, herkes ayni listeyi kullanir.
+f) Giris yapin. "Kullanicilar" sayfasindan takim adminlerini acin (yetki ornekleri asagida).
+   Her kullaniciya bir GECICI sifre verilir; ilk giriste kendi sifresini belirler.
 
-Panel bilgisayar acilinca kendiliginden baslasin isterseniz: GOREV_KUR.bat (bir kez).
+
+2) TAKIM ADMINLERI (diger bilgisayarlar)
+----------------------------------------
+- Bot sahibi, OneDrive'daki telegramkant klasorunu bu kisiyle paylasmis ve kisi klasoru
+  OneDrive'ina eklemis olmali (OneDrive web > Paylasilanlar > klasor > "Dosyalarima kisayol ekle"),
+  boylece klasor onun bilgisayarinda da gorunur ve esitlenir.
+- Kisi klasordeki KanitPaneli.exe'ye cift tiklar; tarayici acilir; verilen kullanici adi/sifreyle girer.
+  Bot klasoru otomatik bulunur. Baska bir sey kurmaz.
+- Her bilgisayarda panelin kendi onbellegi (%LOCALAPPDATA%\KanitPaneli) olusur; bot klasorunde
+  ise sadece o bilgisayara ait panel_kuyruk\<bilgisayar>.jsonl dosyasi olusur.
+
+DIKKAT: Klasoru paylasmak, klasordeki HER SEYI (config.json icindeki bot token'lari dahil)
+paylasmak demektir. Yalnizca guvendiginiz kisilerle paylasin. Daha guvenlisi: token ve sifreleri
+config.json'dan cikarip bot bilgisayarinda TELEBOT_TELEGRAM_TOKEN, TELEBOT_GYAZO_TOKEN,
+TELEBOT_BOT_PASSWORD, TELEBOT_ADMIN_PASSWORD ortam degiskenlerine tasimak (bot bunu destekler),
+sonra config.json'u silmek. Isterseniz bunu birlikte yapariz.
 
 
-3) KULLANICI VE YETKI
+3) YETKI KISALTMALARI
 ---------------------
-Panel > Kullanicilar sayfasindan (super admin) ya da KULLANICI_EKLE.bat ile.
-Yetki kisaltmalari:
-   admin         super admin: her sey
-   *             tum projeler, tam yetki (bot yonetimi yok)
-   OF            OF takim admini: bakar, onaylar, duzenler, siler
-   OF:oku        OF'ye sadece bakar (gorseller dahil)
-   OF:oku,kt     OF'ye bakar ve onay (KT) atar
-   OF,PP:oku GA  OF ve PP'ye bakar; GA'da tam yetki (bosluk ile birden cok kural)
+   admin           super admin: her sey
+   *               tum projeler, tam yetki (bot yonetimi yok)
+   OF              OF takim admini: bakar, onaylar, duzenler, siler
+   OF:oku          OF'ye sadece bakar (gorseller dahil)
+   OF:oku,kt       OF'ye bakar ve onay (KT) atar
+   OF,PP:oku GA    OF ve PP'ye bakar; GA'da tam yetki (bosluk ile birden cok kural)
 Eylemler: oku, gorsel, kt, duzenle, sil.
-Sifre unutulursa: SIFRE_SIFIRLA.bat  (yeni gecici sifre uretir).
+Sifre unutulursa: super admin "Kullanicilar" sayfasindan "Sifre sifirla" (yeni gecici sifre).
 
 
 4) EKRANLAR
 -----------
-Ana sayfa    : Proje kartlari; "Onay bekleyen / Onayli / Silinen" sayilari ve butonlari.
-               Ustteki arama kutusu: personel kodu, uye ID veya link.
-Kayitlar     : Filtreler (proje, kategori, ekleyen, tarih araligi), 3 gorunum:
-               Kart (kucuk resim + bilgiler), Galeri (buyuk gorseller), Tablo.
-               Karta tiklayinca sayfa degismez; pencere acilir: buyuk gorsel, bilgiler,
-               Gyazo/OneDrive linki, ONAYLA (KT), ONAYI KALDIR, DUZENLE, SIL, GERI AL.
-               Klavye: Esc kapatir, sol/sag ok onceki/sonraki kayit.
-Gorseller    : Ayni filtrelerle sadece gorsel galerisi (iletilen tum gorseller).
-Bot          : (super admin) Bot canli mi, bakim modu ac/kapat, Gyazo bakimi ac/kapat,
-               Telegram kullanicilarini onayla/engelle, kategoriler, acik oturumlar,
-               yedek al, Excel'i hemen yeniden oku, son hatalar ve log.
+Ana sayfa    : Proje kartlari; "Onay bekleyen / Onayli / Silinen" sayilari. Ustte arama kutusu
+               (personel kodu, uye ID, link).
+Kayitlar     : Filtreler (proje, kategori, ekleyen, tarih araligi), 3 gorunum: Kart, Galeri, Tablo.
+               Karta tiklayinca sayfa degismez; pencere acilir: buyuk gorsel, bilgiler, link,
+               ONAYLA (KT), ONAYI KALDIR, DUZENLE, SIL, GERI AL. Klavye: Esc kapatir, sol/sag ok gezer.
+Gorseller    : Ayni filtrelerle gorsel galerisi.
+Bot          : (super admin) Bot canli mi, bakim modu, Gyazo bakimi, Telegram kullanicilarini
+               onayla/engelle, kategoriler, acik oturumlar, yedek al, Excel'i hemen oku, son log.
+               "Son islemler" listesinde her komutun durumu gorunur: bekliyor -> ok / hata.
 Kullanicilar : (super admin) panel kullanicilari ve yetkileri.
-Denetim      : (super admin) kim ne zaman ne yapti.
+Denetim      : (super admin) bu bilgisayardan kim ne yapti.
 
-Kayit durumlari:
-  "Excel'e yaziliyor..." : panelde yapildi, bot henuz Excel'e islemedi (birkac saniye - bot acikken).
-  "Excel hatasi"         : bot satiri bulamadi (Excel'de elle degistirilmis/silinmis olabilir). Islemi
-                           Excel'de elle kontrol edin.
-  "Excel'de yok"         : satir Excel'den (elle) silinmis; panelde gecmis olarak durur.
+Kayit rozetleri:
+  "Excel'e yaziliyor..." : panelde yapildi, bot henuz uygulamadi (bot acikken 1-2 dk).
+  "Excel hatasi"         : bot satiri bulamadi (Excel'de elle degismis/silinmis olabilir).
+  "Excel'de yok"         : satir Excel'den silinmis; panelde gecmis olarak durur.
+  "bot 15 dakikadir yanit vermedi": bot kapali ya da OneDrive esitlemiyor; islem kuyrukta bekliyor.
 
 
-5) NASIL CALISIR (teknik, merak edene)
--------------------------------------
-- Panel her 3 dakikada bir Excel'in bir KOPYASINI alir ve okur (acik Excel'e dokunmaz).
-  "Excel'i simdi oku" butonu bunu hemen yapar.
-- Kim ekledi bilgisi: bot_log.txt'den (eski kayitlar, tahmini) ve kayitlar.jsonl'dan (yeni
-  surum bot, kesin).
-- Gorseller: gorseller\<PROJE>\ klasorundeki dosyalar ve ekran_goruntuleri\indeks.csv'deki
-  indirilmis Gyazo gorselleri yerelden; digerleri Gyazo'dan bir kez indirilip tmp\gyazo'ya alinir.
-- Islemler: <bot klasoru>\panel_kuyruk.jsonl -> bot uygular -> panel_kuyruk_sonuc.jsonl.
-- Veritabani: telegrampanel\panel.db (SQLite). Silinirse bir sonraki okumada yeniden dolar;
-  sadece panel kullanicilari ve denetim kaydi kaybolur.
-- Disaridan erisim (telefon/baska PC) icin ileride Cloudflare Tunnel ile acilabilir;
-  simdilik panel sadece bu bilgisayardan (127.0.0.1) acilir. Ag icinde acmak icin
-  panel_ayar.json'da "DINLE": "0.0.0.0" yapip Windows guvenlik duvarinda 8080'e izin verin.
+5) DOSYALAR (bot klasorunde panelin kullandiklari)
+--------------------------------------------------
+  panel_kullanicilar.json     panel kullanicilari (sifreler karma/hash olarak)
+  panel_kuyruk\*.jsonl        her bilgisayarin bota gonderdigi islemler (panel yazar, bot okur)
+  panel_kuyruk_sonuc.jsonl    botun cevaplari (bot yazar, paneller okur)
+  panel_kuyruk_offset.json    botun nereye kadar okudugu
+  kayitlar.jsonl              bot: her kaydi kim ekledi (panelde "Ekleyen" kesinlesir)
+  heartbeat.txt               bot her dakika yazar ("Bot: calisiyor" gostergesi)
+Panelin kendi verisi (silinebilir, yeniden olusur): %LOCALAPPDATA%\KanitPaneli
+  panel_ayar.json (bot klasoru yolu, port)  panel.db (Excel'in kopyasi + denetim)  tmp\ (kucuk resimler)
+Bot klasorunu degistirmek icin: panel_ayar.json'u silin ya da super admin olarak /kurulum adresini acin.
 
 
 6) SORUN GIDERME
 ----------------
-- KUR.bat "Python bulunamadi" diyor: Python'u PATH'e ekleyerek kurun, PC'yi yeniden baslatin.
-- Panel acilmiyor: BASLAT.bat penceresindeki hatayi okuyun; en sik sebep panel_ayar.json'da
-  BOT_KLASOR yolunun yanlis olmasi.
+- Exe acilmiyor / hemen kapaniyor: Exe'yi sag tik > Ozellikler > "Engellemeyi kaldir" isaretleyin.
+  Antivirus engelliyorsa izin verin (PyInstaller ile derlenmis Python programi).
+- "Port 8080 kullanilamiyor": baska bir program 8080'i kullaniyor; %LOCALAPPDATA%\KanitPaneli\panel_ayar.json
+  icine "PORT": 8090 ekleyin.
 - Ana sayfada proje yok: Excel ilk okumada; 10 sn sonra yenileyin. Hala yoksa Bot sayfasinda
-  "Excel'i simdi oku" ve ustteki hata mesajina bakin.
-- "Bot: CALISMIYOR": bot kapali ya da eski telebot.ps1 (heartbeat.txt yazmiyor).
+  "Excel'i simdi oku" ve hata mesajina bakin.
+- "Bot: CALISMIYOR": bot kapali, eski telebot.ps1 ya da OneDrive heartbeat.txt'yi esitlemiyor.
+- Islemler "bekliyor"da kaliyor: botun bilgisayarinda OneDrive calisiyor mu? panel_kuyruk klasoru
+  orada gorunuyor mu? Bot logunda "Panel islemi:" satirlari var mi?
 - Gorseller gri "Gyazo" yaziyor: Gyazo o an cevap vermiyor; 1 saat sonra tekrar dener.
+
+Kaynak koddan calistirmak isteyenler icin (Python ile): KUR.bat, BASLAT.bat (bkz. README.md).

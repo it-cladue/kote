@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block baslik %}Kurulum - Kanıt Paneli{% endblock %}
+{% block icerik %}
+<div class="kart dar" style="max-width: 720px">
+  <h2>Kurulum: bot klasörü</h2>
+  <p>Panel, botun klasöründeki <code>{{ excel_adi }}</code> dosyasını ve görselleri okur. OneDrive ile paylaşılan <b>telegramkant</b> klasörünü seçin.
+  {% if adaylar %}Aşağıda bulunan klasörlerden birini tıklayın ya da yolu elle yazın.{% else %}Otomatik bulunamadı; yolu elle yazın (Dosya Gezgini'nde klasöre girip adres çubuğundan kopyalayın).{% endif %}</p>
+  {% if hata %}<div class="hata">{{ hata }}</div>{% endif %}
+  <form method="post" autocomplete="off" id="kurulum-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% for a in adaylar %}
+    <label class="secenek"><input type="radio" name="aday" value="{{ a }}" {{ 'checked' if loop.first }} onchange="document.getElementById('klasor').value=this.value"> <code>{{ a }}</code></label>
+    {% endfor %}
+    <label>Klasör yolu<input id="klasor" name="klasor" value="{{ adaylar[0] if adaylar else mevcut }}" placeholder="C:\Users\...\OneDrive - Get Mails\telegramkant" required></label>
+    <button class="btn birincil">Kaydet ve devam et</button>
+  </form>
+  <p class="kucukyazi">Ayar dosyası: <code>{{ ayar_yol }}</code> · Panel verisi (önbellek, veritabanı): <code>{{ veri_kok }}</code></p>
+</div>
+{% endblock %}

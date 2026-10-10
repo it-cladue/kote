@@ -51,41 +51,58 @@ def engellenenler(ayar):
     return out
 
 
-def onayla(ayar, tg_id, ad, kim="panel"):
+def _op(ayar, conn, op, deger, kim, ozet):
+    from . import kuyruk
+    return kuyruk.bot_islemi(ayar, conn, op, deger, kim, ozet)
+
+
+# ---- yazma islemleri: dogrudan dosyaya DEGIL, bot kuyruguna (bot uygular; OneDrive ile baska PC'den de calisir) ----
+def onayla(ayar, conn, tg_id, ad, kim="panel"):
     tg_id = str(tg_id).strip()
-    yol = _yol(ayar, "onaylilar.txt")
-    satirlar = [s for s in _oku_satirlar(yol) if s.split("|")[0].strip() != tg_id]
-    satirlar.append(f"{tg_id}|{ad}|{datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    _yaz_satirlar(yol, satirlar)
-    engel_kaldir(ayar, tg_id)
-    _deneme_sifirla(ayar, tg_id)
+    return _op(ayar, conn, "bot_onayla", {"tg_id": tg_id, "ad": ad or tg_id}, kim, f"Onayla {tg_id} {ad or ''}".strip())
 
 
-def onay_kaldir(ayar, tg_id):
+def onay_kaldir(ayar, conn, tg_id, kim="panel"):
     tg_id = str(tg_id).strip()
-    yol = _yol(ayar, "onaylilar.txt")
-    _yaz_satirlar(yol, [s for s in _oku_satirlar(yol) if s.split("|")[0].strip() != tg_id])
+    return _op(ayar, conn, "bot_onay_kaldir", {"tg_id": tg_id}, kim, f"Onayi kaldir {tg_id}")
 
 
-def engelle(ayar, tg_id, ad, sebep, kim="panel"):
+def engelle(ayar, conn, tg_id, ad, sebep, kim="panel"):
     tg_id = str(tg_id).strip()
-    yol = _yol(ayar, "engellenenler.txt")
-    satirlar = [s for s in _oku_satirlar(yol) if s.split("|")[0].strip() != tg_id]
-    satirlar.append(f"{tg_id}|{kim}|{datetime.now().strftime('%Y-%m-%d %H:%M')}|{sebep or 'panel'}")
-    _yaz_satirlar(yol, satirlar)
+    return _op(ayar, conn, "bot_engelle", {"tg_id": tg_id, "ad": ad or "", "sebep": sebep or "panel"}, kim, f"Engelle {tg_id} ({sebep or 'panel'})")
 
 
-def engel_kaldir(ayar, tg_id):
+def engel_kaldir(ayar, conn, tg_id, kim="panel"):
     tg_id = str(tg_id).strip()
-    yol = _yol(ayar, "engellenenler.txt")
-    _yaz_satirlar(yol, [s for s in _oku_satirlar(yol) if s.split("|")[0].strip() != tg_id])
-    _deneme_sifirla(ayar, tg_id)
+    return _op(ayar, conn, "bot_engel_kaldir", {"tg_id": tg_id}, kim, f"Engeli kaldir {tg_id}")
 
 
-def _deneme_sifirla(ayar, tg_id):
-    yol = _yol(ayar, "denemeler.txt")
-    if os.path.exists(yol):
-        _yaz_satirlar(yol, [s for s in _oku_satirlar(yol) if s.split("|")[0].strip() != str(tg_id)])
+def bakim_modu_ayarla(ayar, conn, acik, kim="panel"):
+    return _op(ayar, conn, "bot_bakim", {"acik": bool(acik)}, kim, "Bakim modu " + ("AC" if acik else "KAPAT"))
+
+
+def gyazo_bakim_ayarla(ayar, conn, acik, kim="panel"):
+    return _op(ayar, conn, "bot_gyazo_bakim", {"acik": bool(acik)}, kim, "Gyazo bakim " + ("AC" if acik else "KAPAT"))
+
+
+def oturum_temizle(ayar, conn, tg_id=None, kim="panel"):
+    return _op(ayar, conn, "bot_oturum_temizle", {"tg_id": str(tg_id or "")}, kim, f"Oturum temizle {tg_id or '(hepsi)'}")
+
+
+def kategori_kaydet(ayar, conn, code, label, mode, kim="panel"):
+    return _op(ayar, conn, "bot_kategori_ekle", {"code": code, "label": label, "mode": mode}, kim, f"Kategori ekle/guncelle {code}")
+
+
+def kategori_sil(ayar, conn, code, kim="panel"):
+    return _op(ayar, conn, "bot_kategori_sil", {"code": code}, kim, f"Kategori sil {code}")
+
+
+def yedek_al(ayar, conn, kim="panel"):
+    return _op(ayar, conn, "bot_yedek", {}, kim, "Yedek al")
+
+
+def son_islemler(conn, n=30):
+    return [dict(r) for r in conn.execute("SELECT * FROM islem_sonuclari ORDER BY zaman DESC, rowid DESC LIMIT ?", (n,)).fetchall()]
 
 
 def telegram_kullanicilari(ayar):
@@ -121,25 +138,9 @@ def kategoriler(ayar):
         return []
 
 
-def kategorileri_yaz(ayar, liste):
-    yol = _yol(ayar, "kategoriler.json")
-    tmp = yol + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(liste, f, ensure_ascii=False, indent=4)
-    os.replace(tmp, yol)
-
-
 # ---- bakim anahtarlari ----
 def bakim_modu(ayar):
     return os.path.exists(_yol(ayar, "bakim_modu.txt"))
-
-
-def bakim_modu_ayarla(ayar, acik):
-    yol = _yol(ayar, "bakim_modu.txt")
-    if acik:
-        _yaz_satirlar(yol, [datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
-    elif os.path.exists(yol):
-        os.remove(yol)
 
 
 def gyazo_bakim(ayar):
@@ -149,10 +150,6 @@ def gyazo_bakim(ayar):
             return f.read().strip() != "0"
     cfg = config(ayar)
     return str(cfg.get("GYAZO_BAKIM", "0")).strip().lower() not in ("0", "false", "kapali")
-
-
-def gyazo_bakim_ayarla(ayar, acik):
-    _yaz_satirlar(_yol(ayar, "gyazo_bakim.txt"), ["1" if acik else "0"])
 
 
 def config(ayar):
@@ -175,23 +172,6 @@ def oturumlar(ayar):
         return [{"id": k, **{kk: vv for kk, vv in v.items() if kk != "fileId"}} for k, v in d.items() if isinstance(v, dict)]
     except Exception:
         return []
-
-
-def oturum_temizle(ayar, tg_id=None):
-    yol = _yol(ayar, "oturumlar.json")
-    try:
-        with open(yol, encoding="utf-8-sig") as f:
-            d = json.load(f)
-    except Exception:
-        d = {}
-    if tg_id is None:
-        d = {}
-    else:
-        d.pop(str(tg_id), None)
-    tmp = yol + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(d, f, ensure_ascii=False, indent=4)
-    os.replace(tmp, yol)
 
 
 # ---- log / durum / yedek ----
@@ -227,16 +207,3 @@ def bot_calisiyor_mu(ayar):
     return {"kaynak": "bilinmiyor", "yas_sn": None, "canli": None}
 
 
-def yedek_al(ayar):
-    hedef = os.path.join(ayar["BOT_KLASOR"], "backups", datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "_panel")
-    os.makedirs(hedef, exist_ok=True)
-    kopyalanan = []
-    for ad in ("telegrambot_gyazo.xlsx", "bot_log.txt", "kullanicilar.json", "onaylilar.txt", "engellenenler.txt", "denemeler.txt", "oturumlar.json", "kategoriler.json", "telegram_cache.txt", "telegram_offset.txt"):
-        k = _yol(ayar, ad)
-        if os.path.exists(k):
-            try:
-                shutil.copy2(k, os.path.join(hedef, ad))
-                kopyalanan.append(ad)
-            except Exception:
-                pass
-    return hedef, kopyalanan

@@ -161,3 +161,6 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 10px; border-radius: 8px
 .gecmis li { padding: 3px 0; border-bottom: 1px dashed var(--cizgi); }
 .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: #111827; color: #fff; padding: 10px 16px; border-radius: 8px; z-index: 60; box-shadow: 0 6px 20px rgba(0,0,0,.3); }
 .toast.hata { background: var(--kirmizi); }
+
+.secenek { display: block; padding: 6px 8px; border: 1px solid var(--cizgi); border-radius: 6px; margin-bottom: 6px; cursor: pointer; }
+.secenek input { display: inline; width: auto; margin: 0 6px 0 0; }

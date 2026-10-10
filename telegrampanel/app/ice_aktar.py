@@ -123,6 +123,9 @@ def sonuc_isle(ayar, conn):
             continue
         r = conn.execute("SELECT id, bekleyen_islem FROM kayitlar WHERE bekleyen_id=?", (kid,)).fetchone()
         if not r:
+            # bot yonetim islemi (onayla/engelle/bakim ...) sonucu
+            conn.execute("UPDATE islem_sonuclari SET durum=?, mesaj=?, sonuc_zaman=? WHERE id=?",
+                         ("ok" if s.get("durum") == "ok" else "hata", str(s.get("mesaj") or s.get("durum") or "")[:500], _simdi(), kid))
             continue
         if s.get("durum") == "ok":
             conn.execute("UPDATE kayitlar SET bekleyen_islem=NULL, bekleyen_id=NULL, bekleyen_hata=NULL, excel_satir=COALESCE(?, excel_satir), guncelleme=? WHERE id=?",
@@ -138,3 +141,5 @@ def sonuc_isle(ayar, conn):
     # 15 dakikadir bot cevap vermediyse kullaniciya soyle (islem kuyrukta durur; bot acilinca yine uygulanir)
     conn.execute("""UPDATE kayitlar SET bekleyen_hata='bot 15 dakikadir yanit vermedi (bot kapali olabilir); islem kuyrukta bekliyor'
                     WHERE bekleyen_islem IS NOT NULL AND bekleyen_hata IS NULL AND guncelleme < datetime('now','localtime','-15 minutes')""")
+    conn.execute("""UPDATE islem_sonuclari SET mesaj='bot 15 dakikadir yanit vermedi (bot kapali veya OneDrive esitleme bekliyor)'
+                    WHERE durum='bekliyor' AND mesaj IS NULL AND zaman < datetime('now','localtime','-15 minutes')""")

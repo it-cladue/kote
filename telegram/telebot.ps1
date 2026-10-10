@@ -53,7 +53,8 @@ $EXCEL_MOD_DOSYA  = [string](Get-ConfigValue "EXCEL_MOD_DOSYA" (Join-Base "excel
 # Panel kurulu degilse bu blok hicbir sey yapmaz (kuyruk dosyasi yoksa dongu aninda doner).
 $PANEL_KUYRUK_DOSYA = [string](Get-ConfigValue "PANEL_KUYRUK_DOSYA" (Join-Base "panel_kuyruk.jsonl"))
 $PANEL_SONUC_DOSYA  = [string](Get-ConfigValue "PANEL_SONUC_DOSYA" (Join-Base "panel_kuyruk_sonuc.jsonl"))
-$PANEL_OFFSET_DOSYA = [string](Get-ConfigValue "PANEL_OFFSET_DOSYA" (Join-Base "panel_kuyruk_offset.txt"))
+$PANEL_KUYRUK_KLASOR = [string](Get-ConfigValue "PANEL_KUYRUK_KLASOR" (Join-Base "panel_kuyruk"))   # her bilgisayar kendi dosyasina yazar
+$PANEL_OFFSET_DOSYA = [string](Get-ConfigValue "PANEL_OFFSET_DOSYA" (Join-Base "panel_kuyruk_offset.json"))
 $PANEL_KAYIT_DOSYA  = [string](Get-ConfigValue "PANEL_KAYIT_DOSYA" (Join-Base "kayitlar.jsonl"))
 $HEARTBEAT_DOSYA    = [string](Get-ConfigValue "HEARTBEAT_DOSYA" (Join-Base "heartbeat.txt"))
 $PANEL_KUYRUK_SN    = [int](Get-ConfigValue "PANEL_KUYRUK_SN" 5)
@@ -63,16 +64,10 @@ $script:PanelUtf8 = New-Object System.Text.UTF8Encoding $false
 # GORSEL KAYIT: Gyazo yerine gorseli dogrudan diske kaydetme secenegi.
 # Dosya adi = kategori + gonderim tarihi + kullanicinin girdigi bilgiler (personel, uye id, ana id, tur).
 $GORSEL_KLASOR    = [string](Get-ConfigValue "GORSEL_KLASOR" (Join-Base "gorseller"))
-# Gyazo bakim modu: 1 = Gyazo secenegi "sunucu bakimda" der; 0 = Gyazo ACIK (varsayilan, Gyazo duzeldi).
-# Admin komutlariyla degistirilir: /gyazo_bakim_ac ve /gyazo_bakim_kapat (dosya: gyazo_bakim.txt, config'i ezer)
-$GYAZO_BAKIM_VARSAYILAN = [string](Get-ConfigValue "GYAZO_BAKIM" "0")
+# Gyazo bakim modu: 1 = Gyazo secenegi "sunucu bakimda" der (varsayilan; Gyazo'da sorun var).
+# Admin komutlariyla degistirilir: /gyazo_bakim_ac ve /gyazo_bakim_kapat (dosya: gyazo_bakim.txt)
+$GYAZO_BAKIM_VARSAYILAN = [string](Get-ConfigValue "GYAZO_BAKIM" "1")
 $GYAZO_BAKIM_DOSYA = [string](Get-ConfigValue "GYAZO_BAKIM_DOSYA" (Join-Base "gyazo_bakim.txt"))
-# Gyazo secildiginde de gorselin bir kopyasi gorseller\<PROJE>\ altina kaydedilir (1 = evet, varsayilan).
-# Boylece Excel'de Gyazo linki olur, link bir gun olse bile gorsel elde kalir. Kapatmak: "GYAZO_YEREL_KOPYA": "0"
-$GYAZO_YEREL_KOPYA = (@("0","false","hayir","kapali") -notcontains ([string](Get-ConfigValue "GYAZO_YEREL_KOPYA" "1")).Trim().ToLower())
-# Foto gelince "Gyazo linkine donustur / direkt kaydet" secenegi sorulsun mu? 1 = sor (varsayilan),
-# 0 = sorma, dogrudan Gyazo linkine donustur (eski akis: foto -> proje -> kategori -> ...).
-$KAYIT_SECIM_SOR = (@("0","false","hayir","kapali") -notcontains ([string](Get-ConfigValue "KAYIT_SECIM_SOR" "1")).Trim().ToLower())
 # ONEDRIVE / SHAREPOINT WEB LINKI: bot klasoru OneDrive icindeyse Excel'e yerel yol yerine
 # tiklaninca tarayicida acilan web linki yazilir. Ornek:
 #   GORSEL_ONEDRIVE_SITE = https://pipomail-my.sharepoint.com
@@ -533,24 +528,6 @@ function Save-GorselToDisk($fileId, $oturum, $tarih) {
         Write-Log "  Gorsel diske kaydedildi -> $hedef"
         return (Resolve-Path $hedef).Path
     } catch { Write-Log "! Gorsel kaydetme hatasi: $_"; return $null }
-}
-
-# Elde (gecici dosyada) bulunan gorseli gorseller\<PROJE>\ altina girilen bilgilerle adlandirip tasir.
-# Gyazo yolu da bunu kullanir: link Excel'e yazilir, dosya da diske kalir. Tam yolu ya da $null doner.
-function Move-GorselToKlasor($tempFile, $uzanti, $oturum, $tarih) {
-    try {
-        if (-not $uzanti -or $uzanti.Length -gt 5) { $uzanti = ".jpg" }
-        if (-not $tarih) { $tarih = Get-Date }
-        $projeKlasor = Join-Path $GORSEL_KLASOR (Get-DosyaParcasi ($oturum.proje.ToUpper()) 10)
-        if (-not (Test-Path $projeKlasor)) { New-Item -ItemType Directory -Path $projeKlasor -Force | Out-Null }
-        $ad = Get-GorselDosyaAdi $oturum $tarih
-        $hedef = Join-Path $projeKlasor ($ad + $uzanti)
-        $n = 2
-        while (Test-Path $hedef) { $hedef = Join-Path $projeKlasor ("{0}_{1}{2}" -f $ad, $n, $uzanti); $n++ }
-        Move-Item -Path $tempFile -Destination $hedef -Force
-        Write-Log "  Gorsel diske kaydedildi -> $hedef"
-        return (Resolve-Path $hedef).Path
-    } catch { Write-Log "! Gorsel kopyasi kaydedilemedi: $_"; return $null }
 }
 function Set-MaintenanceMode($enabled) {
     if ($enabled) { Set-TextFileAtomic $BAKIM_DOSYA (Get-Date -Format "yyyy-MM-dd HH:mm:ss") }
@@ -1340,7 +1317,7 @@ function Upload-ToGyazo($imagePath) {
     } catch { Write-Log "Gyazo hatasi: $_"; return $null }
 }
 
-function Get-GyazoFromFileId($fileId, $oturum = $null, $tarih = $null) {
+function Get-GyazoFromFileId($fileId) {
     try {
         $fileInfo = Invoke-RestMethod -Uri "https://api.telegram.org/bot$TELEGRAM_TOKEN/getFile?file_id=$fileId" -TimeoutSec 15
         # GUVENLIK: Asiri buyuk dosyalari reddet (varsayilan 8 MB). Telegram file_size byte cinsinden verir.
@@ -1353,11 +1330,6 @@ function Get-GyazoFromFileId($fileId, $oturum = $null, $tarih = $null) {
         Invoke-WebRequest -Uri "https://api.telegram.org/file/bot$TELEGRAM_TOKEN/$($fileInfo.result.file_path)" `
             -OutFile $tempFile -TimeoutSec 30
         $url = Upload-ToGyazo $tempFile
-        # Gyazo basariliysa gorselin bir kopyasini da gorseller\<PROJE>\ altina koy (GYAZO_YEREL_KOPYA).
-        if ($url -and $GYAZO_YEREL_KOPYA -and $oturum -and $oturum.proje) {
-            $uz = [System.IO.Path]::GetExtension([string]$fileInfo.result.file_path)
-            Move-GorselToKlasor $tempFile $uz $oturum $tarih | Out-Null
-        }
         Remove-Item $tempFile -ErrorAction SilentlyContinue
         return $url
     } catch { Write-Log "! Gorsel indirme hatasi: $_"; return $null }
@@ -1646,16 +1618,44 @@ function Write-PanelKayit($userId, $userName, $sayfaAdi, $katKodu, $katEtiket, $
     } catch { Write-Log "! kayitlar.jsonl yazilamadi: $_" }
 }
 
-# Kuyruk dosyasini son okunan bayttan itibaren okur; yalnizca tam satirlari isler.
-# Donus: @{ Isler = @( @{ Is=<json nesnesi>; SonrakiOffset=<bayt> } ... ); Degisti = $true/$false }
-function Read-PanelKuyruk {
-    $bos = @{ Isler = @(); Degisti = $false; SonOffset = [int64]0 }
-    if (-not (Test-Path -LiteralPath $PANEL_KUYRUK_DOSYA)) { return $bos }
-    $offset = [int64]0
+# Offset sozlugu: { "<dosya adi>": <bayt> }  (panel_kuyruk_offset.json). Eski tek dosyali surumun .txt offseti de tasinir.
+function Get-PanelOffsetler {
+    $h = @{}
     try {
-        if (Test-Path -LiteralPath $PANEL_OFFSET_DOSYA) { $offset = [int64](([string](Get-Content -LiteralPath $PANEL_OFFSET_DOSYA -Raw)).Trim()) }
-    } catch { $offset = [int64]0 }
-    $fs = [System.IO.File]::Open($PANEL_KUYRUK_DOSYA, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        if (Test-Path -LiteralPath $PANEL_OFFSET_DOSYA) {
+            $o = (Get-Content -LiteralPath $PANEL_OFFSET_DOSYA -Raw) | ConvertFrom-Json
+            foreach ($p in $o.PSObject.Properties) { $h[[string]$p.Name] = [int64]$p.Value }
+        } else {
+            $eski = Join-Path (Split-Path -Parent $PANEL_OFFSET_DOSYA) "panel_kuyruk_offset.txt"
+            if (Test-Path -LiteralPath $eski) { $h["panel_kuyruk.jsonl"] = [int64](([string](Get-Content -LiteralPath $eski -Raw)).Trim()) }
+        }
+    } catch { $h = @{} }
+    return $h
+}
+
+function Set-PanelOffsetler($h) {
+    $o = [ordered]@{}
+    foreach ($k in ($h.Keys | Sort-Object)) { $o[[string]$k] = [int64]$h[$k] }
+    [System.IO.File]::WriteAllText($PANEL_OFFSET_DOSYA, ($o | ConvertTo-Json), $script:PanelUtf8)
+}
+
+# Okunacak kuyruk dosyalari: eski tek dosya + panel_kuyruk\*.jsonl (bilgisayar basina bir dosya; OneDrive catismasi olmaz)
+function Get-PanelKuyrukDosyalari {
+    $liste = @()
+    if (Test-Path -LiteralPath $PANEL_KUYRUK_DOSYA) { $liste += ,@{ Ad = "panel_kuyruk.jsonl"; Yol = $PANEL_KUYRUK_DOSYA } }
+    if (Test-Path -LiteralPath $PANEL_KUYRUK_KLASOR) {
+        foreach ($f in (Get-ChildItem -LiteralPath $PANEL_KUYRUK_KLASOR -Filter *.jsonl -File | Sort-Object Name)) {
+            $liste += ,@{ Ad = ("panel_kuyruk/" + $f.Name); Yol = $f.FullName }
+        }
+    }
+    return $liste
+}
+
+# Bir kuyruk dosyasini verilen bayttan itibaren okur; yalnizca tam satirlari isler.
+# Donus: @{ Isler = @( @{ Is=<json>; SonrakiOffset=<bayt> } ... ); Degisti; SonOffset }
+function Read-PanelKuyrukDosyasi($yol, [int64]$offset) {
+    $bos = @{ Isler = @(); Degisti = $false; SonOffset = $offset }
+    $fs = [System.IO.File]::Open($yol, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
     try {
         $uzunluk = [int64]$fs.Length
         if ($offset -gt $uzunluk) { $offset = [int64]0 }   # dosya sifirlanmis/kucultulmus
@@ -1675,7 +1675,7 @@ function Read-PanelKuyruk {
         $s = $satir.Trim()
         if (-not $s) { continue }
         try { $isler += ,@{ Is = (ConvertFrom-Json $s); SonrakiOffset = $pos } }
-        catch { Write-Log "! Panel kuyruk satiri okunamadi: $s" }
+        catch { Write-Log "! Panel kuyruk satiri okunamadi ($yol): $s" }
     }
     return @{ Isler = $isler; Degisti = $true; SonOffset = $pos }
 }
@@ -1752,7 +1752,71 @@ function Find-PanelSatir($ws, $link, $parmak, $ipucu) {
     return 0
 }
 
+# Super adminin panelden gonderdigi bot komutlari (dosyalara yine BOT yazar; OneDrive'da iki yazici olmaz).
+function Invoke-PanelBotIslemi($is) {
+    $op = [string]$is.op
+    $d = $is.deger
+    $id = ""
+    try { $id = ([string]$d.tg_id).Trim() } catch { $id = "" }
+    switch ($op) {
+        "bot_onayla" {
+            if (-not $id) { return @{ durum = "hata"; mesaj = "ID bos"; satir = $null } }
+            Clear-KullaniciDurumu $id | Out-Null
+            if (Is-Onayli $id) { return @{ durum = "ok"; mesaj = "zaten onayli (engel/deneme/oturum temizlendi)"; satir = $null } }
+            $ad = [string]$d.ad; if (-not $ad) { $ad = $id }
+            Add-Onayli $id $ad
+            return @{ durum = "ok"; mesaj = "onaylandi"; satir = $null }
+        }
+        "bot_onay_kaldir" {
+            if (-not $id) { return @{ durum = "hata"; mesaj = "ID bos"; satir = $null } }
+            $b = Remove-Onayli $id
+            return @{ durum = "ok"; mesaj = $(if ($b) { "onay kaldirildi" } else { "onay kaydi yoktu" }); satir = $null }
+        }
+        "bot_engelle" {
+            if (-not $id) { return @{ durum = "hata"; mesaj = "ID bos"; satir = $null } }
+            $sebep = [string]$d.sebep; if (-not $sebep) { $sebep = "panel" }
+            Add-Engellenen $id ([string]$d.ad) $sebep
+            return @{ durum = "ok"; mesaj = "engellendi"; satir = $null }
+        }
+        "bot_engel_kaldir" {
+            if (-not $id) { return @{ durum = "hata"; mesaj = "ID bos"; satir = $null } }
+            $b = Clear-KullaniciDurumu $id
+            $bildirim = $false
+            try { $bildirim = Send-EngelKaldirildiBildirim $id } catch { $bildirim = $false }
+            return @{ durum = "ok"; mesaj = ($(if ($b) { "engel kaldirildi" } else { "engel kaydi yoktu; deneme/oturum sifirlandi" }) + $(if ($bildirim) { ", kullaniciya bildirildi" } else { "" })); satir = $null }
+        }
+        "bot_bakim" {
+            Set-MaintenanceMode ([bool]$d.acik)
+            return @{ durum = "ok"; mesaj = $(if ($d.acik) { "bakim modu ACIK" } else { "bakim modu kapali" }); satir = $null }
+        }
+        "bot_gyazo_bakim" {
+            Set-GyazoBakim ([bool]$d.acik)
+            return @{ durum = "ok"; mesaj = $(if ($d.acik) { "gyazo bakim ACIK (diske kayit)" } else { "gyazo acik" }); satir = $null }
+        }
+        "bot_oturum_temizle" {
+            if ($id) { Remove-Oturum $id; return @{ durum = "ok"; mesaj = "oturum silindi: $id"; satir = $null } }
+            Save-Oturumlar @{}
+            return @{ durum = "ok"; mesaj = "tum oturumlar silindi"; satir = $null }
+        }
+        "bot_kategori_ekle" {
+            $hata = Add-OrUpdate-Kategori ([string]$d.code) ([string]$d.label) ([string]$d.mode)
+            if ($hata) { return @{ durum = "hata"; mesaj = [string]$hata; satir = $null } }
+            return @{ durum = "ok"; mesaj = "kategori kaydedildi: $($d.code)"; satir = $null }
+        }
+        "bot_kategori_sil" {
+            $b = Remove-Kategori ([string]$d.code)
+            return @{ durum = $(if ($b) { "ok" } else { "hata" }); mesaj = $(if ($b) { "kategori silindi" } else { "kategori bulunamadi" }); satir = $null }
+        }
+        "bot_yedek" {
+            $y = Invoke-Backup $true
+            return @{ durum = "ok"; mesaj = "yedek alindi: $y"; satir = $null }
+        }
+        default { return @{ durum = "hata"; mesaj = "bilinmeyen bot islemi: $op"; satir = $null } }
+    }
+}
+
 function Invoke-PanelIslem($is) {
+    if (([string]$is.op).StartsWith("bot_")) { return (Invoke-PanelBotIslemi $is) }
     $sayfa = [string]$is.sayfa
     $ws = Get-PanelWorksheet $sayfa
     if (-not $ws) { return @{ durum = "bulunamadi"; mesaj = "Sayfa yok: $sayfa"; satir = $null } }
@@ -1800,38 +1864,49 @@ function Invoke-PanelIslem($is) {
     return @{ durum = "ok"; mesaj = $op; satir = $(if ($op -eq "sil") { $null } else { $satir }) }
 }
 
-# Ana dongude cagrilir: en fazla PANEL_KUYRUK_SN saniyede bir kuyruga bakar, her isi uygular, sonucunu yazar.
+# Ana dongude cagrilir: en fazla PANEL_KUYRUK_SN saniyede bir tum kuyruk dosyalarina bakar, her isi uygular, sonucunu yazar.
 function Process-PanelKuyrugu {
     try {
         if (((Get-Date) - $global:PanelSonKontrol).TotalSeconds -lt $PANEL_KUYRUK_SN) { return }
         $global:PanelSonKontrol = Get-Date
-        $okuma = Read-PanelKuyruk
-        if (-not $okuma.Degisti) { return }
-        foreach ($kalem in @($okuma.Isler)) {
-            $is = $kalem.Is
-            if ($is -and $is.id) {
-                $sonuc = $null
-                try {
-                    $sonuc = Invoke-PanelIslem $is
-                } catch {
-                    $sonuc = @{ durum = "hata"; mesaj = [string]$_; satir = $null }
-                    Write-Log "! Panel islemi hatasi ($($is.op) [$($is.sayfa)]): $_"
-                    if (([string]$_) -match '0x800706BA|0x800706BE|0x80010108|RPC') {
-                        try { Close-Excel } catch {}
-                        Start-Sleep -Seconds 3
-                        try { Open-Excel } catch {}
+        $dosyalar = Get-PanelKuyrukDosyalari
+        if ($dosyalar.Count -eq 0) { return }
+        $offsetler = Get-PanelOffsetler
+        foreach ($dosya in $dosyalar) {
+            $ad = [string]$dosya.Ad
+            $offset = [int64]0
+            if ($offsetler.ContainsKey($ad)) { $offset = [int64]$offsetler[$ad] }
+            $okuma = $null
+            try { $okuma = Read-PanelKuyrukDosyasi $dosya.Yol $offset } catch { Write-Log "! Panel kuyrugu okunamadi ($ad): $_"; continue }
+            if (-not $okuma.Degisti) { continue }
+            foreach ($kalem in @($okuma.Isler)) {
+                $is = $kalem.Is
+                if ($is -and $is.id) {
+                    $sonuc = $null
+                    try {
+                        $sonuc = Invoke-PanelIslem $is
+                    } catch {
+                        $sonuc = @{ durum = "hata"; mesaj = [string]$_; satir = $null }
+                        Write-Log "! Panel islemi hatasi ($($is.op) [$($is.sayfa)]): $_"
+                        if (([string]$_) -match '0x800706BA|0x800706BE|0x80010108|RPC') {
+                            try { Close-Excel } catch {}
+                            Start-Sleep -Seconds 3
+                            try { Open-Excel } catch {}
+                        }
                     }
+                    Write-Log "  Panel islemi: $($is.op) [$($is.sayfa)] $($is.kullanici) -> $($sonuc.durum) $($sonuc.mesaj)"
+                    try {
+                        Write-JsonSatir $PANEL_SONUC_DOSYA ([ordered]@{ id = [string]$is.id; durum = [string]$sonuc.durum; mesaj = [string]$sonuc.mesaj; satir = $sonuc.satir; op = [string]$is.op; zaman = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') })
+                    } catch { Write-Log "! Panel sonucu yazilamadi: $_" }
                 }
-                Write-Log "  Panel islemi: $($is.op) [$($is.sayfa)] $($is.kullanici) -> $($sonuc.durum) $($sonuc.mesaj)"
-                try {
-                    Write-JsonSatir $PANEL_SONUC_DOSYA ([ordered]@{ id = [string]$is.id; durum = [string]$sonuc.durum; mesaj = [string]$sonuc.mesaj; satir = $sonuc.satir; op = [string]$is.op; zaman = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') })
-                } catch { Write-Log "! Panel sonucu yazilamadi: $_" }
+                # Her kalemden sonra offset: bot kesilirse en fazla 1 islem tekrar denenir (KT/duzenle tekrarina dayanikli).
+                $offsetler[$ad] = [int64]$kalem.SonrakiOffset
+                Set-PanelOffsetler $offsetler
             }
-            # Her kalemden sonra offset: bot capraz kesilirse en fazla 1 islem tekrar denenir (KT/duzenle tekrarina dayanikli).
-            [System.IO.File]::WriteAllText($PANEL_OFFSET_DOSYA, [string]$kalem.SonrakiOffset, $script:PanelUtf8)
+            # Okunan tum tam satirlar (bozuk/bos olanlar dahil) gecildi; ayni satir tekrar tekrar okunmasin.
+            $offsetler[$ad] = [int64]$okuma.SonOffset
+            Set-PanelOffsetler $offsetler
         }
-        # Okunan tum tam satirlar (bozuk/bos olanlar dahil) gecildi; ayni satir tekrar tekrar okunmasin.
-        [System.IO.File]::WriteAllText($PANEL_OFFSET_DOSYA, [string]$okuma.SonOffset, $script:PanelUtf8)
     } catch {
         Write-Log "! Panel kuyrugu islenemedi: $_"
     }
@@ -2005,9 +2080,7 @@ function Process-Callback($update) {
                 return
             }
             Edit-Message $chatId $msgId "$(E '23F3') <b>Yukleniyor...</b>" $null
-            $fotoTarih = Get-Date
-            if ($oturum.fotoTarih) { try { $fotoTarih = [DateTimeOffset]::FromUnixTimeSeconds([int64]$oturum.fotoTarih).LocalDateTime } catch {} }
-            $gyazoUrl = Get-GyazoFromFileId $oturum.fileId $oturum $fotoTarih
+            $gyazoUrl = Get-GyazoFromFileId $oturum.fileId
 
             if (-not $gyazoUrl) {
                 Edit-Message $chatId $msgId "$(E '26A0') <b>Gorsel yuklenemedi.</b>`nNe yapmak istersiniz?" (KB-Hata)
@@ -2132,14 +2205,6 @@ function Process-Message($update) {
             }
             Set-Oturum $userId $oturum
             Add-Cache $cacheKey
-            if (-not $KAYIT_SECIM_SOR) {
-                # Secim sorulmaz (KAYIT_SECIM_SOR=0): dogrudan Gyazo linkine donustur (eski akis).
-                $oturum.kayitModu = "gyazo"; $oturum.adim = "proje"
-                Set-Oturum $userId $oturum
-                $yeniMsgId = Send-Message $chatId "<b>Bilgileriniz alindi.</b>`n`n<b>SIMDI SIZDEN BEKLENEN:</b>`n<b>-> Projeyi secin.</b>" (KB-Proje)
-                if ($yeniMsgId) { $oturum.msgId = $yeniMsgId; Set-Oturum $userId $oturum }
-                return
-            }
             # ONCE SECENEK: Gyazo linkine mi donussun, dogrudan dosyaya mi kaydedilsin?
             # Sonraki adimlar (proje -> kategori -> personel -> ID -> ozet -> onay) iki secenekte de aynidir.
             $yeniMsgId = Send-Message $chatId "$(E '1F5BC') <b>Gorsel alindi.</b>`n`n<b>SIMDI SIZDEN BEKLENEN:</b>`n<b>-> Ne yapmak istersiniz?</b>`n`n$(E '1F517') <b>Gyazo linkine donustur</b>: gorsel Gyazo'ya yuklenir, Excel'e link yazilir.`n$(E '1F4BE') <b>Gorseli direkt kaydet</b>: gorsel, girdiginiz bilgilerle (kategori, tarih, ID'ler) adlandirilip bilgisayara kaydedilir." (KB-KayitSecim)
@@ -2355,7 +2420,7 @@ if ($TELEGRAM_TOKEN -eq "BURAYA_TELEGRAM_BOT_TOKEN" -or $GYAZO_TOKEN -eq "BURAYA
 Invoke-Backup $false | Out-Null
 Init-Excel
 if (-not (Test-Path $GORSEL_KLASOR)) { try { New-Item -ItemType Directory -Path $GORSEL_KLASOR -Force | Out-Null } catch {} }
-Write-Log "  Gorsel klasoru: $GORSEL_KLASOR | Gyazo: $(if (Is-GyazoBakim) { 'BAKIMDA' } else { 'ACIK' }) | Gyazo'da yerel kopya: $(if ($GYAZO_YEREL_KOPYA) { 'EVET' } else { 'HAYIR' }) | Kayit secimi sor: $(if ($KAYIT_SECIM_SOR) { 'EVET' } else { 'HAYIR (dogrudan Gyazo)' })"
+Write-Log "  Gorsel klasoru: $GORSEL_KLASOR | Gyazo: $(if (Is-GyazoBakim) { 'BAKIMDA' } else { 'ACIK' })"
 
 Write-Log "========================================"
 Write-Log "  Hazir! Hizli butonlu akis aktif."

@@ -25,10 +25,6 @@ if not exist panel_ayar.json (
   echo.
 )
 echo.
-echo Ilk super admin kullanicisini acalim.
-set /p KADI=Kullanici adi (ornek: admin): 
-if "%KADI%"=="" set KADI=admin
-python -m app.panel kullanici-ekle %KADI% admin
-echo.
 echo Kurulum tamam. BASLAT.bat ile paneli acin; tarayicida http://127.0.0.1:8080
+echo Ilk acilista bot klasoru ve ilk super admin tarayicida sorulur.
 pause

@@ -179,5 +179,30 @@ window.Panel = (function () {
     else { var i = document.createElement('input'); i.value = metin; document.body.appendChild(i); i.select(); document.execCommand('copy'); i.remove(); toast('Kopyalandı'); }
   }
 
-  return { kayitSayfasi: kayitSayfasi, toast: toast, kopyala: kopyala };
+  // ---------------- bot sayfasi: son islemler tablosunu yenile ----------------
+  function botSayfasi() {
+    var tablo = document.getElementById('islemler-tablo');
+    if (!tablo) return;
+    var sonDurum = null;
+    function yenile() {
+      fetch('/bot/islemler.json', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+        if (!d) return;
+        var tb = tablo.querySelector('tbody');
+        var imza = JSON.stringify(d.islemler.map(function (i) { return [i.id, i.durum]; }));
+        if (imza === sonDurum) return;
+        var degisti = sonDurum !== null;
+        sonDurum = imza;
+        tb.innerHTML = d.islemler.length ? d.islemler.map(function (i) {
+          var durum = i.durum === 'ok' ? '<span class="yesil">ok</span>' : i.durum === 'hata' ? '<b class="kirmizi">hata</b>' : '<span class="turuncu">bekliyor…</span>';
+          return '<tr><td class="nowrap">' + esc(i.zaman) + '</td><td>' + esc(i.ozet) + '</td><td>' + esc(i.kullanici) + '</td><td>' + durum + '</td><td class="kucukyazi">' + esc(i.mesaj || '') + (i.sonuc_zaman ? ' <small>(' + esc(i.sonuc_zaman) + ')</small>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="5">Henüz işlem yok.</td></tr>';
+        var b = document.getElementById('islem-bekleyen');
+        if (b) { b.textContent = 'bekleyen: ' + d.bekleyen; b.classList.toggle('gizli', !d.bekleyen); }
+        if (degisti && !d.bekleyen) { toast('Bot işlemleri uyguladı; sayfa yenileniyor'); setTimeout(function () { location.reload(); }, 1200); }
+      }).catch(function () {});
+    }
+    setInterval(yenile, 10000);
+  }
+
+  return { kayitSayfasi: kayitSayfasi, botSayfasi: botSayfasi, toast: toast, kopyala: kopyala };
 })();

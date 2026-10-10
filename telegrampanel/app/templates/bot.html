@@ -28,6 +28,20 @@
   {{ islem_btn('oturum_temizle', '🧹 Tüm oturumları temizle', '', 'Yarım kalan tüm kullanıcı oturumları silinecek. Emin misiniz?') }}
 </div>
 
+<div class="kart">
+  <h3>Son işlemler <small>(panelden bota gönderilenler; bot uygulayınca "ok" olur)</small> <span id="islem-bekleyen" class="etiket-kucuk turuncu-arka {{ '' if durum.kuyruk_bekleyen else 'gizli' }}">bekleyen: {{ durum.kuyruk_bekleyen }}</span></h3>
+  <table class="tablo kucuk" id="islemler-tablo">
+    <thead><tr><th>Zaman</th><th>İşlem</th><th>Kim</th><th>Durum</th><th>Sonuç</th></tr></thead>
+    <tbody>
+    {% for i in islemler %}
+    <tr><td class="nowrap">{{ i.zaman }}</td><td>{{ i.ozet }}</td><td>{{ i.kullanici }}</td>
+      <td>{% if i.durum == 'ok' %}<span class="yesil">ok</span>{% elif i.durum == 'hata' %}<b class="kirmizi">hata</b>{% else %}<span class="turuncu">bekliyor…</span>{% endif %}</td>
+      <td class="kucukyazi">{{ i.mesaj or '' }}{% if i.sonuc_zaman %} <small>({{ i.sonuc_zaman }})</small>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="5">Henüz işlem yok.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
 <div class="iki-kolon">
 <div class="kart">
   <h3>Telegram kullanıcıları <small>({{ tg_kullanicilar|length }})</small></h3>
@@ -122,3 +136,4 @@
 {% endfor %}</pre>
 </div>
 {% endblock %}
+{% block script %}<script>Panel.botSayfasi();</script>{% endblock %}

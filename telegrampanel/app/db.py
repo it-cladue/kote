@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS ice_aktarim (
   yeni INTEGER, degisen INTEGER, silinen INTEGER, hata TEXT
 );
 CREATE TABLE IF NOT EXISTS ayarlar (anahtar TEXT PRIMARY KEY, deger TEXT);
+CREATE TABLE IF NOT EXISTS islem_sonuclari (
+  id TEXT PRIMARY KEY, zaman TEXT, op TEXT, ozet TEXT, kullanici TEXT,
+  durum TEXT DEFAULT 'bekliyor', mesaj TEXT, sonuc_zaman TEXT
+);
 """
 
 _kilit = threading.RLock()
