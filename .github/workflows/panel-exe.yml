@@ -4,6 +4,8 @@ on:
   push:
     branches: ["claude/busy-feynman-cibo22"]
     paths: ["telegrampanel/**", ".github/workflows/panel-exe.yml"]
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
@@ -28,3 +30,24 @@ jobs:
           name: KanitPaneli-exe
           path: telegrampanel/dist/KanitPaneli.exe
           if-no-files-found: error
+      - name: Exe'yi dagitim dalina gonder (exe-dagitim)
+        shell: bash
+        run: |
+          set -e
+          mkdir -p /tmp/dagitim && cp telegrampanel/dist/KanitPaneli.exe /tmp/dagitim/
+          cp telegrampanel/OKU_BENI_PANEL.txt /tmp/dagitim/ 2>/dev/null || true
+          cd /tmp/dagitim
+          git init -q && git checkout -q -b exe-dagitim
+          git config user.name "github-actions" && git config user.email "actions@github.com"
+          git add -A && git commit -q -m "KanitPaneli.exe (kaynak: ${GITHUB_SHA})"
+          git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}" exe-dagitim
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Surum sayfasina yukle (release)
+        continue-on-error: true
+        shell: bash
+        run: |
+          TAG="panel-exe-$(date +%Y%m%d-%H%M%S)"
+          gh release create "$TAG" telegrampanel/dist/KanitPaneli.exe --title "Kanit Paneli exe ($TAG)" --notes "Kaynak: ${GITHUB_SHA}. Bot klasorune (OneDrive telegramkant) koyup cift tiklayin."
+        env:
+          GH_TOKEN: ${{ github.token }}
