@@ -49,13 +49,29 @@ window.Panel = (function () {
     document.getElementById('m-duzenle-iptal').addEventListener('click', function () { form.classList.add('gizli'); });
 
     function duzenleAcik() { return !form.classList.contains('gizli'); }
+    // Excel'de degisiklik: pencere kapaliysa listeyi sessizce yenile, acik ise serit goster ve pencere kapaninca yenile
+    var yenileBekliyor = false, serit = document.getElementById('degisiklik-serit');
+    document.addEventListener('kp:degisti', function () {
+      if (modal.classList.contains('gizli')) { location.reload(); return; }
+      yenileBekliyor = true; if (serit) serit.classList.remove('gizli');
+    });
+    if (serit) document.getElementById('degisiklik-yenile').addEventListener('click', function (ev) { ev.preventDefault(); location.reload(); });
     function adim(d) {
       var i = idler.indexOf(acikId);
       if (i < 0) return;
       var j = i + d;
       if (j >= 0 && j < idler.length) ac(idler[j]);
     }
-    function kapat() { modal.classList.add('gizli'); modal.setAttribute('aria-hidden', 'true'); acikId = null; }
+    function kapat() {
+      modal.classList.add('gizli'); modal.setAttribute('aria-hidden', 'true'); acikId = null;
+      if (yenileBekliyor) setTimeout(function () { location.reload(); }, 300);
+    }
+    // Bildirimden gelen ?ac=<id>: pencereyi hemen ac, adresi temizle (yenilemede tekrar acilmasin)
+    var acParam = new URLSearchParams(location.search).get('ac');
+    if (acParam) {
+      var u = new URL(location.href); u.searchParams.delete('ac'); history.replaceState(null, '', u.pathname + u.search);
+      ac(parseInt(acParam, 10));
+    }
 
     function ac(id) {
       acikId = id;
@@ -179,6 +195,76 @@ window.Panel = (function () {
     else { var i = document.createElement('input'); i.value = metin; document.body.appendChild(i); i.select(); document.execCommand('copy'); i.remove(); toast('Kopyalandı'); }
   }
 
+  // ---------------- canli yenileme ve yeni kayit bildirimleri (her sayfada) ----------------
+  var BILDIRIM_SN = 20;
+  function bildirimler() {
+    var zil = document.getElementById('zil'), kutu = document.getElementById('bildirim-kutu'), liste = document.getElementById('bildirim-liste'), sayi = document.getElementById('zil-sayi');
+    if (!zil || !kutu) return;
+    var son = parseInt(localStorage.getItem('kp_son_id') || '-1', 10), degisiklik = localStorage.getItem('kp_degisiklik'), okunmamis = 0, ilk = true;
+    var izinKutu = document.getElementById('bildirim-izin');
+    if (window.Notification && Notification.permission === 'default' && izinKutu) izinKutu.classList.remove('gizli');
+    var izinBtn = document.getElementById('bildirim-izin-btn');
+    if (izinBtn) izinBtn.addEventListener('click', function () { Notification.requestPermission().then(function () { izinKutu.classList.add('gizli'); }); });
+    zil.addEventListener('click', function () { kutu.classList.toggle('gizli'); okunmamis = 0; sayi.classList.add('gizli'); });
+    document.getElementById('bildirim-temizle').addEventListener('click', function () { liste.innerHTML = ''; kutu.classList.add('gizli'); try { localStorage.removeItem('kp_bildirimler'); } catch (e) {} });
+    // onceki oturumdan kalan bildirimler
+    try { var eski = JSON.parse(localStorage.getItem('kp_bildirimler') || '[]'); eski.slice(0, 20).forEach(function (k) { ekle(k, false); }); } catch (e) {}
+
+    function link(k) { return '/kayitlar?proje=' + encodeURIComponent(k.proje) + '&durum=' + (k.kt ? 'hepsi' : 'bekleyen') + '&ac=' + k.id; }
+    function ekle(k, yeni) {
+      var li = document.createElement('li');
+      if (yeni) li.className = 'yeni';
+      li.innerHTML = '<span class="rozet" style="background:' + esc(k.renk || '#999') + ';color:' + yaziRengi(k.renk || '#999') + '">' + esc(k.proje) + '</span> <b>' + esc(k.personel || '—') + '</b> ' + esc(k.kategori || '') +
+        ' <small>' + esc((k.tarih || '').slice(0, 16)) + (k.ekleyen_ad ? ' · ' + esc(k.ekleyen_ad) : '') + '</small><br><a class="kontrol" href="' + link(k) + '">Kontrol et →</a>';
+      liste.insertBefore(li, liste.firstChild);
+      while (liste.children.length > 30) liste.removeChild(liste.lastChild);
+    }
+    function goster(yeniler) {
+      var sakla = [];
+      try { sakla = JSON.parse(localStorage.getItem('kp_bildirimler') || '[]'); } catch (e) {}
+      yeniler.slice().reverse().forEach(function (k) { ekle(k, true); sakla.unshift(k); });
+      try { localStorage.setItem('kp_bildirimler', JSON.stringify(sakla.slice(0, 30))); } catch (e) {}
+      okunmamis += yeniler.length; sayi.textContent = okunmamis; sayi.classList.remove('gizli');
+      kutu.classList.remove('gizli');
+      var ilkK = yeniler[0];
+      toast(yeniler.length === 1 ? 'Yeni kayıt eklendi: ' + ilkK.proje + ' ' + (ilkK.personel || '') + ' ' + (ilkK.kategori || '') + ' — kontrol edin' : yeniler.length + ' yeni kayıt eklendi — kontrol edin');
+      if (window.Notification && Notification.permission === 'granted') {
+        try {
+          var n = new Notification(yeniler.length === 1 ? 'Yeni kayıt: ' + ilkK.proje + ' ' + (ilkK.personel || '') + ' ' + (ilkK.kategori || '') : yeniler.length + ' yeni kayıt eklendi',
+            { body: 'Kanıt Paneli — kontrol etmek için tıklayın', tag: 'kp-yeni-' + ilkK.id });
+          n.onclick = function () { window.focus(); location.href = link(ilkK); n.close(); };
+        } catch (e) {}
+      }
+    }
+    function kontrol() {
+      fetch('/bildirim.json?son=' + son, { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+        if (!d) return;
+        if (son < 0) { son = d.maks; try { localStorage.setItem('kp_son_id', son); } catch (e) {} }
+        else if (d.yeni && d.yeni.length) {
+          son = d.maks; try { localStorage.setItem('kp_son_id', son); } catch (e) {}
+          d.yeni.forEach(function (k) { k.renk = (window.PROJE_RENK || {})[k.proje]; });
+          goster(d.yeni);
+        } else if (d.maks > son) { son = d.maks; try { localStorage.setItem('kp_son_id', son); } catch (e) {} }
+        if (d.degisiklik && d.degisiklik !== degisiklik) {
+          var ilkKez = (degisiklik === null);
+          degisiklik = d.degisiklik; try { localStorage.setItem('kp_degisiklik', degisiklik); } catch (e) {}
+          if (!ilkKez || !ilk) document.dispatchEvent(new CustomEvent('kp:degisti', { detail: d }));
+        }
+        sayaclariGuncelle(d.sayac);
+        ilk = false;
+      }).catch(function () {});
+    }
+    function sayaclariGuncelle(sayac) {
+      if (!sayac) return;
+      Array.prototype.forEach.call(document.querySelectorAll('[data-sayac]'), function (el) {
+        var p = el.getAttribute('data-sayac').split(':'), v = sayac[p[0]] && sayac[p[0]][p[1]];
+        if (v !== undefined && String(v) !== el.textContent) { el.textContent = v; el.classList.add('sayac-degisti'); setTimeout(function () { el.classList.remove('sayac-degisti'); }, 1500); }
+      });
+    }
+    kontrol();
+    setInterval(kontrol, BILDIRIM_SN * 1000);
+  }
+
   // ---------------- bot sayfasi: son islemler tablosunu yenile ----------------
   function botSayfasi() {
     var tablo = document.getElementById('islemler-tablo');
@@ -204,5 +290,5 @@ window.Panel = (function () {
     setInterval(yenile, 10000);
   }
 
-  return { kayitSayfasi: kayitSayfasi, botSayfasi: botSayfasi, toast: toast, kopyala: kopyala };
+  return { kayitSayfasi: kayitSayfasi, botSayfasi: botSayfasi, bildirimler: bildirimler, toast: toast, kopyala: kopyala };
 })();

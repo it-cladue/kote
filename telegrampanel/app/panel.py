@@ -117,7 +117,7 @@ def ayar_turet(ham):
     a["GORSEL_KLASOR"] = ham.get("GORSEL_KLASOR") or os.path.join(bk, "gorseller")
     a["DB"] = ham.get("DB") or os.path.join(VERI_KOK, "panel.db")
     a["ONBELLEK"] = ham.get("ONBELLEK") or os.path.join(VERI_KOK, "tmp")
-    a.setdefault("YENILEME_DK", 2)
+    a.setdefault("YENILEME_SN", 30)       # kaynak degisti mi kontrolu (ucuz); Excel ancak degistiyse yeniden okunur
     a.setdefault("DINLE", "127.0.0.1")
     a.setdefault("PORT", 8080)
     a.setdefault("PROJE_RENK", VARSAYILAN_RENK)
@@ -688,7 +688,7 @@ def bot_sayfasi():
                 bot_yonetim.yedek_al(AYAR, c, kim)
             elif islem == "yenile":
                 kuyrukta = False
-                rapor = ice_aktar.calistir(AYAR, c, AYAR["ONBELLEK"], COZUCU)
+                rapor = ice_aktar.calistir(AYAR, c, AYAR["ONBELLEK"], COZUCU, zorla=True)
                 mesaj = f"Excel yeniden okundu: {rapor.get('sayfalar')} yeni={rapor.get('yeni')} degisen={rapor.get('degisen')} {('HATA: ' + rapor['hata']) if rapor.get('hata') else ''}"
             else:
                 kuyrukta = False
@@ -725,6 +725,35 @@ def durum_json():
     return jsonify(durum_bilgisi())
 
 
+@app.route("/bildirim.json")
+@giris_gerekli
+def bildirim_json():
+    """Canli yenileme: son goruldugunden beri eklenen kayitlar (kullanicinin yetkili oldugu projeler) + guncel sayaclar + degisiklik damgasi."""
+    c = baglanti()
+    izinli = yetki.izinli_projeler(g.yk, projeler())
+    try:
+        son = int(request.args.get("son", -1))
+    except ValueError:
+        son = -1
+    maks = c.execute("SELECT COALESCE(MAX(id),0) FROM kayitlar").fetchone()[0]
+    yeni = []
+    if son >= 0 and izinli and maks > son:
+        q = f"""SELECT id, proje, personel, kategori, tarih, ekleyen_ad, kt FROM kayitlar
+                WHERE id > ? AND proje IN ({",".join("?" * len(izinli))}) AND silindi=0 AND excel_durum='var'
+                  AND COALESCE(tarih, ilk_gorulme) > datetime('now','localtime','-2 days')
+                ORDER BY id DESC LIMIT 20"""
+        yeni = [dict(r) for r in c.execute(q, (son, *izinli)).fetchall()]
+    sayac = {}
+    for r in c.execute("""SELECT proje, SUM(CASE WHEN kt=0 AND silindi=0 AND excel_durum='var' THEN 1 ELSE 0 END) bekleyen,
+                                 SUM(CASE WHEN kt=1 AND silindi=0 AND excel_durum='var' THEN 1 ELSE 0 END) onayli,
+                                 SUM(CASE WHEN silindi=1 OR excel_durum='silinmis' THEN 1 ELSE 0 END) silinen, COUNT(*) toplam
+                          FROM kayitlar GROUP BY proje""").fetchall():
+        if r["proje"] in izinli:
+            sayac[r["proje"]] = {"bekleyen": r["bekleyen"] or 0, "onayli": r["onayli"] or 0, "silinen": r["silinen"] or 0, "toplam": r["toplam"]}
+    return jsonify({"maks": maks, "yeni": yeni, "sayac": sayac, "degisiklik": db.ayar_al(c, "son_degisiklik"), "kuyruk_bekleyen": kuyruk.bekleyen_sayisi(c),
+                    "bot": bot_yonetim.bot_calisiyor_mu(AYAR).get("canli")})
+
+
 @app.route("/saglik")
 def saglik():
     resp = app.make_response("OK")
@@ -759,7 +788,7 @@ def _arka_plan():
                 ice_aktar.calistir(AYAR, conn, AYAR["ONBELLEK"], COZUCU)
             except Exception as e:
                 print("ice aktarim hatasi:", e)
-            time.sleep(max(30, int(float(AYAR.get("YENILEME_DK", 2)) * 60)))
+            time.sleep(max(10, int(float(AYAR.get("YENILEME_SN", 30)))))
         else:
             time.sleep(10)
 

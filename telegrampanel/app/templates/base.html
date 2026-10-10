@@ -22,6 +22,7 @@
     {% endif %}
   </nav>
   <div class="kullanici">
+    <button type="button" id="zil" class="zil" title="Yeni kayıt bildirimleri">🔔<span id="zil-sayi" class="zil-sayi gizli">0</span></button>
     <span title="{{ k.yetki }}">{{ k.ad or k.kullanici_adi }}{% if yk.admin %} <small>(süper admin)</small>{% endif %}</span>
     <a href="{{ url_for('sifre_degistir') }}">Şifre</a>
     <a href="{{ url_for('cikis') }}">Çıkış</a>
@@ -38,7 +39,14 @@
 {% block icerik %}{% endblock %}
 </main>
 <div id="toast" class="toast gizli"></div>
+<div id="bildirim-kutu" class="bildirim-kutu gizli" aria-live="polite">
+  <div class="bildirim-baslik"><b>Yeni kayıtlar</b> <span id="bildirim-izin" class="gizli"><button type="button" class="btn kucuk" id="bildirim-izin-btn">Masaüstü bildirimlerini aç</button></span> <button type="button" class="btn kucuk" id="bildirim-temizle">Temizle</button></div>
+  <ul id="bildirim-liste"></ul>
+</div>
+<div id="degisiklik-serit" class="degisiklik-serit gizli">Excel'de değişiklik var. <a href="#" id="degisiklik-yenile">Listeyi yenile</a></div>
+<script>window.PROJE_RENK = {{ AYAR.PROJE_RENK|tojson }};</script>
 <script src="{{ url_for('static', filename='panel.js') }}"></script>
+{% if k %}<script>Panel.bildirimler();</script>{% endif %}
 {% block script %}{% endblock %}
 </body>
 </html>

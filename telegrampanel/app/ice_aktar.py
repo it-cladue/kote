@@ -18,12 +18,28 @@ def _simdi():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None):
+def _imza(yol):
+    try:
+        st = os.stat(yol)
+        return f"{st.st_mtime_ns}:{st.st_size}"
+    except OSError:
+        return "yok"
+
+
+def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False):
     if not _kilit.acquire(blocking=False):
         return {"atlandi": True}
     t0 = time.time()
     rapor = {"zaman": _simdi(), "sayfalar": {}, "yeni": 0, "degisen": 0, "silinen": 0, "hata": None, "uyari": None}
     try:
+        # Excel (ve bot logu) degismediyse yeniden okumaya gerek yok: sadece bot sonuclarini isle (30 sn'de bir ucuz kontrol)
+        imza = _imza(ayar["EXCEL"]) + "|" + _imza(ayar.get("LOG_DOSYA") or "") + "|" + _imza(os.path.join(ayar["BOT_KLASOR"], "kayitlar.jsonl"))
+        if not zorla and db.ayar_al(conn, "kaynak_imza") == imza and conn.execute("SELECT COUNT(*) FROM kayitlar").fetchone()[0] > 0:
+            islenen = sonuc_isle(ayar, conn)
+            if islenen:
+                db.ayar_yaz(conn, "son_degisiklik", _simdi())
+            rapor.update({"atlandi": True, "sebep": "kaynak degismedi", "sonuc": islenen})
+            return rapor
         kopya, uyari = excel_oku.kopyala(ayar["EXCEL"], onbellek_klasor)
         rapor["uyari"] = uyari
         sayfalar = excel_oku.oku(kopya, ayar.get("SUTUN_HARITASI") or {})
@@ -98,25 +114,30 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None):
                     conn.execute("UPDATE kayitlar SET excel_durum='silinmis', guncelleme=? WHERE id=?", (_simdi(), r["id"]))
                     rapor["silinen"] += 1
         # bot sonuclari
-        sonuc_isle(ayar, conn)
+        islenen = sonuc_isle(ayar, conn)
+        db.ayar_yaz(conn, "kaynak_imza", imza)
+        if rapor["yeni"] or rapor["degisen"] or rapor["silinen"] or islenen:
+            db.ayar_yaz(conn, "son_degisiklik", _simdi())
     except Exception as e:
         rapor["hata"] = f"{type(e).__name__}: {e}"
     finally:
         rapor["sure_ms"] = int((time.time() - t0) * 1000)
-        try:
-            conn.execute("INSERT INTO ice_aktarim(zaman,sure_ms,sayfalar,yeni,degisen,silinen,hata) VALUES(?,?,?,?,?,?,?)",
-                         (rapor["zaman"], rapor["sure_ms"], json.dumps(rapor["sayfalar"], ensure_ascii=False), rapor["yeni"], rapor["degisen"], rapor["silinen"], rapor["hata"] or rapor["uyari"]))
-            db.ayar_yaz(conn, "son_ice_aktarim", json.dumps(rapor, ensure_ascii=False))
-        except Exception:
-            pass
+        if not rapor.get("atlandi"):
+            try:
+                conn.execute("INSERT INTO ice_aktarim(zaman,sure_ms,sayfalar,yeni,degisen,silinen,hata) VALUES(?,?,?,?,?,?,?)",
+                             (rapor["zaman"], rapor["sure_ms"], json.dumps(rapor["sayfalar"], ensure_ascii=False), rapor["yeni"], rapor["degisen"], rapor["silinen"], rapor["hata"] or rapor["uyari"]))
+                db.ayar_yaz(conn, "son_ice_aktarim", json.dumps(rapor, ensure_ascii=False))
+            except Exception:
+                pass
         _kilit.release()
     return rapor
 
 
 def sonuc_isle(ayar, conn):
-    """panel_kuyruk_sonuc.jsonl -> bekleyen islemleri kapat"""
+    """panel_kuyruk_sonuc.jsonl -> bekleyen islemleri kapat. -> islenen (bu panele ait) sonuc sayisi"""
     offset = int(db.ayar_al(conn, "kuyruk_sonuc_offset", "0") or 0)
     sonuclar, yeni_offset = kuyruk.sonuclari_oku(ayar, offset)
+    islenen = 0
     for s in sonuclar:
         kid = s.get("id")
         if not kid:
@@ -124,9 +145,10 @@ def sonuc_isle(ayar, conn):
         r = conn.execute("SELECT id, bekleyen_islem FROM kayitlar WHERE bekleyen_id=?", (kid,)).fetchone()
         if not r:
             # bot yonetim islemi (onayla/engelle/bakim ...) sonucu
-            conn.execute("UPDATE islem_sonuclari SET durum=?, mesaj=?, sonuc_zaman=? WHERE id=?",
-                         ("ok" if s.get("durum") == "ok" else "hata", str(s.get("mesaj") or s.get("durum") or "")[:500], _simdi(), kid))
+            islenen += conn.execute("UPDATE islem_sonuclari SET durum=?, mesaj=?, sonuc_zaman=? WHERE id=?",
+                                    ("ok" if s.get("durum") == "ok" else "hata", str(s.get("mesaj") or s.get("durum") or "")[:500], _simdi(), kid)).rowcount
             continue
+        islenen += 1
         if s.get("durum") == "ok":
             conn.execute("UPDATE kayitlar SET bekleyen_islem=NULL, bekleyen_id=NULL, bekleyen_hata=NULL, excel_satir=COALESCE(?, excel_satir), guncelleme=? WHERE id=?",
                          (s.get("satir"), _simdi(), r["id"]))
@@ -143,3 +165,4 @@ def sonuc_isle(ayar, conn):
                     WHERE bekleyen_islem IS NOT NULL AND bekleyen_hata IS NULL AND guncelleme < datetime('now','localtime','-15 minutes')""")
     conn.execute("""UPDATE islem_sonuclari SET mesaj='bot 15 dakikadir yanit vermedi (bot kapali veya OneDrive esitleme bekliyor)'
                     WHERE durum='bekliyor' AND mesaj IS NULL AND zaman < datetime('now','localtime','-15 minutes')""")
+    return islenen

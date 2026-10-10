@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block baslik %}Ana sayfa - Kanıt Paneli{% endblock %}
 {% block icerik %}
-<div class="durum-serit" id="durum-serit">
+<div class="durum-serit" id="durum-serit" data-ana-sayfa="1">
   <span class="durum-parca">Bot:
     {% if durum.bot.canli %}<b class="yesil">çalışıyor</b>{% elif durum.bot.canli is none %}<b class="gri">bilinmiyor</b>{% else %}<b class="kirmizi">ÇALIŞMIYOR</b>{% endif %}
     {% if durum.log_son %}<small>(son log: {{ durum.log_son }})</small>{% endif %}
@@ -24,12 +24,12 @@
   <div class="proje-kart" style="border-top-color: {{ renk(kart.proje) }}">
     <div class="proje-baslik">
       <span class="rozet" style="background: {{ renk(kart.proje) }}; color: {{ metin_rengi(renk(kart.proje)) }}">{{ kart.proje }}</span>
-      <small>{{ kart.toplam }} kayıt{% if kart.bugun %} · bugün {{ kart.bugun }}{% endif %}</small>
+      <small><span data-sayac="{{ kart.proje }}:toplam">{{ kart.toplam }}</span> kayıt{% if kart.bugun %} · bugün {{ kart.bugun }}{% endif %}</small>
     </div>
     <div class="proje-butonlar">
-      <a class="btn sayi-btn bekleyen" href="{{ url_for('kayitlar', proje=kart.proje, durum='bekleyen') }}"><b>{{ kart.bekleyen }}</b><span>Onay bekleyen</span></a>
-      <a class="btn sayi-btn onayli" href="{{ url_for('kayitlar', proje=kart.proje, durum='onayli') }}"><b>{{ kart.onayli }}</b><span>Onaylı</span></a>
-      <a class="btn sayi-btn silinen" href="{{ url_for('kayitlar', proje=kart.proje, durum='silinen') }}"><b>{{ kart.silinen }}</b><span>Silinen</span></a>
+      <a class="btn sayi-btn bekleyen" href="{{ url_for('kayitlar', proje=kart.proje, durum='bekleyen') }}"><b data-sayac="{{ kart.proje }}:bekleyen">{{ kart.bekleyen }}</b><span>Onay bekleyen</span></a>
+      <a class="btn sayi-btn onayli" href="{{ url_for('kayitlar', proje=kart.proje, durum='onayli') }}"><b data-sayac="{{ kart.proje }}:onayli">{{ kart.onayli }}</b><span>Onaylı</span></a>
+      <a class="btn sayi-btn silinen" href="{{ url_for('kayitlar', proje=kart.proje, durum='silinen') }}"><b data-sayac="{{ kart.proje }}:silinen">{{ kart.silinen }}</b><span>Silinen</span></a>
     </div>
     <div class="proje-alt">
       <a href="{{ url_for('kayitlar', proje=kart.proje, durum='hepsi', gorunum='galeri') }}">🖼 Görseller</a>
