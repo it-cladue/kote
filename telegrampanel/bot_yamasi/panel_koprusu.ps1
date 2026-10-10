@@ -8,6 +8,8 @@ $PANEL_KUYRUK_DOSYA = [string](Get-ConfigValue "PANEL_KUYRUK_DOSYA" (Join-Base "
 $PANEL_SONUC_DOSYA  = [string](Get-ConfigValue "PANEL_SONUC_DOSYA" (Join-Base "panel_kuyruk_sonuc.jsonl"))
 $PANEL_KUYRUK_KLASOR = [string](Get-ConfigValue "PANEL_KUYRUK_KLASOR" (Join-Base "panel_kuyruk"))   # her bilgisayar kendi dosyasina yazar
 $PANEL_OFFSET_DOSYA = [string](Get-ConfigValue "PANEL_OFFSET_DOSYA" (Join-Base "panel_kuyruk_offset.json"))
+$PANEL_ISLENEN_DOSYA = [string](Get-ConfigValue "PANEL_ISLENEN_DOSYA" (Join-Base "panel_kuyruk_islenen.txt"))   # islenen is kimlikleri (OneDrive catisma kopyasi / tekrar okuma korumasi)
+$global:PanelIslenenler = $null
 $PANEL_KAYIT_DOSYA  = [string](Get-ConfigValue "PANEL_KAYIT_DOSYA" (Join-Base "kayitlar.jsonl"))
 $HEARTBEAT_DOSYA    = [string](Get-ConfigValue "HEARTBEAT_DOSYA" (Join-Base "heartbeat.txt"))
 $PANEL_KUYRUK_SN    = [int](Get-ConfigValue "PANEL_KUYRUK_SN" 5)
@@ -72,6 +74,39 @@ function Set-PanelOffsetler($h) {
     $o = [ordered]@{}
     foreach ($k in ($h.Keys | Sort-Object)) { $o[[string]$k] = [int64]$h[$k] }
     [System.IO.File]::WriteAllText($PANEL_OFFSET_DOSYA, ($o | ConvertTo-Json), $script:PanelUtf8)
+}
+
+# Islenen is kimlikleri: ayni is (OneDrive catisma kopyasi "pc_a-DESKTOP.jsonl", yeniden yuklenen eski surum, offset sifirlanmasi) ikinci kez uygulanmaz.
+# (PowerShell bir koleksiyonu fonksiyondan dondururken acar; bos HashSet $null olur. O yuzden set donmez, global degisken dogrudan kullanilir.)
+function Initialize-PanelIslenenler {
+    if ($null -eq $global:PanelIslenenler) {
+        $global:PanelIslenenler = New-Object System.Collections.Generic.HashSet[string]
+        try {
+            if (Test-Path -LiteralPath $PANEL_ISLENEN_DOSYA) {
+                foreach ($satir in [System.IO.File]::ReadAllLines($PANEL_ISLENEN_DOSYA)) { $t = $satir.Trim(); if ($t) { [void]$global:PanelIslenenler.Add($t) } }
+            }
+        } catch {}
+    }
+}
+
+function Test-PanelIslendi($id) {
+    Initialize-PanelIslenenler
+    return $global:PanelIslenenler.Contains([string]$id)
+}
+
+function Add-PanelIslenen($id) {
+    Initialize-PanelIslenenler
+    [void]$global:PanelIslenenler.Add([string]$id)
+    try {
+        [System.IO.File]::AppendAllText($PANEL_ISLENEN_DOSYA, ([string]$id + "`r`n"), $script:PanelUtf8)
+        if ($global:PanelIslenenler.Count -gt 20000) {
+            # dosyayi kucult: son 10000 kimlik kalsin
+            $hepsi = [System.IO.File]::ReadAllLines($PANEL_ISLENEN_DOSYA)
+            $kalan = $hepsi[[math]::Max(0, $hepsi.Count - 10000)..($hepsi.Count - 1)]
+            [System.IO.File]::WriteAllLines($PANEL_ISLENEN_DOSYA, $kalan, $script:PanelUtf8)
+            $global:PanelIslenenler = $null
+        }
+    } catch {}
 }
 
 # Okunacak kuyruk dosyalari: eski tek dosya + panel_kuyruk\*.jsonl (bilgisayar basina bir dosya; OneDrive catismasi olmaz)
@@ -316,7 +351,10 @@ function Process-PanelKuyrugu {
             if (-not $okuma.Degisti) { continue }
             foreach ($kalem in @($okuma.Isler)) {
                 $is = $kalem.Is
-                if ($is -and $is.id) {
+                if ($is -and $is.id -and (Test-PanelIslendi $is.id)) {
+                    Write-Log "  Panel islemi atlandi (daha once islendi): $($is.op) $($is.id)"
+                } elseif ($is -and $is.id) {
+                    Add-PanelIslenen $is.id
                     $sonuc = $null
                     try {
                         $sonuc = Invoke-PanelIslem $is

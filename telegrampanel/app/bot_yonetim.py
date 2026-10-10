@@ -194,7 +194,8 @@ def bot_calisiyor_mu(ayar):
     hb = _yol(ayar, "heartbeat.txt")
     if os.path.exists(hb):
         yas = (datetime.now().timestamp() - os.path.getmtime(hb))
-        return {"kaynak": "heartbeat", "yas_sn": int(yas), "canli": yas < 180}
+        # bot 60 sn'de bir yazar; OneDrive esitlemesi 1-2 dk gecikebilir -> 5 dk esigi
+        return {"kaynak": "heartbeat", "yas_sn": int(yas), "canli": yas < 300}
     if platform.system() == "Windows":
         try:
             out = subprocess.run(["powershell", "-NoProfile", "-Command",
