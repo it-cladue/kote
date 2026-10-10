@@ -500,6 +500,119 @@ def kayitlar():
                            f=f, izinli=izinli, kategoriler=kategoriler, gorunum=gorunum, sayac=sayac)
 
 
+# ==================== disa aktarma (Excel ciktisi) ====================
+DISA_SUTUNLAR = [("Proje", "proje", 8), ("Kategori", "kategori", 10), ("Personel kodu", "personel", 14), ("Uye ID", "uye_id", 14), ("Ana uye ID", "ana_uye_id", 14),
+                 ("Tur", "tip", 12), ("Tarih", "tarih", 19), ("Link", "link", 60), ("Onay (KT)", "kt", 10), ("Onaylayan", "kt_kim", 14), ("Onay zamani", "kt_zaman", 19),
+                 ("Ekleyen (Telegram)", "ekleyen_ad", 18), ("Ekleyen ID", "ekleyen_id", 14), ("Aciklama", "aciklama", 30), ("Durum", "_durum", 12), ("Excel satiri", "excel_satir", 11), ("Gorsel dosyasi", "_gorsel", 40)]
+
+
+def _disa_aktar_sorgu():
+    c = baglanti()
+    izinli = yetki.izinli_projeler(g.yk, projeler())
+    args = request.args.to_dict(flat=False)
+    args.setdefault("durum", ["hepsi"])
+    where, par, f = _filtre_sql(MultiDict(args), izinli)
+    rows = c.execute(f"SELECT * FROM kayitlar WHERE {where} ORDER BY proje, COALESCE(tarih,'0000'), id", par).fetchall()
+    return rows, f
+
+
+@app.route("/disa-aktar")
+@giris_gerekli
+def disa_aktar_sayfasi():
+    c = baglanti()
+    izinli = yetki.izinli_projeler(g.yk, projeler())
+    kategoriler = [r[0] for r in c.execute("SELECT DISTINCT upper(kategori) FROM kayitlar WHERE kategori<>'' ORDER BY 1").fetchall()]
+    bugun = datetime.now().date()
+    return render_template("disa_aktar.html", izinli=izinli, kategoriler=kategoriler, tarih1=(bugun - timedelta(days=30)).isoformat(), tarih2=bugun.isoformat())
+
+
+@app.route("/disa-aktar.xlsx")
+@giris_gerekli
+def disa_aktar_xlsx():
+    import io
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+    rows, f = _disa_aktar_sorgu()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Kayitlar"
+    ws.append([b for b, _, _ in DISA_SUTUNLAR])
+    for i, (_, _, gen) in enumerate(DISA_SUTUNLAR, 1):
+        ws.column_dimensions[get_column_letter(i)].width = gen
+        h = ws.cell(row=1, column=i)
+        h.font = Font(bold=True, color="FFFFFF")
+        h.fill = PatternFill("solid", fgColor="1F2937")
+        h.alignment = Alignment(vertical="center")
+    for r in rows:
+        d = dict(r)
+        durum = "silindi" if d.get("silindi") else ("Excel'de yok" if d.get("excel_durum") == "silinmis" else ("bekliyor" if d.get("bekleyen_islem") else "aktif"))
+        satir = []
+        for _, k, _ in DISA_SUTUNLAR:
+            if k == "_durum":
+                v = durum
+            elif k == "_gorsel":
+                v = os.path.basename(d["gorsel_dosya"]) if d.get("gorsel_dosya") else ""
+            elif k == "kt":
+                v = "EVET" if d.get("kt") else "HAYIR"
+            elif k in ("tarih", "kt_zaman") and d.get(k):
+                try:
+                    v = datetime.strptime(d[k][:19], "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    v = d[k]
+            else:
+                v = d.get(k)
+                if v is None:
+                    v = ""
+            satir.append(v)
+        ws.append(satir)
+        n = ws.max_row
+        link = d.get("link") or ""
+        if link.startswith("http"):
+            hucre = ws.cell(row=n, column=8)
+            hucre.hyperlink = link
+            hucre.font = Font(color="0563C1", underline="single")
+        for col in (7, 11):
+            if isinstance(ws.cell(row=n, column=col).value, datetime):
+                ws.cell(row=n, column=col).number_format = "yyyy-mm-dd hh:mm:ss"
+        renk_hex = renk(d["proje"]).lstrip("#")
+        if len(renk_hex) == 6:
+            ws.cell(row=n, column=1).fill = PatternFill("solid", fgColor=renk_hex)
+            ws.cell(row=n, column=1).font = Font(bold=True, color=metin_rengi("#" + renk_hex).lstrip("#"))
+    ws.freeze_panes = "A2"
+    if rows:
+        ws.auto_filter.ref = f"A1:{get_column_letter(len(DISA_SUTUNLAR))}{ws.max_row}"
+    # ozet sayfasi
+    oz = wb.create_sheet("Ozet")
+    oz.append(["Proje", "Toplam", "Onayli", "Onay bekleyen", "Silinen"])
+    for i in range(1, 6):
+        oz.cell(row=1, column=i).font = Font(bold=True)
+        oz.column_dimensions[get_column_letter(i)].width = 14
+    sayac = {}
+    for r in rows:
+        s_ = sayac.setdefault(r["proje"], [0, 0, 0, 0])
+        s_[0] += 1
+        if r["silindi"] or r["excel_durum"] == "silinmis":
+            s_[3] += 1
+        elif r["kt"]:
+            s_[1] += 1
+        else:
+            s_[2] += 1
+    for p_ in sorted(sayac):
+        oz.append([p_] + sayac[p_])
+    oz.append(["TOPLAM"] + [sum(v[i] for v in sayac.values()) for i in range(4)])
+    oz.append([])
+    oz.append(["Filtre", f"projeler: {', '.join(f.get('proje', []))}; durum: {f.get('durum')}; tarih: {f.get('tarih1') or '-'} / {f.get('tarih2') or '-'}; kategori: {f.get('kategori') or '-'}; arama: {f.get('q') or '-'}"])
+    oz.append(["Olusturan", f"{g.k['kullanici_adi']} - {simdi()}"])
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    projeler_ad = "-".join(f.get("proje", [])) if f.get("proje") and len(f["proje"]) <= 3 else "tum"
+    ad = f"kanit_{projeler_ad}_{(f.get('tarih1') or 'bastan')}_{(f.get('tarih2') or 'bugun')}.xlsx".replace("/", "-")
+    db.denetim_yaz(baglanti(), g.k["kullanici_adi"], "disa_aktar", yeni=f"{len(rows)} satir | {ad}", ip=ip())
+    return send_file(bio, as_attachment=True, download_name=ad, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 @app.route("/kayit/<int:kid>")
 @giris_gerekli
 def kayit_json(kid):

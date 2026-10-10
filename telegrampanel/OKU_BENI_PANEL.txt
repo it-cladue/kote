@@ -101,6 +101,12 @@ Kayitlar     : Filtreler (proje, kategori, ekleyen, tarih araligi), 3 gorunum: K
                Karta tiklayinca sayfa degismez; pencere acilir: buyuk gorsel, bilgiler, link,
                ONAYLA (KT), ONAYI KALDIR, DUZENLE, SIL, GERI AL. Klavye: Esc kapatir, sol/sag ok gezer.
 Gorseller    : Ayni filtrelerle gorsel galerisi.
+Cikti        : Tarih araligi (ve istege bagli proje, durum, kategori, personel) secip o aralikta eklenen
+               kanitlari Excel olarak indirir: Proje, Kategori, Personel kodu, Uye ID, Ana uye ID, Tur, Tarih,
+               Link (tiklanabilir), Onay, Onaylayan, Onay zamani, Ekleyen, Aciklama, Durum, Excel satiri,
+               Gorsel dosyasi. Ikinci sayfada proje ozeti (toplam / onayli / bekleyen / silinen).
+               Kayitlar sayfasindaki "Excel" dugmesi de o anki filtreyi indirir. Herkes yalnizca yetkili oldugu
+               projeleri indirebilir; her indirme Denetim'e yazilir.
 Bot          : (super admin) Bot canli mi, bakim modu, Gyazo bakimi, Telegram kullanicilarini
                onayla/engelle, kategoriler, acik oturumlar, yedek al, Excel'i hemen oku, son log.
                "Son islemler" listesinde her komutun durumu gorunur: bekliyor -> ok / hata.

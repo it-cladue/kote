@@ -15,6 +15,7 @@
     <a href="{{ url_for('ana') }}" class="{{ 'aktif' if request.endpoint == 'ana' }}">Ana sayfa</a>
     <a href="{{ url_for('kayitlar') }}" class="{{ 'aktif' if request.endpoint == 'kayitlar' and request.args.get('gorunum','kart') != 'galeri' }}">Kayıtlar</a>
     <a href="{{ url_for('kayitlar', gorunum='galeri', durum='hepsi') }}" class="{{ 'aktif' if request.endpoint == 'kayitlar' and request.args.get('gorunum') == 'galeri' }}">Görseller</a>
+    <a href="{{ url_for('disa_aktar_sayfasi') }}" class="{{ 'aktif' if request.endpoint == 'disa_aktar_sayfasi' }}">Çıktı</a>
     {% if yk.admin %}
     <a href="{{ url_for('bot_sayfasi') }}" class="{{ 'aktif' if request.endpoint == 'bot_sayfasi' }}">Bot</a>
     <a href="{{ url_for('yonetim_kullanicilar') }}" class="{{ 'aktif' if request.endpoint == 'yonetim_kullanicilar' }}">Kullanıcılar</a>
