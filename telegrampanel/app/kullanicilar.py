@@ -168,8 +168,9 @@ def dogrula(ayar, ad, sifre):
 
 
 def sqlite_tasi(ayar, conn):
-    """Eski surum (panel.db icindeki panel_kullanicilari) -> ortak dosya. Dosya varsa dokunmaz."""
-    if var_mi(ayar):
+    """Eski surum (panel.db icindeki panel_kullanicilari) -> ortak dosya. Dosya varsa ya da klasorde panel
+    daha once kullanilmissa (dosya OneDrive'dan henuz gelmemis olabilir) dokunmaz."""
+    if var_mi(ayar) or once_kullanilmis(ayar):
         return 0
     try:
         rows = conn.execute("SELECT * FROM panel_kullanicilari").fetchall()
