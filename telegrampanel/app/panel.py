@@ -20,6 +20,7 @@ KAYNAK_KOK = getattr(sys, "_MEIPASS", None) or KOK                            # 
 EXE_KLASOR = os.path.dirname(os.path.abspath(sys.executable)) if DONMUS else KOK
 VARSAYILAN_RENK = {"PP": "#A6A6A6", "PA": "#4472C4", "OF": "#FFFF00", "HI": "#FF0000", "VI": "#7030A0", "GA": "#00B050", "BETA": "#FFA500"}
 EXCEL_ADI = "telegrambot_gyazo.xlsx"
+KOPYA_ADI = "panel_excel_kopya.xlsx"   # paylasim klasoru modunda bot yalnizca bu kopyayi koyar
 
 
 def _veri_koku():
@@ -38,8 +39,9 @@ AYAR_YOL = os.environ.get("PANEL_AYAR") or os.path.join(VERI_KOK, "panel_ayar.js
 
 
 def bot_klasoru_mu(k):
+    """Bot klasoru (ana Excel var) ya da paylasim klasoru (botun yazdigi panel_excel_kopya.xlsx var)."""
     try:
-        return bool(k) and os.path.isfile(os.path.join(k, EXCEL_ADI))
+        return bool(k) and (os.path.isfile(os.path.join(k, EXCEL_ADI)) or os.path.isfile(os.path.join(k, KOPYA_ADI)))
     except Exception:
         return False
 
@@ -69,7 +71,7 @@ def bot_klasoru_adaylari(mevcut=None):
         for root, dirs, files in os.walk(od):
             if root.count(os.sep) - derinlik0 >= 3:
                 dirs[:] = []
-            if EXCEL_ADI in files:
+            if EXCEL_ADI in files or KOPYA_ADI in files:
                 ekle(root)
                 dirs[:] = []
             dirs[:] = [d for d in dirs if not d.startswith(".") and d.lower() not in ("gorseller", "backups", "ekran_goruntuleri", "telegram_gorseller", "node_modules")]
@@ -120,7 +122,9 @@ def ayar_turet(ham):
     a = dict(ham)
     a.setdefault("BOT_KLASOR", "")
     bk = a["BOT_KLASOR"] or EXE_KLASOR
-    a["EXCEL"] = ham.get("EXCEL") or os.path.join(bk, EXCEL_ADI)
+    ana = os.path.join(bk, EXCEL_ADI)
+    a["EXCEL"] = ham.get("EXCEL") or (ana if os.path.isfile(ana) or not os.path.isfile(os.path.join(bk, KOPYA_ADI)) else os.path.join(bk, KOPYA_ADI))
+    a["PAYLASIM_MODU"] = not os.path.isfile(ana) and os.path.isfile(os.path.join(bk, KOPYA_ADI))
     a["LOG_DOSYA"] = ham.get("LOG_DOSYA") or os.path.join(bk, "bot_log.txt")
     a["GORSEL_KLASOR"] = ham.get("GORSEL_KLASOR") or os.path.join(bk, "gorseller")
     a["DB"] = ham.get("DB") or os.path.join(VERI_KOK, "panel.db")
@@ -403,7 +407,7 @@ def durum_bilgisi():
     return {"son_ice_aktarim": son, "excel_mtime": excel_mtime, "excel_kopya_mtime": kopya_mtime, "log_son": log_oku.son_satir_zamani(AYAR["LOG_DOSYA"]),
             "bot": bot_yonetim.bot_calisiyor_mu(AYAR), "kuyruk_bekleyen": kuyruk.bekleyen_sayisi(c),
             "bekleyen_islem": c.execute("SELECT COUNT(*) FROM kayitlar WHERE bekleyen_islem IS NOT NULL").fetchone()[0],
-            "istemci": kuyruk.istemci_adi(AYAR), "bot_klasor": AYAR["BOT_KLASOR"], "surum": SURUM}
+            "istemci": kuyruk.istemci_adi(AYAR), "bot_klasor": AYAR["BOT_KLASOR"], "surum": SURUM, "paylasim_modu": bool(AYAR.get("PAYLASIM_MODU"))}
 
 
 @app.route("/")

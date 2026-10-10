@@ -10,8 +10,9 @@ ANCHOR_FONK = '# ==================== CALLBACK ===================='
 ANCHOR_KAYIT = '        Register-KullaniciKayit $userId $userName $cb.from.first_name $sayfaAdi $oturum.kategori $katLabel'
 ANCHOR_DONGU = '        Start-Sleep -Milliseconds $NORMAL_SLEEP_MS'
 EK_KAYIT = '        Write-PanelKayit $userId $userName $sayfaAdi $oturum.kategori $katLabel $oturum $gyazoUrl $kayitDosyaAdi $girisTipi'
-EK_DONGU = '        try { Process-PanelKuyrugu; Update-PanelExcelKopyasi; Write-Heartbeat } catch { Write-Log "! Panel koprusu: $_" }'
-EK_DONGU_ESKI = ['        try { Process-PanelKuyrugu; Write-Heartbeat } catch { Write-Log "! Panel koprusu: $_" }']
+EK_DONGU = '        try { Process-PanelKuyrugu; Update-PanelExcelKopyasi; Sync-PanelDurumu; Write-Heartbeat } catch { Write-Log "! Panel koprusu: $_" }'
+EK_DONGU_ESKI = ['        try { Process-PanelKuyrugu; Write-Heartbeat } catch { Write-Log "! Panel koprusu: $_" }',
+                 '        try { Process-PanelKuyrugu; Update-PanelExcelKopyasi; Write-Heartbeat } catch { Write-Log "! Panel koprusu: $_" }']
 
 
 def kopru_surumu(metin):

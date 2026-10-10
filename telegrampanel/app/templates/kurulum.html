@@ -3,7 +3,7 @@
 {% block icerik %}
 <div class="kart dar" style="max-width: 720px">
   <h2>Kurulum: bot klasörü</h2>
-  <p>Panel, botun klasöründeki <code>{{ excel_adi }}</code> dosyasını ve görselleri okur. OneDrive ile paylaşılan <b>telegramkant</b> klasörünü seçin.
+  <p>Panel, botun klasöründeki <code>{{ excel_adi }}</code> dosyasını (ya da paylaşım klasörü modunda botun koyduğu <code>panel_excel_kopya.xlsx</code> dosyasını) ve görselleri okur. OneDrive ile paylaşılan klasörü seçin.
   {% if adaylar %}Aşağıda bulunan klasörlerden birini tıklayın ya da yolu elle yazın.{% else %}Otomatik bulunamadı; yolu elle yazın (Dosya Gezgini'nde klasöre girip adres çubuğundan kopyalayın).{% endif %}</p>
   {% if hata %}<div class="hata">{{ hata }}</div>{% endif %}
   <form method="post" autocomplete="off" id="kurulum-form">

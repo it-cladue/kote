@@ -54,7 +54,7 @@ def kopyala(kaynak, hedef_klasor, deneme=2):
     gecici = hedef + ".tmp"
     bot_kopya = os.path.join(os.path.dirname(kaynak), BOT_KOPYA_ADI)
     adaylar = [(kaynak, None)]
-    if os.path.exists(bot_kopya):
+    if os.path.exists(bot_kopya) and os.path.abspath(bot_kopya) != os.path.abspath(kaynak):
         try:
             fark = os.path.getmtime(kaynak) - os.path.getmtime(bot_kopya)
         except OSError:

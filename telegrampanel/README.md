@@ -18,6 +18,7 @@ telegrampanel/
 Tasarım kuralları:
 - Panel Excel'e **yazmaz**. İşlemler `<bot>/panel_kuyruk/<bilgisayar>.jsonl` dosyasına eklenir (her PC kendi dosyası: OneDrive çakışması olmaz); bot (`Process-PanelKuyrugu`) kendi COM bağlantısıyla uygular, sonucu `panel_kuyruk_sonuc.jsonl`'a yazar. Süper admin bot komutları da (`bot_onayla`, `bot_engelle`, `bot_bakim` …) aynı kuyruktan gider; bot klasöründeki dosyalara yalnızca bot yazar.
 - Panel kullanıcıları `<bot>/panel_kullanicilar.json` içinde (hash'li); her PC aynı listeyi kullanır.
+- Paylaşım klasörü modu: `config.json` içinde `PANEL_KLASOR` verilirse bot kuyruk/sonuç/Excel kopyası/heartbeat/kayitlar.jsonl dosyalarını ve durum dosyalarının + görsellerin aynalarını oraya yazar (`Sync-PanelDurumu`); panel o klasörden çalışır (`panel_excel_kopya.xlsx` ile tanır), bot klasörü (token'lar) paylaşılmaz.
 - Panel verisi exe modunda `%LOCALAPPDATA%\KanitPaneli` altında (ayar, SQLite, küçük resimler).
 - Her `YENILEME_SN` saniyede (varsayılan 30) Excel/log değişmiş mi diye bakılır; değiştiyse kopyalanıp `openpyxl` ile okunur; OF sayfasında H sütunu 1M satır dolu olduğu için yalnızca A..G'ye bakılarak son satır bulunur.
 - Yetki sözdizimi: `admin`, `*`, `OF`, `OF:oku`, `OF:oku,kt`, `OF,PP:oku GA` (`app/yetki.py`).

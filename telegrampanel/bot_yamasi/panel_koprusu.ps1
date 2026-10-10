@@ -4,18 +4,27 @@
 # baglantisiyla uygular ve sonucu panel_kuyruk_sonuc.jsonl'a yazar. Boylece Excel'e tek yazan yine bottur.
 # Ek olarak: her kayitta kayitlar.jsonl'a "kim ekledi, hangi link" satiri; 60 sn'de bir heartbeat.txt (bot canli mi).
 # Panel kurulu degilse bu blok hicbir sey yapmaz (kuyruk dosyasi yoksa dongu aninda doner).
-$PANEL_KUYRUK_DOSYA = [string](Get-ConfigValue "PANEL_KUYRUK_DOSYA" (Join-Base "panel_kuyruk.jsonl"))
-$PANEL_SONUC_DOSYA  = [string](Get-ConfigValue "PANEL_SONUC_DOSYA" (Join-Base "panel_kuyruk_sonuc.jsonl"))
-$PANEL_KUYRUK_KLASOR = [string](Get-ConfigValue "PANEL_KUYRUK_KLASOR" (Join-Base "panel_kuyruk"))   # her bilgisayar kendi dosyasina yazar
-$PANEL_OFFSET_DOSYA = [string](Get-ConfigValue "PANEL_OFFSET_DOSYA" (Join-Base "panel_kuyruk_offset.json"))
+# PAYLASIM KLASORU MODU: config.json'a "PANEL_KLASOR": "C:\\...\\OneDrive - Get Mails\\KanitPaneli" yazilirsa panelle alisveris
+# dosyalari (kuyruk, sonuc, Excel kopyasi, kayitlar.jsonl, heartbeat) o klasorde tutulur ve bot kucuk durum dosyalarini
+# (onaylilar, engellenenler, kategoriler, kullanicilar, oturumlar, bakim bayraklari, bot_log) ile gorselleri oraya kopyalar.
+# Boylece token'larin oldugu bot klasoru paylasilmaz; yalnizca PANEL_KLASOR paylasilir. Yazilmazsa her sey bot klasorundedir.
+$PANEL_KLASOR       = [string](Get-ConfigValue "PANEL_KLASOR" $SCRIPT_DIR)
+function Join-Panel($f) { return (Join-Path $PANEL_KLASOR $f) }
+$PANEL_KUYRUK_DOSYA = [string](Get-ConfigValue "PANEL_KUYRUK_DOSYA" (Join-Panel "panel_kuyruk.jsonl"))
+$PANEL_SONUC_DOSYA  = [string](Get-ConfigValue "PANEL_SONUC_DOSYA" (Join-Panel "panel_kuyruk_sonuc.jsonl"))
+$PANEL_KUYRUK_KLASOR = [string](Get-ConfigValue "PANEL_KUYRUK_KLASOR" (Join-Panel "panel_kuyruk"))   # her bilgisayar kendi dosyasina yazar
+$PANEL_OFFSET_DOSYA = [string](Get-ConfigValue "PANEL_OFFSET_DOSYA" (Join-Base "panel_kuyruk_offset.json"))        # botun kendi defteri (bot klasorunde)
 $PANEL_ISLENEN_DOSYA = [string](Get-ConfigValue "PANEL_ISLENEN_DOSYA" (Join-Base "panel_kuyruk_islenen.txt"))   # islenen is kimlikleri (OneDrive catisma kopyasi / tekrar okuma korumasi)
 $global:PanelIslenenler = $null
-$PANEL_KAYIT_DOSYA  = [string](Get-ConfigValue "PANEL_KAYIT_DOSYA" (Join-Base "kayitlar.jsonl"))
-$HEARTBEAT_DOSYA    = [string](Get-ConfigValue "HEARTBEAT_DOSYA" (Join-Base "heartbeat.txt"))
+$PANEL_KAYIT_DOSYA  = [string](Get-ConfigValue "PANEL_KAYIT_DOSYA" (Join-Panel "kayitlar.jsonl"))
+$HEARTBEAT_DOSYA    = [string](Get-ConfigValue "HEARTBEAT_DOSYA" (Join-Panel "heartbeat.txt"))
 $PANEL_KUYRUK_SN    = [int](Get-ConfigValue "PANEL_KUYRUK_SN" 5)
 # Panel icin Excel kopyasi: bot calisirken Excel COM dosyayi kilitli tutar, panel ana dosyayi kopyalayamaz (Permission denied).
 # Bot, dosya degistikce (en sik PANEL_KOPYA_SN saniyede bir) SaveCopyAs ile bu kopyayi yazar; panel ana dosya kilitliyse bunu okur.
-$PANEL_EXCEL_KOPYA  = [string](Get-ConfigValue "PANEL_EXCEL_KOPYA" (Join-Base "panel_excel_kopya.xlsx"))
+$PANEL_EXCEL_KOPYA  = [string](Get-ConfigValue "PANEL_EXCEL_KOPYA" (Join-Panel "panel_excel_kopya.xlsx"))
+$PANEL_DURUM_SN     = [int](Get-ConfigValue "PANEL_DURUM_SN" 60)      # paylasim klasoru modunda durum dosyasi/gorsel esitleme araligi
+$global:PanelSonDurum = [datetime]::MinValue
+$global:PanelDurumImza = @{}
 $PANEL_KOPYA_SN     = [int](Get-ConfigValue "PANEL_KOPYA_SN" 60)
 $global:PanelSonKopya = [datetime]::MinValue
 $global:PanelKopyaYazma = $null
@@ -28,6 +37,8 @@ $script:PanelUtf8 = New-Object System.Text.UTF8Encoding $false
 # ==================== WEB PANELI KOPRUSU: FONKSIYONLAR (surum 3) ====================
 function Write-JsonSatir($dosya, $nesne) {
     # BOM'suz UTF-8, CRLF satir sonu; panel (Python) satir satir okur.
+    $kd = Split-Path -Parent $dosya
+    if ($kd -and -not (Test-Path -LiteralPath $kd)) { New-Item -ItemType Directory -Path $kd -Force | Out-Null }
     $json = ($nesne | ConvertTo-Json -Compress -Depth 6)
     [System.IO.File]::AppendAllText($dosya, ($json + "`r`n"), $script:PanelUtf8)
 }
@@ -45,6 +56,8 @@ function Update-PanelExcelKopyasi([bool]$zorla = $false) {
         if (-not $global:xlWb) { return }
         if (-not $zorla -and ((Get-Date) - $global:PanelSonKopya).TotalSeconds -lt $PANEL_KOPYA_SN) { return }
         $global:PanelSonKopya = Get-Date
+        $kd = Split-Path -Parent $PANEL_EXCEL_KOPYA
+        if ($kd -and -not (Test-Path -LiteralPath $kd)) { New-Item -ItemType Directory -Path $kd -Force | Out-Null }
         $anaYazma = $null
         try { $anaYazma = (Get-Item -LiteralPath $EXCEL_DOSYA).LastWriteTime } catch { $anaYazma = $null }
         if (-not $zorla -and $anaYazma -and $global:PanelKopyaYazma -and $anaYazma -le $global:PanelKopyaYazma -and (Test-Path -LiteralPath $PANEL_EXCEL_KOPYA)) { return }
@@ -58,10 +71,65 @@ function Update-PanelExcelKopyasi([bool]$zorla = $false) {
     }
 }
 
+# Paylasim klasoru modu: bot klasorundeki kucuk durum dosyalarini, gizli alanlari ayiklanmis ayarlari ve gorselleri
+# PANEL_KLASOR'e kopyalar (yalnizca degisenler). Tek klasor modunda (PANEL_KLASOR = bot klasoru) hicbir sey yapmaz.
+function Sync-PanelDurumu([bool]$zorla = $false) {
+    try {
+        if ((Resolve-Path -LiteralPath $PANEL_KLASOR -ErrorAction SilentlyContinue).Path -eq (Resolve-Path -LiteralPath $SCRIPT_DIR).Path) { return }
+        if (-not $zorla -and ((Get-Date) - $global:PanelSonDurum).TotalSeconds -lt $PANEL_DURUM_SN) { return }
+        $global:PanelSonDurum = Get-Date
+        if (-not (Test-Path -LiteralPath $PANEL_KLASOR)) { New-Item -ItemType Directory -Path $PANEL_KLASOR -Force | Out-Null }
+        # 1) kucuk durum dosyalari (ayni adla)
+        foreach ($yol in @($ONAYLILAR_DOSYA, $ENGELLENEN_DOSYA, $KATEGORI_DOSYA, $KULLANICI_DOSYA, $OTURUM_DOSYA, $BAKIM_DOSYA, $GYAZO_BAKIM_DOSYA, $LOG_DOSYA)) {
+            if (-not $yol) { continue }
+            $hedef = Join-Panel (Split-Path -Leaf $yol)
+            if (-not (Test-Path -LiteralPath $yol)) {
+                if ((Split-Path -Leaf $yol) -in @("bakim_modu.txt", "gyazo_bakim.txt") -and (Test-Path -LiteralPath $hedef)) { Remove-Item -LiteralPath $hedef -Force -ErrorAction SilentlyContinue }
+                continue
+            }
+            $it = Get-Item -LiteralPath $yol
+            $imza = "$($it.LastWriteTime.Ticks):$($it.Length)"
+            if ($global:PanelDurumImza[$yol] -eq $imza -and (Test-Path -LiteralPath $hedef)) { continue }
+            try { Copy-Item -LiteralPath $yol -Destination $hedef -Force; $global:PanelDurumImza[$yol] = $imza } catch { Write-Log "! Panel durum kopyasi ($hedef): $_" }
+        }
+        # 2) ayarlar: gizli alanlar (token/sifre) cikarilarak panel_bot_ayarlari.json
+        try {
+            if ($global:Config) {
+                $temiz = [ordered]@{}
+                foreach ($p in $global:Config.PSObject.Properties) {
+                    if ($p.Name -match 'TOKEN|PASSWORD|SIFRE|SECRET') { continue }
+                    $temiz[$p.Name] = $p.Value
+                }
+                $json = ($temiz | ConvertTo-Json -Depth 4)
+                $hedef = Join-Panel "panel_bot_ayarlari.json"
+                if (-not (Test-Path -LiteralPath $hedef) -or ([System.IO.File]::ReadAllText($hedef) -ne $json)) { Write-PanelAtomik $hedef $json }
+            }
+        } catch {}
+        # 3) gorseller ve indirilmis ekran goruntuleri: yalnizca yeni/degismis dosyalar
+        foreach ($kl in @($GORSEL_KLASOR, (Join-Base "ekran_goruntuleri"))) {
+            if (-not $kl -or -not (Test-Path -LiteralPath $kl)) { continue }
+            $kok = (Resolve-Path -LiteralPath $kl).Path
+            $hedefKok = Join-Panel (Split-Path -Leaf $kok)
+            foreach ($f in (Get-ChildItem -LiteralPath $kok -Recurse -File -ErrorAction SilentlyContinue)) {
+                $goreli = $f.FullName.Substring($kok.Length).TrimStart('\', '/')
+                $hedef = Join-Path $hedefKok $goreli
+                if ((Test-Path -LiteralPath $hedef) -and ((Get-Item -LiteralPath $hedef).Length -eq $f.Length) -and ((Get-Item -LiteralPath $hedef).LastWriteTime -ge $f.LastWriteTime)) { continue }
+                $hd = Split-Path -Parent $hedef
+                if (-not (Test-Path -LiteralPath $hd)) { New-Item -ItemType Directory -Path $hd -Force | Out-Null }
+                try { Copy-Item -LiteralPath $f.FullName -Destination $hedef -Force } catch { Write-Log "! Panel gorsel kopyasi ($goreli): $_" }
+            }
+        }
+    } catch {
+        Write-Log "! Panel durum esitleme hatasi: $_"
+    }
+}
+
 function Write-Heartbeat {
     try {
         if (((Get-Date) - $global:PanelSonNabiz).TotalSeconds -lt 60) { return }
         $global:PanelSonNabiz = Get-Date
+        $kd = Split-Path -Parent $HEARTBEAT_DOSYA
+        if ($kd -and -not (Test-Path -LiteralPath $kd)) { New-Item -ItemType Directory -Path $kd -Force | Out-Null }
         [System.IO.File]::WriteAllText($HEARTBEAT_DOSYA, (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $script:PanelUtf8)
     } catch {}
 }

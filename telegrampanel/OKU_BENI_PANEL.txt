@@ -65,6 +65,22 @@ sonra panelin "ilk super admin yeniden olusturma" ekrani yalnizca bot bilgisayar
 Isterseniz bunu birlikte yapariz.
 
 
+2b) PAYLASIM KLASORU MODU (onerilen: bot klasoru sizde kalir, adminlere ayri klasor)
+------------------------------------------------------------------------------
+Bot klasorunu (token'lar, yedekler, arsivler) paylasmak istemiyorsaniz:
+a) OneDrive'da yeni bir klasor acin, ornek: OneDrive - Get Mails\KanitPaneli
+b) Bot klasorundeki config.json'u Not Defteri ile acip en uste su satiri ekleyin (ters boluler CIFT):
+      "PANEL_KLASOR": "C:\\Users\\KULLANICI\\OneDrive - Get Mails\\KanitPaneli",
+   (Ilk satirdaki { isaretinden sonra, diger satirlarin arasina; satir sonundaki virgule dikkat.)
+c) Botu yeniden baslatin. Bot bir dakika icinde bu klasore kendisi koyar: panel_excel_kopya.xlsx (Excel'in
+   panel kopyasi), gorseller ve ekran_goruntuleri kopyalari, onaylilar/engellenenler/kategoriler/kullanicilar/
+   oturumlar/bot_log kopyalari, panel_bot_ayarlari.json (token'lar AYIKLANMIS ayarlar), heartbeat.txt.
+   Sonra kuyruk ve sonuc dosyalari da orada olusur. Bot bunlari degistikce gunceller (en fazla 60 sn gecikme).
+d) KanitPaneli.exe'yi BU klasore koyun, cift tiklayin; ilk super admini olusturun (kullanici listesi de burada
+   tutulur). Adminlere YALNIZCA bu klasoru paylasin. Bot klasorunde telebot.ps1 ve config.json kalir, kimse gormez.
+Bu modda panel ana Excel'i hic gormez; botun kopyasini okur. Onay/duzenleme/silme yine kuyruk -> bot -> ana Excel
+yoluyla uygulanir (bot ana Excel'i kendi klasorunde tutar). Ayni anda istediginiz kadar admin calisabilir.
+
 3) YETKI KISALTMALARI
 ---------------------
    admin           super admin: her sey
@@ -114,6 +130,9 @@ Kayit rozetleri:
   panel_kuyruk_offset.json    botun nereye kadar okudugu
   panel_excel_kopya.xlsx      botun panel icin yazdigi Excel kopyasi (bot acikken ana Excel kilitlidir; panel
                               bunu okur, yazma yine bot uzerinden ana dosyaya yapilir)
+  panel_bot_ayarlari.json     (paylasim klasoru modu) config.json'un token'siz kopyasi
+Paylasim klasoru modunda bu dosyalar PANEL_KLASOR'de olusur; panel_kuyruk_offset.json ve panel_kuyruk_islenen.txt
+(botun kendi defteri) bot klasorunde kalir.
   kayitlar.jsonl              bot: her kaydi kim ekledi (panelde "Ekleyen" kesinlesir)
   heartbeat.txt               bot her dakika yazar ("Bot: calisiyor" gostergesi)
 Panelin kendi verisi (silinebilir, yeniden olusur): %LOCALAPPDATA%\KanitPaneli

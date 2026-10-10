@@ -153,12 +153,17 @@ def gyazo_bakim(ayar):
 
 
 def config(ayar):
-    """config.json'un GIZLI OLMAYAN alanlari (token/sifre asla okunmaz)"""
-    yol = _yol(ayar, "config.json")
-    try:
-        with open(yol, encoding="utf-8-sig") as f:
-            d = json.load(f)
-    except Exception:
+    """config.json'un GIZLI OLMAYAN alanlari (token/sifre asla okunmaz). Paylasim klasoru modunda bot bunlari
+    panel_bot_ayarlari.json olarak koyar (gizli alanlar ayiklanmis)."""
+    d = None
+    for ad in ("config.json", "panel_bot_ayarlari.json"):
+        try:
+            with open(_yol(ayar, ad), encoding="utf-8-sig") as f:
+                d = json.load(f)
+            break
+        except Exception:
+            continue
+    if not isinstance(d, dict):
         return {}
     return {k: v for k, v in d.items() if not any(s in k.upper() for s in ("TOKEN", "PASSWORD", "SIFRE", "SECRET"))}
 
