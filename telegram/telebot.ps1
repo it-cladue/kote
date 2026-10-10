@@ -124,6 +124,8 @@ function Set-TextFileAtomic($path, $content) {
         $text = [string]$content
     }
 
+    # Dosya sonunda satir sonu olsun; yoksa sonraki Add-Content kaydi son satira yapistiriyor (engellenenler.txt sorunu).
+    if ($text.Length -gt 0 -and -not $text.EndsWith("`n")) { $text += "`r`n" }
     # .NET ile yazinca dosya HER ZAMAN olusur (icerik bos olsa bile)
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($tmp, $text, $utf8NoBom)
@@ -244,8 +246,16 @@ function Add-Onayli($userId, $userName) {
 
 # ==================== ENGELLENENLER ====================
 function Get-Engellenenler {
-    if (Test-Path $ENGELLENEN_DOSYA) { return @(Get-Content $ENGELLENEN_DOSYA -Encoding UTF8) }
-    return @()
+    if (-not (Test-Path $ENGELLENEN_DOSYA)) { return @() }
+    $sonuc = @()
+    foreach ($satir in @(Get-Content $ENGELLENEN_DOSYA -Encoding UTF8)) {
+        if ([string]::IsNullOrWhiteSpace($satir)) { continue }
+        # Eski dosyada kayitlar satir sonu olmadan yapismis olabilir ("...ayrildi8406076054|admin|..."); ID basladigi yerden bol.
+        foreach ($parca in [regex]::Split($satir, '(?=(?<![0-9])[0-9]{8,12}\|)')) {
+            if (-not [string]::IsNullOrWhiteSpace($parca)) { $sonuc += $parca.Trim() }
+        }
+    }
+    return $sonuc
 }
 
 function Is-Engellenen($userId) {
@@ -1466,12 +1476,9 @@ function Init-Excel {
 
     $gecerliAdlar = @{ "HATALI" = $true; "ONAYLILAR" = $true }
     foreach ($proje in $PROJELER) { $gecerliAdlar[$proje.ToUpper()] = $true }
-    $silList = @()
+    # Tanimsiz sayfalar (elle acilmis "cennet kt" gibi) artik SILINMEZ; sadece loglanir.
     foreach ($ws in $global:xlWb.Worksheets) {
-        if (-not $gecerliAdlar.ContainsKey($ws.Name)) { $silList += $ws }
-    }
-    foreach ($ws in $silList) {
-        if ($global:xlWb.Worksheets.Count -gt 1) { $ws.Delete() }
+        if (-not $gecerliAdlar.ContainsKey($ws.Name)) { Write-Log "  Elle acilmis sayfa korunuyor: $($ws.Name)" }
     }
 
     $global:xlWb.Save()
