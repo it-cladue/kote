@@ -77,6 +77,14 @@ Bot          : (super admin) Bot canli mi, bakim modu, Gyazo bakimi, Telegram ku
 Kullanicilar : (super admin) panel kullanicilari ve yetkileri.
 Denetim      : (super admin) bu bilgisayardan kim ne yapti.
 
+Canli yenileme ve bildirim:
+- Panel 30 saniyede bir Excel degismis mi diye bakar; degistiyse sayilar ve listeler kendiliginden
+  guncellenir (bir kayit penceresi acikken "Listeyi yenile" seridi cikar, pencere kapaninca yenilenir).
+- Yetkili oldugunuz projeye yeni kayit gelince sag ustteki zil (🔔) sayar, kutuda kayit gorunur,
+  "Kontrol et" tiklaninca kaydin penceresi acilir (onayla/duzenle/sil). "Masaustu bildirimlerini ac"
+  derseniz tarayici arka plandayken de Windows bildirimi gelir.
+- Ayni anda birden fazla kisi (ayni ya da farkli bilgisayarda) giris yapabilir.
+
 Kayit rozetleri:
   "Excel'e yaziliyor..." : panelde yapildi, bot henuz uygulamadi (bot acikken 1-2 dk).
   "Excel hatasi"         : bot satiri bulamadi (Excel'de elle degismis/silinmis olabilir).
