@@ -944,7 +944,7 @@ def _arka_plan():
 
 # ==================== komut satiri ====================
 def komut(argv):
-    if not argv or argv[0] in ("--ac",):
+    if not argv or argv[0] in ("--ac", "--ag", "--port"):
         return False
     if argv[0] == "--surum":
         print("KanitPaneli", SURUM)
@@ -1002,6 +1002,13 @@ def calistir():
             pass
     if len(sys.argv) > 1 and komut(sys.argv[1:]):
         return
+    # --ag: ag modu (sunucu). Panel yalnizca bu bilgisayarda calisir, digerleri tarayicidan http://<bu bilgisayar>:PORT ile girer.
+    ag_modu = "--ag" in sys.argv or str(AYAR.get("DINLE", "127.0.0.1")) not in ("127.0.0.1", "localhost", "")
+    if "--ag" in sys.argv:
+        AYAR["DINLE"] = "0.0.0.0"
+    for i, a in enumerate(sys.argv):
+        if a == "--port" and i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit():
+            AYAR["PORT"] = int(sys.argv[i + 1])
     port = int(AYAR["PORT"])
     url = f"http://127.0.0.1:{port}/"
     if panel_calisiyor_mu(port):
@@ -1018,8 +1025,16 @@ def calistir():
             print("kullanici tasima hatasi:", e)
     threading.Thread(target=_arka_plan, daemon=True).start()
     print("=" * 60)
-    print(f"  KANIT PANELI {SURUM}")
+    print(f"  KANIT PANELI {SURUM}" + ("  [AG MODU]" if ag_modu else ""))
     print(f"  Adres      : {url}")
+    if ag_modu:
+        try:
+            import socket
+            adlar = socket.gethostbyname_ex(socket.gethostname())[2]
+            print("  Diger bilgisayarlardan: " + "   ".join(f"http://{ip_}:{port}/" for ip_ in adlar if not ip_.startswith("127.")))
+            print(f"  (ya da http://{socket.gethostname()}:{port}/ ). Guvenlik duvarinda {port} portu acik olmali: GUVENLIK_DUVARI_AC.bat")
+        except Exception:
+            pass
     print(f"  Bot klasoru: {AYAR.get('BOT_KLASOR') or '(bulunamadi - tarayicida secilecek)'}")
     print(f"  Veri       : {VERI_KOK}")
     print("  Bu pencere acik kaldigi surece panel calisir. Kapatmak icin pencereyi kapatin.")

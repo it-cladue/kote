@@ -83,6 +83,20 @@ d) KanitPaneli.exe'yi BU klasore koyun, cift tiklayin; ilk super admini olusturu
 Bu modda panel ana Excel'i hic gormez; botun kopyasini okur. Onay/duzenleme/silme yine kuyruk -> bot -> ana Excel
 yoluyla uygulanir (bot ana Excel'i kendi klasorunde tutar). Ayni anda istediginiz kadar admin calisabilir.
 
+2c) AG MODU (OneDrive esitlemesi kapaliysa / kurum izin vermiyorsa)
+--------------------------------------------------------------------
+Panel yalnizca BOT bilgisayarinda calisir; adminler hicbir sey kurmadan kendi tarayicilarindan girer.
+a) Bot bilgisayarinda GUVENLIK_DUVARI_AC.bat'a cift tiklayin (bir kez; yonetici izni ister; 8080 portunu acar).
+b) KanitPaneli.exe yerine PANEL_AG.bat ile baslatin (ayni klasorde). Siyah pencerede "Diger bilgisayarlardan:"
+   satirinda adres yazar, ornek: http://192.168.1.25:8080/
+c) Adminler bu adresi tarayicilarina yazar (ofis agi / VPN icinde; telefon da olur), kullanici adi ve sifreyle girer.
+   Kullanici listesi, kuyruk, her sey bot bilgisayarinda kalir; OneDrive'a, kisayola gerek yok.
+d) Bilgisayarin IP'si degismesin diye IT'den sabit IP ya da ad (ornek: http://kanitpc:8080) isteyin.
+Not: Ofis disindan (evden) erisim icin VPN ya da Cloudflare Tunnel gerekir; isterseniz kurulumunu yazarim.
+Guvenlik: bu modda sifreler ofis agi icinde sifresiz (http) gider; yalnizca guvendiginiz ag icinde kullanin.
+Panel kapaninca (siyah pencere kapatilinca) erisim de kapanir; bilgisayar acilinca otomatik baslamasi icin
+GOREV_KUR.bat (kaynak kod) ya da PANEL_AG.bat'in kisayolunu Baslangic klasorune koyma (Win+R -> shell:startup).
+
 3) YETKI KISALTMALARI
 ---------------------
    admin           super admin: her sey
