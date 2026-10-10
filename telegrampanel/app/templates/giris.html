@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Giriş - Kanıt Paneli</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='stil.css') }}">
+</head>
+<body class="giris-sayfa">
+<form class="giris-kutu" method="post" autocomplete="off">
+  <h1>📋 Kanıt Paneli</h1>
+  {% if hata %}<div class="hata">{{ hata }}</div>{% endif %}
+  <label>Kullanıcı adı<input name="kullanici" required autofocus autocapitalize="off"></label>
+  <label>Şifre<input name="sifre" type="password" required></label>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button type="submit" class="btn birincil genis">Giriş yap</button>
+</form>
+</body>
+</html>

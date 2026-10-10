@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block baslik %}Kanıt Paneli{% endblock %}</title>
+<meta name="csrf" content="{{ csrf }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='stil.css') }}">
+</head>
+<body>
+{% if k %}
+<header class="ust">
+  <a class="marka" href="{{ url_for('ana') }}">📋 Kanıt Paneli</a>
+  <nav class="menu">
+    <a href="{{ url_for('ana') }}" class="{{ 'aktif' if request.endpoint == 'ana' }}">Ana sayfa</a>
+    <a href="{{ url_for('kayitlar') }}" class="{{ 'aktif' if request.endpoint == 'kayitlar' and request.args.get('gorunum','kart') != 'galeri' }}">Kayıtlar</a>
+    <a href="{{ url_for('kayitlar', gorunum='galeri', durum='hepsi') }}" class="{{ 'aktif' if request.endpoint == 'kayitlar' and request.args.get('gorunum') == 'galeri' }}">Görseller</a>
+    {% if yk.admin %}
+    <a href="{{ url_for('bot_sayfasi') }}" class="{{ 'aktif' if request.endpoint == 'bot_sayfasi' }}">Bot</a>
+    <a href="{{ url_for('yonetim_kullanicilar') }}" class="{{ 'aktif' if request.endpoint == 'yonetim_kullanicilar' }}">Kullanıcılar</a>
+    <a href="{{ url_for('denetim') }}" class="{{ 'aktif' if request.endpoint == 'denetim' }}">Denetim</a>
+    {% endif %}
+  </nav>
+  <div class="kullanici">
+    <span title="{{ k.yetki }}">{{ k.ad or k.kullanici_adi }}{% if yk.admin %} <small>(süper admin)</small>{% endif %}</span>
+    <a href="{{ url_for('sifre_degistir') }}">Şifre</a>
+    <a href="{{ url_for('cikis') }}">Çıkış</a>
+  </div>
+</header>
+{% if k.sifre_degistir %}
+<div class="uyari-serit">Geçici şifre ile girdiniz. Lütfen <a href="{{ url_for('sifre_degistir') }}">şifrenizi değiştirin</a>.</div>
+{% endif %}
+{% endif %}
+{% with mesajlar = get_flashed_messages() %}
+  {% if mesajlar %}<div class="bilgi-serit">{% for m in mesajlar %}<div>{{ m }}</div>{% endfor %}</div>{% endif %}
+{% endwith %}
+<main class="icerik">
+{% block icerik %}{% endblock %}
+</main>
+<div id="toast" class="toast gizli"></div>
+<script src="{{ url_for('static', filename='panel.js') }}"></script>
+{% block script %}{% endblock %}
+</body>
+</html>

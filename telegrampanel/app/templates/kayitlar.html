@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block baslik %}{{ 'Görseller' if gorunum == 'galeri' else 'Kayıtlar' }} - Kanıt Paneli{% endblock %}
+{% block icerik %}
+<form class="filtre" method="get" id="filtre-form">
+  <input type="hidden" name="gorunum" value="{{ gorunum }}">
+  <input type="hidden" name="durum" value="{{ f.durum }}">
+  <div class="filtre-grup">
+    <span class="etiket">Proje</span>
+    {% for p in izinli %}
+    <label class="cip" style="--renk: {{ renk(p) }}; --cipyazi: {{ metin_rengi(renk(p)) }}">
+      <input type="checkbox" name="proje" value="{{ p }}" {{ 'checked' if p in f.proje and f.proje|length != izinli|length }}><span>{{ p }}</span>
+    </label>
+    {% endfor %}
+  </div>
+  <div class="filtre-grup">
+    <input name="q" value="{{ f.q }}" placeholder="Personel kodu / üye ID / link" class="arama">
+    <select name="kategori"><option value="">Tüm kategoriler</option>{% for kat in kategoriler %}<option value="{{ kat }}" {{ 'selected' if kat == f.kategori|upper }}>{{ kat }}</option>{% endfor %}</select>
+    <input name="ekleyen" value="{{ f.ekleyen }}" placeholder="Ekleyen (Telegram adı/ID)">
+    <input type="date" name="tarih1" value="{{ f.tarih1 }}" title="başlangıç"> <input type="date" name="tarih2" value="{{ f.tarih2 }}" title="bitiş">
+    <button class="btn birincil">Filtrele</button>
+    <a class="btn" href="{{ url_for('kayitlar', gorunum=gorunum, durum=f.durum) }}">Temizle</a>
+  </div>
+</form>
+
+<div class="sekme-satir">
+  <div class="sekmeler">
+    {% for d, ad in [('bekleyen','Onay bekleyen'),('onayli','Onaylı'),('silinen','Silinen'),('hepsi','Hepsi')] %}
+    <a class="sekme {{ 'aktif' if f.durum == d }} {{ d }}" href="{{ url_degistir(durum=d) }}">{{ ad }} <b>{{ sayac[d] }}</b></a>
+    {% endfor %}
+  </div>
+  <div class="gorunumler">
+    <a class="{{ 'aktif' if gorunum == 'kart' }}" href="{{ url_degistir(gorunum='kart') }}" title="Kartlar">▦ Kart</a>
+    <a class="{{ 'aktif' if gorunum == 'galeri' }}" href="{{ url_degistir(gorunum='galeri') }}" title="Görsel galerisi">🖼 Galeri</a>
+    <a class="{{ 'aktif' if gorunum == 'tablo' }}" href="{{ url_degistir(gorunum='tablo') }}" title="Tablo">☰ Tablo</a>
+  </div>
+</div>
+
+<p class="kucukyazi">{{ toplam }} kayıt{% if sayfa_sayisi > 1 %} · sayfa {{ sayfa }} / {{ sayfa_sayisi }}{% endif %}{% if f.durum == 'bekleyen' and toplam %} · kartı tıklayın: büyütüp onaylayın, düzenleyin veya silin{% endif %}</p>
+
+{% macro rozetler(k) -%}
+  {% if k.silindi %}<span class="etiket-kucuk kirmizi-arka">silindi</span>{% elif k.excel_durum == 'silinmis' %}<span class="etiket-kucuk gri-arka">Excel'de yok</span>{% endif %}
+  {% if k.bekleyen_hata %}<span class="etiket-kucuk kirmizi-arka" title="{{ k.bekleyen_hata }}">Excel hatası</span>{% elif k.bekleyen_islem %}<span class="etiket-kucuk turuncu-arka" title="Bot Excel'e henüz yazmadı">Excel'e yazılıyor…</span>{% endif %}
+{%- endmacro %}
+
+{% if gorunum == 'tablo' %}
+<table class="tablo kayit-tablo">
+  <thead><tr><th></th><th>Proje</th><th>Kategori</th><th>Personel</th><th>Üye ID</th><th>Ana ID</th><th>Tür</th><th>Tarih</th><th>Ekleyen</th><th>KT</th><th>Link</th></tr></thead>
+  <tbody>
+  {% for k in kayitlar %}
+  <tr class="kayit" data-id="{{ k.id }}">
+    <td>{% if k.gorsel_var %}<img class="mini" loading="lazy" src="{{ url_for('kucuk_goster', kid=k.id) }}" onerror="this.style.display='none'">{% endif %}</td>
+    <td><span class="rozet" style="background: {{ k.renk }}; color: {{ metin_rengi(k.renk) }}">{{ k.proje }}</span></td>
+    <td>{{ k.kategori or '' }}</td><td><b>{{ k.personel or '' }}</b></td><td>{{ k.uye_id or '' }}</td><td>{{ k.ana_uye_id or '' }}</td><td>{{ k.tip or '' }}</td>
+    <td class="nowrap">{{ k.tarih or k.tarih_ham or '' }}</td><td>{{ k.ekleyen_ad or '' }}</td>
+    <td>{% if k.kt %}<span class="kt-isaret">✔</span>{% endif %} {{ rozetler(k) }}</td>
+    <td class="kucukyazi">{% if k.dis_link %}<a href="{{ k.dis_link }}" target="_blank" rel="noopener" onclick="event.stopPropagation()">{{ k.link_turu }}</a>{% else %}{{ k.link_turu }}{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="11">Kayıt bulunamadı.</td></tr>{% endfor %}
+  </tbody>
+</table>
+
+{% elif gorunum == 'galeri' %}
+<div class="galeri">
+  {% for k in kayitlar %}
+  <figure class="kayit galeri-kart {{ 'onayli' if k.kt }} {{ 'silik' if k.silindi }}" data-id="{{ k.id }}" style="--renk: {{ k.renk }}">
+    {% if k.gorsel_var %}<img loading="lazy" src="{{ url_for('kucuk_goster', kid=k.id) }}" alt="" onerror="this.parentNode.classList.add('gorsel-yok')">{% endif %}<div class="gorsel-yok-kutu">{% if k.link_turu == 'gyazo' %}Gyazo görseli açılamadı{% elif k.dis_link %}{{ k.link_turu }} linki{% else %}görsel yok{% endif %}</div>
+    <figcaption>
+      <span class="rozet" style="background: {{ k.renk }}; color: {{ metin_rengi(k.renk) }}">{{ k.proje }}</span>
+      <b>{{ k.personel or '-' }}</b> <span>{{ k.kategori or '' }}</span>
+      <small>{{ (k.tarih or k.tarih_ham or '')[:16] }}{% if k.ekleyen_ad %} · {{ k.ekleyen_ad }}{% endif %}</small>
+      {% if k.kt %}<span class="kt-isaret">✔</span>{% endif %} {{ rozetler(k) }}
+    </figcaption>
+  </figure>
+  {% else %}<div class="kart">Kayıt bulunamadı.</div>{% endfor %}
+</div>
+
+{% else %}
+<div class="kart-izgara">
+  {% for k in kayitlar %}
+  <div class="kayit kayit-kart {{ 'onayli' if k.kt }} {{ 'silik' if k.silindi }}" data-id="{{ k.id }}" style="--renk: {{ k.renk }}">
+    <div class="kart-gorsel">
+      {% if k.gorsel_var %}<img loading="lazy" src="{{ url_for('kucuk_goster', kid=k.id) }}" alt="" onerror="this.parentNode.classList.add('gorsel-yok')">{% endif %}
+      <span class="gorsel-yok-yazi">{% if k.link_turu == 'gyazo' %}Gyazo{% elif k.dis_link %}link{% else %}görsel yok{% endif %}</span>
+      <span class="rozet kose" style="background: {{ k.renk }}; color: {{ metin_rengi(k.renk) }}">{{ k.proje }}</span>
+      {% if k.kt %}<span class="kt-isaret kose-sag" title="onaylı">✔</span>{% endif %}
+    </div>
+    <div class="kart-bilgi">
+      <div class="satir1"><b>{{ k.personel or '—' }}</b> <span class="kat">{{ k.kategori or '' }}</span></div>
+      <div class="satir2">{% if k.uye_id %}Üye {{ k.uye_id }}{% endif %}{% if k.ana_uye_id %} · Ana {{ k.ana_uye_id }}{% endif %}{% if k.tip %} · {{ k.tip }}{% endif %}</div>
+      <div class="satir3"><small>{{ (k.tarih or k.tarih_ham or '')[:16] }}{% if k.ekleyen_ad %} · {{ k.ekleyen_ad }}{% endif %}</small></div>
+      <div class="satir4">{{ rozetler(k) }}</div>
+    </div>
+  </div>
+  {% else %}<div class="kart">Kayıt bulunamadı.</div>{% endfor %}
+</div>
+{% endif %}
+
+{% if sayfa_sayisi > 1 %}
+<div class="sayfalama">
+  {% if sayfa > 1 %}<a class="btn" href="{{ url_degistir() }}&s={{ sayfa - 1 }}">‹ Önceki</a>{% endif %}
+  <span>{{ sayfa }} / {{ sayfa_sayisi }}</span>
+  {% if sayfa < sayfa_sayisi %}<a class="btn" href="{{ url_degistir() }}&s={{ sayfa + 1 }}">Sonraki ›</a>{% endif %}
+</div>
+{% endif %}
+
+<!-- Kayıt penceresi (modal) -->
+<div id="modal" class="modal gizli" aria-hidden="true">
+  <div class="modal-icerik">
+    <button class="modal-kapat" type="button" title="Kapat (Esc)">✕</button>
+    <button class="modal-onceki" type="button" title="Önceki (←)">‹</button>
+    <button class="modal-sonraki" type="button" title="Sonraki (→)">›</button>
+    <div class="modal-govde">
+      <div class="modal-gorsel">
+        <a id="m-gorsel-link" href="#" target="_blank" rel="noopener"><img id="m-gorsel" alt=""></a>
+        <div id="m-gorsel-yok" class="gizli"></div>
+      </div>
+      <div class="modal-bilgi">
+        <div class="modal-baslik"><span id="m-proje" class="rozet"></span> <span id="m-kategori"></span> <span id="m-kt" class="kt-isaret gizli">✔ onaylı</span> <span id="m-durum"></span></div>
+        <dl id="m-alanlar" class="alanlar"></dl>
+        <div id="m-link" class="kucukyazi"></div>
+        <div id="m-butonlar" class="modal-butonlar"></div>
+        <form id="m-duzenle" class="duzenle-form gizli" autocomplete="off">
+          <label>Personel kodu<input name="personel"></label>
+          <label>Üye ID<input name="uye_id"></label>
+          <label>Ana üye ID<input name="ana_uye_id"></label>
+          <label>Tür<input name="tip"></label>
+          <label>Kategori<input name="kategori" list="kategori-listesi"></label>
+          <label>Açıklama<input name="aciklama"></label>
+          <div><button class="btn birincil" type="submit">Kaydet</button> <button class="btn" type="button" id="m-duzenle-iptal">Vazgeç</button></div>
+        </form>
+        <details id="m-gecmis-kutu"><summary>Geçmiş</summary><ul id="m-gecmis" class="gecmis"></ul></details>
+      </div>
+    </div>
+  </div>
+</div>
+<datalist id="kategori-listesi">{% for kat in kategoriler %}<option value="{{ kat }}">{% endfor %}</datalist>
+{% endblock %}
+{% block script %}<script>Panel.kayitSayfasi({{ f.durum|tojson }});</script>{% endblock %}

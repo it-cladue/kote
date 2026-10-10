@@ -1,0 +1,8 @@
+panel_ayar.json
+panel.db
+panel.db-wal
+panel.db-shm
+tmp/
+venv/
+__pycache__/
+*.pyc

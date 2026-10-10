@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block baslik %}Ana sayfa - Kanıt Paneli{% endblock %}
+{% block icerik %}
+<div class="durum-serit" id="durum-serit">
+  <span class="durum-parca">Bot:
+    {% if durum.bot.canli %}<b class="yesil">çalışıyor</b>{% elif durum.bot.canli is none %}<b class="gri">bilinmiyor</b>{% else %}<b class="kirmizi">ÇALIŞMIYOR</b>{% endif %}
+    {% if durum.log_son %}<small>(son log: {{ durum.log_son }})</small>{% endif %}
+  </span>
+  <span class="durum-parca">Excel: <b>{{ durum.excel_mtime or '-' }}</b></span>
+  <span class="durum-parca">Son okuma:
+    {% if durum.son_ice_aktarim %}<b>{{ durum.son_ice_aktarim.zaman }}</b>{% if durum.son_ice_aktarim.hata %} <span class="kirmizi">HATA: {{ durum.son_ice_aktarim.hata }}</span>{% endif %}{% else %}<b>henüz yok</b>{% endif %}
+  </span>
+  {% if durum.bekleyen_islem %}<span class="durum-parca turuncu">Excel'e yazılmayı bekleyen işlem: <b>{{ durum.bekleyen_islem }}</b></span>{% endif %}
+</div>
+
+<form class="arama-buyuk" method="get" action="{{ url_for('kayitlar') }}">
+  <input type="hidden" name="durum" value="hepsi">
+  <input name="q" placeholder="Personel kodu, üye ID veya link ile ara…" autofocus>
+  <button class="btn birincil">Ara</button>
+</form>
+
+<div class="proje-izgara">
+{% for kart in kartlar %}
+  <div class="proje-kart" style="border-top-color: {{ renk(kart.proje) }}">
+    <div class="proje-baslik">
+      <span class="rozet" style="background: {{ renk(kart.proje) }}; color: {{ metin_rengi(renk(kart.proje)) }}">{{ kart.proje }}</span>
+      <small>{{ kart.toplam }} kayıt{% if kart.bugun %} · bugün {{ kart.bugun }}{% endif %}</small>
+    </div>
+    <div class="proje-butonlar">
+      <a class="btn sayi-btn bekleyen" href="{{ url_for('kayitlar', proje=kart.proje, durum='bekleyen') }}"><b>{{ kart.bekleyen }}</b><span>Onay bekleyen</span></a>
+      <a class="btn sayi-btn onayli" href="{{ url_for('kayitlar', proje=kart.proje, durum='onayli') }}"><b>{{ kart.onayli }}</b><span>Onaylı</span></a>
+      <a class="btn sayi-btn silinen" href="{{ url_for('kayitlar', proje=kart.proje, durum='silinen') }}"><b>{{ kart.silinen }}</b><span>Silinen</span></a>
+    </div>
+    <div class="proje-alt">
+      <a href="{{ url_for('kayitlar', proje=kart.proje, durum='hepsi', gorunum='galeri') }}">🖼 Görseller</a>
+      <a href="{{ url_for('kayitlar', proje=kart.proje, durum='hepsi', gorunum='tablo') }}">☰ Tablo</a>
+    </div>
+  </div>
+{% else %}
+  <div class="kart">Henüz görebileceğiniz proje yok. {% if not durum.son_ice_aktarim %}Excel ilk okumada; birkaç saniye sonra yenileyin.{% else %}Yetkinizi süper admine sorun.{% endif %}</div>
+{% endfor %}
+</div>
+{% endblock %}

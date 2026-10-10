@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block baslik %}Bot yönetimi{% endblock %}
+{% block icerik %}
+<h2>Bot yönetimi</h2>
+{% if mesaj %}<div class="bilgi">{{ mesaj }}</div>{% endif %}
+
+<div class="durum-serit">
+  <span class="durum-parca">Bot: {% if durum.bot.canli %}<b class="yesil">çalışıyor</b>{% elif durum.bot.canli is none %}<b class="gri">bilinmiyor</b>{% else %}<b class="kirmizi">ÇALIŞMIYOR</b>{% endif %}
+    {% if durum.bot.yas_sn is not none %}<small>({{ durum.bot.yas_sn }} sn önce nabız)</small>{% endif %}</span>
+  <span class="durum-parca">Son log: <b>{{ durum.log_son or '-' }}</b></span>
+  <span class="durum-parca">Excel: <b>{{ durum.excel_mtime or '-' }}</b></span>
+  <span class="durum-parca">Kuyrukta bekleyen: <b>{{ durum.kuyruk_bekleyen }}</b></span>
+  <span class="durum-parca">Bakım modu: {% if bakim %}<b class="kirmizi">AÇIK</b>{% else %}<b class="yesil">kapalı</b>{% endif %}</span>
+  <span class="durum-parca">Gyazo bakım: {% if gyazo_bakim %}<b class="turuncu">AÇIK (diske kaydediyor)</b>{% else %}<b class="yesil">kapalı (Gyazo açık)</b>{% endif %}</span>
+</div>
+
+<div class="buton-satir">
+  {% macro islem_btn(islem, etiket, sinif='', onay='') -%}
+  <form method="post" class="satir-form" {% if onay %}onsubmit="return confirm('{{ onay }}')"{% endif %}>
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="{{ islem }}">
+    <button class="btn {{ sinif }}">{{ etiket }}</button>
+  </form>
+  {%- endmacro %}
+  {% if bakim %}{{ islem_btn('bakim_kapat', '🔓 Bakım modunu kapat', 'birincil') }}{% else %}{{ islem_btn('bakim_ac', '🔒 Bakım modunu aç', 'tehlike', 'Bot herkese "bakımda" diyecek. Emin misiniz?') }}{% endif %}
+  {% if gyazo_bakim %}{{ islem_btn('gyazo_bakim_kapat', '☁ Gyazo linkini AÇ', 'birincil') }}{% else %}{{ islem_btn('gyazo_bakim_ac', '💾 Gyazo bakımı aç (diske kaydet)', '', 'Görseller Gyazo yerine diske kaydedilecek. Emin misiniz?') }}{% endif %}
+  {{ islem_btn('yedek', '🗜 Yedek al') }}
+  {{ islem_btn('yenile', '🔄 Excel\'i şimdi oku') }}
+  {{ islem_btn('oturum_temizle', '🧹 Tüm oturumları temizle', '', 'Yarım kalan tüm kullanıcı oturumları silinecek. Emin misiniz?') }}
+</div>
+
+<div class="iki-kolon">
+<div class="kart">
+  <h3>Telegram kullanıcıları <small>({{ tg_kullanicilar|length }})</small></h3>
+  <form method="post" class="filtre-satir" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="tg_id" placeholder="Telegram ID" required pattern="[0-9]{5,15}">
+    <input name="ad" placeholder="ad (isteğe bağlı)">
+    <input name="sebep" placeholder="engel sebebi">
+    <button class="btn" name="islem" value="onayla">Onayla</button>
+    <button class="btn tehlike" name="islem" value="engelle">Engelle</button>
+  </form>
+  <div class="kaydir">
+  <table class="tablo kucuk">
+    <thead><tr><th>ID</th><th>Kullanıcı</th><th>Son görülme</th><th>Kayıt</th><th>Durum</th><th></th></tr></thead>
+    <tbody>
+    {% for u in tg_kullanicilar %}
+    <tr>
+      <td><code>{{ u.id }}</code></td>
+      <td>{{ u.username }}{% if u.first_name %} <small>{{ u.first_name }}</small>{% endif %}</td>
+      <td class="nowrap">{{ u.last_seen or '' }}</td>
+      <td>{{ u.kayit_sayisi }}</td>
+      <td>{% if u.engelli %}<b class="kirmizi">engelli</b> <small>{{ u.engel_sebep }}</small>{% elif u.onayli %}<span class="yesil">onaylı</span> <small>{{ u.onay_tarihi }}</small>{% else %}<span class="gri">onaysız</span>{% endif %}</td>
+      <td class="nowrap">
+        <form method="post" class="satir-form">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="tg_id" value="{{ u.id }}"><input type="hidden" name="ad" value="{{ u.username }}">
+          {% if u.engelli %}<button class="btn kucuk" name="islem" value="engel_kaldir">Engeli kaldır</button>
+          {% else %}
+            {% if u.onayli %}<button class="btn kucuk" name="islem" value="onay_kaldir">Onayı kaldır</button>{% else %}<button class="btn kucuk" name="islem" value="onayla">Onayla</button>{% endif %}
+            <button class="btn kucuk tehlike" name="islem" value="engelle">Engelle</button>
+          {% endif %}
+          <button class="btn kucuk" name="islem" value="oturum_temizle" title="yarım kalan oturumu sil">Oturum</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div>
+<div class="kart">
+  <h3>Kategoriler</h3>
+  <table class="tablo kucuk">
+    <thead><tr><th>Kod</th><th>Etiket</th><th>Mod</th><th></th></tr></thead>
+    <tbody>
+    {% for kat in kategoriler %}
+    <tr><td><code>{{ kat.code }}</code></td><td>{{ kat.label }}</td><td>{{ kat.mode }}</td>
+      <td><form method="post" class="satir-form" onsubmit="return confirm('{{ kat.code }} kategorisi silinsin mi?')"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="kategori_sil"><input type="hidden" name="code" value="{{ kat.code }}"><button class="btn kucuk tehlike">Sil</button></form></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" class="filtre-satir" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="kategori_ekle">
+    <input name="code" placeholder="kod (örn: gm)" required pattern="[a-z0-9_]+">
+    <input name="label" placeholder="etiket (örn: 🎮 GM)" required>
+    <select name="mode"><option value="tek_uye">tek_uye</option><option value="ana_alt">ana_alt</option><option value="yazili">yazili</option></select>
+    <button class="btn">Ekle / güncelle</button>
+  </form>
+</div>
+
+<div class="kart">
+  <h3>Açık oturumlar <small>({{ oturumlar|length }})</small></h3>
+  {% if oturumlar %}
+  <table class="tablo kucuk">
+    <thead><tr><th>ID</th><th>Adım</th><th>Proje</th><th>Kategori</th><th></th></tr></thead>
+    <tbody>
+    {% for o in oturumlar %}
+    <tr><td><code>{{ o.id }}</code></td><td>{{ o.step or o.adim or '' }}</td><td>{{ o.proje or '' }}</td><td>{{ o.kategori or '' }}</td>
+      <td><form method="post" class="satir-form"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="oturum_temizle"><input type="hidden" name="tg_id" value="{{ o.id }}"><button class="btn kucuk">Temizle</button></form></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="kucukyazi">Açık oturum yok.</p>{% endif %}
+</div>
+
+<div class="kart">
+  <h3>Bot ayarları <small>(config.json, gizli alanlar hariç)</small></h3>
+  <table class="tablo kucuk">
+    {% for ad, deger in cfg.items() %}<tr><td><code>{{ ad }}</code></td><td>{{ deger }}</td></tr>{% endfor %}
+  </table>
+</div>
+</div>
+</div>
+
+<div class="kart">
+  <h3>Son hatalar</h3>
+  <pre class="log">{% for s in hatalar %}{{ s }}
+{% else %}(hata yok){% endfor %}</pre>
+  <h3>Son log</h3>
+  <pre class="log">{% for s in log %}{{ s }}
+{% endfor %}</pre>
+</div>
+{% endblock %}
