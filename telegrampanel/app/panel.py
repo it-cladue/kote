@@ -78,12 +78,20 @@ def bot_klasoru_adaylari(mevcut=None):
 
 def ayar_yukle():
     ham = {}
+    bozuk = False
     if os.path.exists(AYAR_YOL):
         try:
             with open(AYAR_YOL, encoding="utf-8-sig") as f:
                 ham = json.load(f)
         except Exception as e:
-            print("panel_ayar.json okunamadi:", e)
+            # Elle duzenlenirken bozulmus olabilir: ustune YAZMA, kenara al, varsayilanlarla devam et
+            bozuk = True
+            try:
+                yedek = AYAR_YOL + ".bozuk-" + datetime.now().strftime("%Y%m%d-%H%M%S")
+                os.replace(AYAR_YOL, yedek)
+                print(f"! panel_ayar.json okunamadi ({e}); dosya {yedek} olarak kenara alindi, varsayilan ayarlarla devam ediliyor.")
+            except Exception:
+                print("! panel_ayar.json okunamadi:", e)
     degisti = False
     if not ham.get("GIZLI_ANAHTAR"):
         ham["GIZLI_ANAHTAR"] = secrets.token_hex(32)
@@ -93,7 +101,7 @@ def ayar_yukle():
         if adaylar:
             ham["BOT_KLASOR"] = adaylar[0]
             degisti = True
-    if degisti:
+    if degisti and not bozuk:
         ayar_dosyaya_yaz(ham)
     return ayar_turet(ham)
 
@@ -457,6 +465,7 @@ def kayit_sozluk(r):
     d["izin_kt"] = kayit_izin(d, "kt")
     d["izin_duzenle"] = kayit_izin(d, "duzenle")
     d["izin_sil"] = kayit_izin(d, "sil")
+    d["geri_al_olur"] = bool(d.get("silindi")) and d.get("bekleyen_islem") != "sil"
     d["dis_link"] = d["link"] if (d.get("link") or "").startswith("http") else None
     return d
 
@@ -531,14 +540,18 @@ def kayit_duzenle(kid):
             alanlar[kolon] = (request.form.get(k) or "").strip()[:200]
     if not alanlar:
         return jsonify({"ok": False, "hata": "degisiklik yok"})
+    if "kategori" in alanlar:
+        alanlar["kategori"] = alanlar["kategori"].upper()   # bot Excel'e buyuk harfle yazar
     eski = {k: r[k] for k in alanlar}
-    if all((eski[k] or "") == alanlar[k] for k in alanlar):
+    alanlar = {k: v for k, v in alanlar.items() if (eski[k] or "") != v}   # yalnizca DEGISEN alanlar gider (baska adminin duzeltmesi ezilmez)
+    if not alanlar:
         return jsonify({"ok": True, "degisiklik": False})
+    eski = {k: eski[k] for k in alanlar}
     c = baglanti()
-    qid = kuyruk.ekle(AYAR, "duzenle", r["proje"], r["link"], _parmak(r),
-                      {"personel": alanlar.get("personel", r["personel"]), "uye": alanlar.get("uye_id", r["uye_id"]), "ana": alanlar.get("ana_uye_id", r["ana_uye_id"]),
-                       "tip": alanlar.get("tip", r["tip"]), "kategori": alanlar.get("kategori", r["kategori"]), "aciklama": alanlar.get("aciklama", r["aciklama"]), "satir": r["excel_satir"]},
-                      g.k["kullanici_adi"], r["anahtar"])
+    ad_haritasi = {"personel": "personel", "uye_id": "uye", "ana_uye_id": "ana", "tip": "tip", "kategori": "kategori", "aciklama": "aciklama"}
+    deger = {ad_haritasi[k]: v for k, v in alanlar.items()}
+    deger["satir"] = r["excel_satir"]
+    qid = kuyruk.ekle(AYAR, "duzenle", r["proje"], r["link"], _parmak(r), deger, g.k["kullanici_adi"], r["anahtar"])
     sets = ", ".join(f"{k}=?" for k in alanlar)
     c.execute(f"UPDATE kayitlar SET {sets}, bekleyen_islem='duzenle', bekleyen_id=?, bekleyen_hata=NULL, guncelleme=? WHERE id=?", (*alanlar.values(), qid, simdi(), kid))
     db.denetim_yaz(c, g.k["kullanici_adi"], "duzenle", r["proje"], r["anahtar"], json.dumps(eski, ensure_ascii=False), json.dumps(alanlar, ensure_ascii=False), ip())
@@ -561,9 +574,11 @@ def kayit_sil(kid):
 @giris_gerekli
 def kayit_geri_al(kid):
     r = _kayit_al(kid, "sil")
+    if r["bekleyen_islem"] == "sil":
+        return jsonify({"ok": False, "hata": "Silme islemi henuz bota ulasmadi; bot cevaplayinca geri alabilirsiniz."})
     c = baglanti()
-    degerler = [r["personel"] or "", r["uye_id"] or "", r["ana_uye_id"] or "", r["tip"] or "", r["link"] or "", (r["kategori"] or "").upper(), r["tarih"] or r["tarih_ham"] or ""]
-    qid = kuyruk.ekle(AYAR, "ekle", r["proje"], r["link"], _parmak(r), {"degerler": degerler, "kt": bool(r["kt"])}, g.k["kullanici_adi"], r["anahtar"])
+    degerler = [r["personel"] or "", r["uye_id"] or "", r["ana_uye_id"] or "", r["tip"] or "", r["link"] or "", (r["kategori"] or "").upper(), r["tarih_ham"] or r["tarih"] or ""]
+    qid = kuyruk.ekle(AYAR, "ekle", r["proje"], r["link"], _parmak(r), {"degerler": degerler, "kt": bool(r["kt"]), "gorsel2": r["gorsel2"] or "", "aciklama": r["aciklama"] or ""}, g.k["kullanici_adi"], r["anahtar"])
     c.execute("UPDATE kayitlar SET silindi=0, silen=NULL, silme_zamani=NULL, bekleyen_islem='geri_al', bekleyen_id=?, bekleyen_hata=NULL, guncelleme=? WHERE id=?", (qid, simdi(), kid))
     db.denetim_yaz(c, g.k["kullanici_adi"], "geri_al", r["proje"], r["anahtar"], None, json.dumps(degerler, ensure_ascii=False), ip())
     return jsonify({"ok": True})
@@ -855,6 +870,14 @@ def panel_calisiyor_mu(port):
 
 
 def calistir():
+    if sys.stdout is None or sys.stderr is None:
+        # pythonw / gorev zamanlayici: konsol yok, ciktiyi dosyaya yaz
+        try:
+            f = open(os.path.join(VERI_KOK, "panel.log"), "a", encoding="utf-8")
+            sys.stdout = sys.stdout or f
+            sys.stderr = sys.stderr or f
+        except Exception:
+            pass
     if len(sys.argv) > 1 and komut(sys.argv[1:]):
         return
     port = int(AYAR["PORT"])

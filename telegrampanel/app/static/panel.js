@@ -128,8 +128,10 @@ window.Panel = (function () {
         if (k.izin_kt) b.push(k.kt ? '<button class="btn" data-islem="kt" data-deger="0">Onayı kaldır</button>' : '<button class="btn basari" data-islem="kt" data-deger="1">✔ Onayla</button>');
         if (k.izin_duzenle) b.push('<button class="btn" data-islem="duzenle">✎ Düzenle</button>');
         if (k.izin_sil) b.push('<button class="btn tehlike" data-islem="sil">🗑 Sil</button>');
-      } else if (k.izin_sil) {
+      } else if (k.izin_sil && k.geri_al_olur) {
         b.push('<button class="btn" data-islem="geri_al">↩ Geri al (Excel\'e yeniden ekle)</button>');
+      } else if (k.izin_sil) {
+        b.push('<span class="kucukyazi">Silme işlemi bota ulaşınca geri alınabilir.</span>');
       }
       var kutu = document.getElementById('m-butonlar');
       kutu.innerHTML = b.join('');

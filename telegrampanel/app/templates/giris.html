@@ -9,6 +9,7 @@
 <body class="giris-sayfa">
 <form class="giris-kutu" method="post" autocomplete="off">
   <h1>📋 Kanıt Paneli</h1>
+  {% with mesajlar = get_flashed_messages() %}{% if mesajlar %}<div class="bilgi">{% for m in mesajlar %}{{ m }}<br>{% endfor %}</div>{% endif %}{% endwith %}
   {% if hata %}<div class="hata">{{ hata }}</div>{% endif %}
   <label>Kullanıcı adı<input name="kullanici" required autofocus autocapitalize="off"></label>
   <label>Şifre<input name="sifre" type="password" required></label>

@@ -205,66 +205,105 @@ function Get-PanelWorksheet($sayfaAdi) {
 # Hucre degerini karsilastirma icin metne cevirir (sayi -> "123", tarih sayisi -> "yyyy-MM-dd HH:mm:ss").
 function Get-PanelHucreMetni($ws, $satir, $sutun) {
     try {
-        $v = $ws.Cells($satir, $sutun).Value2
+        $hucre = $ws.Cells($satir, $sutun)
+        $v = $hucre.Value2
         if ($null -eq $v) { return "" }
         if ($v -is [double]) {
-            if ($sutun -eq 7 -and $v -gt 20000) { return ([DateTime]::FromOADate($v)).ToString("yyyy-MM-dd HH:mm:ss") }
+            # Tarih olarak yazilmis hucre (G sutunu ya da tarih bicimli herhangi bir hucre) -> panelin gordugu metin
+            $nf = ""; try { $nf = [string]$hucre.NumberFormat } catch { $nf = "" }
+            if (($sutun -eq 7 -and $v -gt 20000) -or ($v -gt 20000 -and $v -lt 80000 -and $nf -match '[dmyDMY]')) {
+                $dt = [DateTime]::FromOADate($v)
+                return $dt.ToString("yyyy-MM-dd HH:mm:ss")
+            }
             if ([math]::Floor($v) -eq $v) { return ([int64]$v).ToString() }
         }
         return ([string]$v).Trim()
     } catch { return "" }
 }
 
-function Test-PanelSatirEslesiyor($ws, $satir, $link, $parmak) {
-    if ($link) {
-        if ((Get-PanelHucreMetni $ws $satir 5) -ne $link) { return $false }
-        if ($parmak -and $parmak.personel -and ((Get-PanelHucreMetni $ws $satir 1) -ne ([string]$parmak.personel).Trim())) { return $false }
-        return $true
-    }
-    if (-not $parmak) { return $false }
+# Parmak izi karsilastirmasi: panelin bildigi A,B,C,D,F (ve varsa G) degerleri satirla ayni mi?
+function Test-PanelParmakIzi($ws, $satir, $parmak, [bool]$bosOlabilir) {
+    if (-not $parmak) { return $bosOlabilir }
     $dolu = 0
     foreach ($a in @(@(1, 'personel'), @(2, 'uye'), @(3, 'ana'), @(4, 'tip'), @(6, 'kategori'))) {
-        $beklenen = ([string]$parmak.($a[1])).Trim()
+        $prop = $parmak.PSObject.Properties[$a[1]]
+        if (-not $prop) { continue }   # panel bu alani gondermemis: karsilastirma
+        $beklenen = ([string]$prop.Value).Trim()
         if ($beklenen -ne (Get-PanelHucreMetni $ws $satir $a[0])) { return $false }
         if ($beklenen) { $dolu++ }
     }
-    if ($dolu -eq 0) { return $false }
-    $t = ([string]$parmak.tarih).Trim()
+    if ($dolu -eq 0 -and -not $bosOlabilir) { return $false }
+    $t = ""; $tp = $parmak.PSObject.Properties['tarih']; if ($tp) { $t = ([string]$tp.Value).Trim() }
     if ($t) { $h = Get-PanelHucreMetni $ws $satir 7; if ($h -and $h -ne $t) { return $false } }
     return $true
 }
 
+function Test-PanelSatirEslesiyor($ws, $satir, $link, $parmak) {
+    if ($link) {
+        if ((Get-PanelHucreMetni $ws $satir 5) -ne $link) { return $false }
+        # Ayni link birden fazla satirda olabilir (ayni ekran goruntusu iki uye icin): A,B,C,D,F de uymali
+        return (Test-PanelParmakIzi $ws $satir $parmak $true)
+    }
+    return (Test-PanelParmakIzi $ws $satir $parmak $false)
+}
+
 # Panelin bildigi satir numarasi hala ayni kaydi gosteriyorsa onu kullanir; degilse E sutununda (link) arar,
 # link yoksa A,B,C,D,F,G parmak iziyle tarar. 0 = bulunamadi.
-function Find-PanelSatir($ws, $link, $parmak, $ipucu) {
+# Linki (E sutunu) ya da linksizse parmak izi eslesen TUM satirlar (artan sira)
+function Get-PanelAdaySatirlar($ws, $link, $parmak) {
     $link = ([string]$link).Trim()
     $sonSatir = [int](Get-ExcelLastDataRow $ws 7)
-    if ($ipucu -and $ipucu -ge 2 -and $ipucu -le $sonSatir) {
-        if (Test-PanelSatirEslesiyor $ws $ipucu $link $parmak) { return [int]$ipucu }
-    }
-    if ($sonSatir -lt 2) { return 0 }
+    $adaylar = @()
+    if ($sonSatir -lt 2) { return @() }
     if ($link) {
-        $adaylar = @()
+        $linkli = @()
         if ($sonSatir -eq 2) {
-            if (([string]$ws.Cells(2, 5).Value2).Trim() -eq $link) { $adaylar += 2 }
+            if (([string]$ws.Cells(2, 5).Value2).Trim() -eq $link) { $linkli += 2 }
         } else {
             $degerler = $ws.Range("E2:E$sonSatir").Value2
             $lb0 = $degerler.GetLowerBound(0); $lb1 = $degerler.GetLowerBound(1)
             for ($i = 2; $i -le $sonSatir; $i++) {
                 $v = $degerler[($lb0 + $i - 2), $lb1]
-                if ($null -ne $v -and ([string]$v).Trim() -eq $link) { $adaylar += $i }
+                if ($null -eq $v) { continue }
+                $m = if ($v -is [double]) { Get-PanelHucreMetni $ws $i 5 } else { ([string]$v).Trim() }
+                if ($m -eq $link) { $linkli += $i }
             }
         }
-        if ($adaylar.Count -eq 1) { return [int]$adaylar[0] }
-        if ($adaylar.Count -gt 1) {
-            foreach ($a in $adaylar) { if (Test-PanelSatirEslesiyor $ws $a $link $parmak) { return [int]$a } }
-            return [int]$adaylar[0]
-        }
-        return 0
+        if ($linkli.Count -le 1) { return $linkli }
+        foreach ($a in $linkli) { if (Test-PanelParmakIzi $ws $a $parmak $true) { $adaylar += $a } }
+        $script:PanelLinkAdaylari = $linkli
+        return $adaylar
     }
     for ($i = 2; $i -le $sonSatir; $i++) {
-        if (Test-PanelSatirEslesiyor $ws $i "" $parmak) { return [int]$i }
+        if (Test-PanelParmakIzi $ws $i $parmak $false) { $adaylar += $i }
     }
+    return $adaylar
+}
+
+# Panelin bildigi satir numarasi hala ayni kaydi gosteriyorsa onu kullanir; degilse E sutununda (link) arar,
+# link yoksa A,B,C,D,F,G parmak iziyle tarar. Birden fazla satir uyuyorsa ipucuna en yakin TEK satir secilir;
+# yine belirsizse 0 doner (yanlis satiri degistirmektense "bulunamadi" demek daha guvenli).
+function Find-PanelSatir($ws, $link, $parmak, $ipucu) {
+    $script:PanelBulunamadiSebep = "link / bilgiler uymuyor; satir elle degismis olabilir"
+    $script:PanelLinkAdaylari = @()
+    $link = ([string]$link).Trim()
+    $sonSatir = [int](Get-ExcelLastDataRow $ws 7)
+    if ($ipucu -and $ipucu -ge 2 -and $ipucu -le $sonSatir) {
+        if (Test-PanelSatirEslesiyor $ws $ipucu $link $parmak) { return [int]$ipucu }
+    }
+    $adaylar = @(Get-PanelAdaySatirlar $ws $link $parmak)
+    if ($adaylar.Count -eq 1) { return [int]$adaylar[0] }
+    if ($adaylar.Count -eq 0) {
+        if ($script:PanelLinkAdaylari.Count -gt 1) { $script:PanelBulunamadiSebep = "ayni link $($script:PanelLinkAdaylari.Count) satirda var ama bilgiler (uye/tip/kategori) hicbiriyle uymuyor; paneli yenileyip tekrar deneyin" }
+        return 0
+    }
+    if ($ipucu -and $ipucu -gt 0) {
+        $sirali = $adaylar | Sort-Object { [math]::Abs($_ - $ipucu) }
+        $enYakin = [int]$sirali[0]
+        $ikinci = if ($sirali.Count -gt 1) { [int]$sirali[1] } else { $null }
+        if ($null -eq $ikinci -or [math]::Abs($ikinci - $ipucu) -gt [math]::Abs($enYakin - $ipucu)) { return $enYakin }
+    }
+    $script:PanelBulunamadiSebep = "birebir ayni $($adaylar.Count) satir var (satirlar: $($adaylar -join ', ')); hangisi oldugu belirsiz, Excel'de elle islem yapin"
     return 0
 }
 
@@ -341,35 +380,49 @@ function Invoke-PanelIslem($is) {
     $ipucu = 0
     try { if ($deger -and $deger.satir) { $ipucu = [int]$deger.satir } } catch { $ipucu = 0 }
     if ($op -eq "ekle") {
-        # Panelden "geri al": satir Excel'e yeniden eklenir (A..G), istenirse KT isaretlenir.
+        # Panelden "geri al": satir hala duruyorsa (silme uygulanmamis / bulunamamis) ikinci satir ACILMAZ, sadece KT/I/J yazilir.
         $degerler = @()
         foreach ($d in @($deger.degerler)) { $degerler += [string]$d }
         if ($degerler.Count -lt 5) { return @{ durum = "hata"; mesaj = "ekle: eksik deger"; satir = $null } }
-        Add-ExcelRow $sayfa $degerler $degerler[4]
-        $yeni = Find-PanelSatir $ws $degerler[4] $is.parmak 0
-        if ($yeni -gt 0 -and $deger.kt) { $ws.Cells($yeni, 8).Value2 = $true; $global:xlWb.Save() }
-        return @{ durum = "ok"; mesaj = "eklendi"; satir = $(if ($yeni -gt 0) { $yeni } else { $null }) }
+        $mevcut = @(Get-PanelAdaySatirlar $ws $degerler[4] $is.parmak)
+        if ($mevcut.Count -gt 0) {
+            $yeni = [int]$mevcut[$mevcut.Count - 1]
+            $mesaj = "satir zaten vardi (satir $yeni), yeniden eklenmedi"
+        } else {
+            Add-ExcelRow $sayfa $degerler[0..6] $degerler[4]
+            $sonra = @(Get-PanelAdaySatirlar $ws $degerler[4] $is.parmak)
+            if ($sonra.Count -eq 0) { return @{ durum = "hata"; mesaj = "satir eklendi ama bulunamadi"; satir = $null } }
+            $yeni = [int]$sonra[$sonra.Count - 1]   # en alttaki = yeni eklenen
+            $mesaj = "eklendi"
+        }
+        $ws.Cells($yeni, 8).Value2 = [bool]$deger.kt
+        foreach ($ek in @(@(9, 'gorsel2'), @(10, 'aciklama'))) {
+            $prop = $deger.PSObject.Properties[$ek[1]]
+            if ($prop -and ([string]$prop.Value) -ne "") { $h = $ws.Cells($yeni, $ek[0]); $h.NumberFormat = "@"; $h.Value2 = (Protect-ExcelValue ([string]$prop.Value)) }
+        }
+        $global:xlWb.Save()
+        return @{ durum = "ok"; mesaj = $mesaj; satir = $yeni }
     }
     $satir = Find-PanelSatir $ws $is.link $is.parmak $ipucu
-    if ($satir -lt 2) { return @{ durum = "bulunamadi"; mesaj = "Excel'de satir bulunamadi (link / bilgiler uymuyor; satir elle degismis olabilir)"; satir = $null } }
+    if ($satir -lt 2) { return @{ durum = "bulunamadi"; mesaj = "Excel'de satir bulunamadi ($($script:PanelBulunamadiSebep))"; satir = $null } }
     switch ($op) {
         "kt" {
             $ws.Cells($satir, 8).Value2 = [bool]$deger.kt
         }
         "duzenle" {
-            $yaz = @{ 1 = $deger.personel; 2 = $deger.uye; 3 = $deger.ana; 4 = $deger.tip; 6 = $deger.kategori }
-            foreach ($k in @(1, 2, 3, 4, 6)) {
-                $hucre = $ws.Cells($satir, $k)
+            # Yalnizca panelin GONDERDIGI alanlar yazilir; digerleri Excel'de ne ise oyle kalir (baska adminin duzeltmesi ezilmez).
+            $yazildi = 0
+            foreach ($k in @(@(1, 'personel'), @(2, 'uye'), @(3, 'ana'), @(4, 'tip'), @(6, 'kategori'), @(10, 'aciklama'))) {
+                $prop = $deger.PSObject.Properties[$k[1]]
+                if (-not $prop) { continue }
+                $hucre = $ws.Cells($satir, $k[0])
                 $hucre.NumberFormat = "@"
-                $v = [string]$yaz[$k]
-                if ($k -eq 6) { $v = $v.ToUpperInvariant() }
+                $v = [string]$prop.Value
+                if ($k[0] -eq 6) { $v = $v.ToUpperInvariant() }
                 $hucre.Value2 = (Protect-ExcelValue $v)
+                $yazildi++
             }
-            if ($null -ne $deger.aciklama) {
-                $hucre = $ws.Cells($satir, 10)
-                $hucre.NumberFormat = "@"
-                $hucre.Value2 = (Protect-ExcelValue ([string]$deger.aciklama))
-            }
+            if ($yazildi -eq 0) { return @{ durum = "hata"; mesaj = "duzenle: degisecek alan yok"; satir = $satir } }
         }
         "sil" {
             $ws.Rows($satir).Delete() | Out-Null

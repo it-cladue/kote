@@ -19,10 +19,12 @@ NASIL CALISIR (ozet)
 - Bu yuzden bot bilgisayarinda YENI telebot.ps1 (bu paketteki) calisiyor olmali.
 
 
-1) ILK KURULUM (bot sahibi, bir kez)
-------------------------------------
+1) ILK KURULUM (bot sahibi, bir kez; tercihen BOT BILGISAYARINDA)
+----------------------------------------------------------------
+Dosyalar: bu paketin icinde (KanitPaneli.exe, telebot.ps1). Sonraki surumler GitHub'da:
+  https://github.com/it-cladue/kote/releases  -> en ustteki surum -> KanitPaneli.exe ve telebot.ps1
 a) Eski telebot.ps1'in yerine bu paketteki telebot.ps1'i koyun, botu yeniden baslatin.
-   (Ayni bot; ek olarak panel kuyrugunu okur, heartbeat.txt ve kayitlar.jsonl yazar.)
+   (Ayni bot; ek olarak panel kuyrugunu okur, heartbeat.txt ve kayitlar.jsonl yazar. config.json aynen kalir.)
 b) KanitPaneli.exe dosyasini bot klasorune (OneDrive - Get Mails\telegramkant) kopyalayin.
 c) Exe'ye cift tiklayin. Windows "Bilgisayariniz korundu" derse: "Daha fazla bilgi" -> "Yine de calistir"
    (exe imzali degildir; bir kez onaylanir). Siyah bir pencere acilir ve tarayici kendiliginden gelir.
@@ -30,6 +32,8 @@ c) Exe'ye cift tiklayin. Windows "Bilgisayariniz korundu" derse: "Daha fazla bil
 d) Ilk ekran: bot klasoru. Exe bot klasorunun icindeyse otomatik bulunur; "Kaydet ve devam et".
 e) Sonraki ekran: ILK SUPER ADMIN. Kullanici adi ve sifre belirleyin. Bu liste bot klasorunde
    panel_kullanicilar.json dosyasinda tutulur; OneDrive ile herkese gider, herkes ayni listeyi kullanir.
+   (Ilk kurulumu bot bilgisayarinda degil de baska bir bilgisayarda yapiyorsaniz ve ekran "bot admin
+   sifresi" sorarsa: config.json icindeki ADMIN_PASSWORD'u girin.)
 f) Giris yapin. "Kullanicilar" sayfasindan takim adminlerini acin (yetki ornekleri asagida).
    Her kullaniciya bir GECICI sifre verilir; ilk giriste kendi sifresini belirler.
 
@@ -52,10 +56,13 @@ f) Giris yapin. "Kullanicilar" sayfasindan takim adminlerini acin (yetki ornekle
 DIKKAT: Klasoru paylasmak, klasordeki HER SEYI (config.json icindeki bot token'lari dahil)
 paylasmak demektir. Klasore erisen herkes Excel'i ve panel dosyalarini dogrudan da degistirebilir;
 panelin yetki sistemi "duzgun kullanim" icindir, kotu niyetli bir ortaga karsi koruma degildir.
-Yalnizca guvendiginiz kisilerle paylasin. Daha guvenlisi: token ve sifreleri
-config.json'dan cikarip bot bilgisayarinda TELEBOT_TELEGRAM_TOKEN, TELEBOT_GYAZO_TOKEN,
-TELEBOT_BOT_PASSWORD, TELEBOT_ADMIN_PASSWORD ortam degiskenlerine tasimak (bot bunu destekler),
-sonra config.json'u silmek. Isterseniz bunu birlikte yapariz.
+Yalnizca guvendiginiz kisilerle paylasin. Daha guvenlisi: yalnizca 4 gizli satiri
+(TELEGRAM_TOKEN, GYAZO_TOKEN, BOT_PASSWORD, ADMIN_PASSWORD) config.json'dan CIKARIP bot
+bilgisayarinda TELEBOT_TELEGRAM_TOKEN, TELEBOT_GYAZO_TOKEN, TELEBOT_BOT_PASSWORD,
+TELEBOT_ADMIN_PASSWORD ortam degiskenlerine tasimak (bot bunu destekler). config.json'u SILMEYIN:
+ADMIN_IDS ve GORSEL_* satirlari orada kalmali. Not: ADMIN_PASSWORD ortam degiskenine tasindiktan
+sonra panelin "ilk super admin yeniden olusturma" ekrani yalnizca bot bilgisayarinda calisir.
+Isterseniz bunu birlikte yapariz.
 
 
 3) YETKI KISALTMALARI
@@ -85,7 +92,7 @@ Kullanicilar : (super admin) panel kullanicilari ve yetkileri.
 Denetim      : (super admin) bu bilgisayardan kim ne yapti.
 
 Canli yenileme ve bildirim:
-- Panel 30 saniyede bir Excel degismis mi diye bakar; degistiyse sayilar ve listeler kendiliginden
+- Panel 30 saniyede bir (YENILEME_SN) Excel degismis mi diye bakar; degistiyse sayilar ve listeler kendiliginden
   guncellenir (bir kayit penceresi acikken "Listeyi yenile" seridi cikar, pencere kapaninca yenilenir).
 - Yetkili oldugunuz projeye yeni kayit gelince sag ustteki zil (🔔) sayar, kutuda kayit gorunur,
   "Kontrol et" tiklaninca kaydin penceresi acilir (onayla/duzenle/sil). "Masaustu bildirimlerini ac"
@@ -117,7 +124,13 @@ Bot klasorunu degistirmek icin: panel_ayar.json'u silin ya da super admin olarak
 - Exe acilmiyor / hemen kapaniyor: Exe'yi sag tik > Ozellikler > "Engellemeyi kaldir" isaretleyin.
   Antivirus engelliyorsa izin verin (PyInstaller ile derlenmis Python programi).
 - "Port 8080 kullanilamiyor": baska bir program 8080'i kullaniyor; %LOCALAPPDATA%\KanitPaneli\panel_ayar.json
-  icine "PORT": 8090 ekleyin.
+  dosyasini Not Defteri ile acip PORT satiri ekleyin. Dosyanin tamami su sekilde olmali (virgullere dikkat):
+      {
+        "GIZLI_ANAHTAR": "...oldugu gibi birakin...",
+        "BOT_KLASOR": "C:\\Users\\...\\telegramkant",
+        "PORT": 8090
+      }
+  Dosya bozuk kaydedilirse panel onu "panel_ayar.json.bozuk-..." adiyla kenara alir ve varsayilanlarla acilir.
 - Ana sayfada proje yok: Excel ilk okumada; 10 sn sonra yenileyin. Hala yoksa Bot sayfasinda
   "Excel'i simdi oku" ve hata mesajina bakin.
 - "Bot: CALISMIYOR": bot kapali, eski telebot.ps1 ya da OneDrive heartbeat.txt'yi esitlemiyor.

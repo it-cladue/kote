@@ -1,7 +1,7 @@
 {
   "_aciklama": "Bu dosyayi panel_ayar.json adiyla kopyalayin. BOT_KLASOR botun (telebot.ps1) bulundugu klasor olmali.",
   "BOT_KLASOR": "C:\\Users\\KULLANICI\\OneDrive - Get Mails\\telegramkant",
-  "YENILEME_DK": 3,
+  "YENILEME_SN": 30,
   "DINLE": "127.0.0.1",
   "PORT": 8080,
   "SAYFA_BOYU": 48,

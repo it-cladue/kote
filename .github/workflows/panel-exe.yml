@@ -2,8 +2,8 @@ name: panel-exe
 on:
   workflow_dispatch:
   push:
-    branches: ["claude/busy-feynman-cibo22"]
-    paths: ["telegrampanel/**", ".github/workflows/panel-exe.yml"]
+    branches: ["claude/busy-feynman-cibo22", "main", "master"]
+    paths: ["telegrampanel/**", "telegram/telebot.ps1", ".github/workflows/panel-exe.yml"]
 permissions:
   contents: write
 jobs:
@@ -25,6 +25,7 @@ jobs:
         working-directory: telegrampanel
         run: |
           dist\KanitPaneli.exe --surum
+          dist\KanitPaneli.exe --kendini-sina
       - uses: actions/upload-artifact@v4
         with:
           name: KanitPaneli-exe
@@ -35,7 +36,8 @@ jobs:
         run: |
           set -e
           mkdir -p /tmp/dagitim && cp telegrampanel/dist/KanitPaneli.exe /tmp/dagitim/
-          cp telegrampanel/OKU_BENI_PANEL.txt /tmp/dagitim/ 2>/dev/null || true
+          cp telegrampanel/OKU_BENI_PANEL.txt telegram/telebot.ps1 /tmp/dagitim/
+          cp -r telegrampanel/bot_yamasi /tmp/dagitim/bot_yamasi
           cd /tmp/dagitim
           git init -q && git checkout -q -b exe-dagitim
           git config user.name "github-actions" && git config user.email "actions@github.com"
@@ -48,6 +50,6 @@ jobs:
         shell: bash
         run: |
           TAG="panel-exe-$(date +%Y%m%d-%H%M%S)"
-          gh release create "$TAG" telegrampanel/dist/KanitPaneli.exe --title "Kanit Paneli exe ($TAG)" --notes "Kaynak: ${GITHUB_SHA}. Bot klasorune (OneDrive telegramkant) koyup cift tiklayin."
+          gh release create "$TAG" telegrampanel/dist/KanitPaneli.exe telegram/telebot.ps1 telegrampanel/OKU_BENI_PANEL.txt --target "$GITHUB_SHA" --latest --title "Kanit Paneli exe ($TAG)" --notes "Kaynak: ${GITHUB_SHA}. KanitPaneli.exe'yi bot klasorune (OneDrive telegramkant) koyup cift tiklayin; telebot.ps1 bot bilgisayarindaki eskisinin yerine konur (config.json ayni kalir)."
         env:
           GH_TOKEN: ${{ github.token }}

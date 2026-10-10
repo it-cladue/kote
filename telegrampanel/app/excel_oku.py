@@ -109,13 +109,24 @@ def link_turu_ve_kimlik(link):
     return "metin", ""
 
 
-def anahtar_uret(sayfa, satir_degerleri, link, sayac):
+PARMAK_ALANLARI = ("personel", "uye", "ana", "tip", "kategori", "tarih_ham", "link")
+
+
+def parmak_ozeti(satir_degerleri, uzunluk=16):
+    parmak = "|".join(str(satir_degerleri.get(k, "") or "") for k in PARMAK_ALANLARI)
+    return hashlib.sha1(parmak.encode("utf-8")).hexdigest()[:uzunluk]
+
+
+def anahtar_uret(sayfa, satir_degerleri, link, sayac, link_sayisi=None):
+    """Kayit anahtari. Link tekse: sayfa|tur:kimlik. Ayni link ayni sayfada birden fazla satirdaysa (ayni ekran goruntusu
+    iki uye icin) satirin parmak izi eklenir ki bir satir silinince digerinin kimligi degismesin. Linksiz satir: parmak izi."""
     tur, kimlik = link_turu_ve_kimlik(link)
     if tur in ("gyazo", "onedrive", "snappark", "teamzone", "dosya", "diger") and kimlik:
         temel = f"{sayfa}|{tur}:{kimlik}"
+        if link_sayisi and link_sayisi.get(f"{tur}:{kimlik}", 0) > 1:
+            temel += "|h:" + parmak_ozeti(satir_degerleri, 8)
     else:
-        parmak = "|".join(satir_degerleri.get(k, "") for k in ("personel", "uye", "ana", "tip", "kategori", "tarih_ham", "link"))
-        temel = f"{sayfa}|h:" + hashlib.sha1(parmak.encode("utf-8")).hexdigest()[:16]
+        temel = f"{sayfa}|h:" + parmak_ozeti(satir_degerleri)
     n = sayac.get(temel, 0) + 1
     sayac[temel] = n
     return temel if n == 1 else f"{temel}#{n}", tur
@@ -137,7 +148,7 @@ def oku(xlsx_yol, sutun_haritasi=None, haric=HARIC_SAYFALAR):
             idx = {k: _kol(v) for k, v in harita.items()}
             # "kt" (H) bilerek disarida: OF sayfasinda H sutunu 1 milyon satira kadar FALSE ile dolu (botun A..G kurali)
             ana_kolonlar = [idx[k] for k in ("personel", "uye", "ana", "tip", "link", "kategori", "tarih") if idx.get(k) is not None]
-            satirlar, bos_ust_uste, sayac = [], 0, {}
+            satirlar, bos_ust_uste, sayac, link_sayisi = [], 0, {}, {}
             for i, row in enumerate(ws.iter_rows(values_only=True), start=1):
                 if i == 1:
                     continue  # baslik
@@ -164,8 +175,13 @@ def oku(xlsx_yol, sutun_haritasi=None, haric=HARIC_SAYFALAR):
                     if j not in kullanilan and v not in (None, ""):
                         ek[openpyxl.utils.get_column_letter(j + 1)] = _metin(v)
                 d["ek_not"] = "; ".join(f"{k}={v}" for k, v in ek.items()) if ek else ""
-                d["anahtar"], d["link_turu"] = anahtar_uret(ad, d, d["link"], sayac)
+                tur, kimlik = link_turu_ve_kimlik(d["link"])
+                if kimlik:
+                    link_sayisi[f"{tur}:{kimlik}"] = link_sayisi.get(f"{tur}:{kimlik}", 0) + 1
                 satirlar.append(d)
+            # anahtarlar ikinci geciste: ayni link kac satirda var bilinmeli
+            for d in satirlar:
+                d["anahtar"], d["link_turu"] = anahtar_uret(ad, d, d["link"], sayac, link_sayisi)
             sonuc[ad] = satirlar
     finally:
         wb.close()

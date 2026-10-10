@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Excel kopyasi + bot logu -> panel.db. Panel bu islemi arka planda YENILEME_DK dakikada bir yapar.
+"""Excel kopyasi + bot logu -> panel.db. Panel YENILEME_SN saniyede bir kaynak degisti mi diye bakar; degistiyse yeniden okur.
 
 Kurallar:
   - Excel'e asla yazilmaz; kaynak = bot klasoru (salt okunur).
@@ -59,6 +59,7 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False):
         harita = log_oku.link_haritasi(log_kayitlar, jsonl)
 
         gorulen = set()
+        tum_anahtarlar = {s["anahtar"] for satirlar in sayfalar.values() for s in satirlar}
         for sayfa, satirlar in sayfalar.items():
             rapor["sayfalar"][sayfa] = len(satirlar)
             for s in satirlar:
@@ -71,6 +72,16 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False):
                     yol, _ = gorsel_cozucu.yerel_dosya({"link": s["link"], "proje": sayfa, "gorsel_dosya": None, "anahtar": s["anahtar"]})
                     gorsel_dosya = yol
                 mevcut = conn.execute("SELECT * FROM kayitlar WHERE anahtar=?", (s["anahtar"],)).fetchone()
+                if mevcut is None:
+                    # Eski Excel kopyasi: panelden duzenlenmis (anahtari degismis) bir kaydin ayni satirdaki ESKI hali
+                    # "yeni kayit" diye eklenmesin; bot uygulamasindan eski kopyada ayni satir numarali korunan kayit varsa atla.
+                    es = conn.execute("SELECT id, panel_uygulama FROM kayitlar WHERE proje=? AND excel_satir=? AND panel_uygulama IS NOT NULL AND silindi=0 ORDER BY panel_uygulama DESC", (sayfa, s["satir"])).fetchone()
+                    if es and _eski_kopya(excel_zaman, es["panel_uygulama"]):
+                        korunan.add(es["id"])
+                        continue
+                    # Anahtari degismis ayni kayit olabilir (ayni linkin ikizi silindi/eklendi, linksiz satir elle duzeltildi):
+                    # bu okumada hic gorulmeyen eski kaydi ayni link / ayni satir uzerinden yeniden bagla, kimligi korunsun.
+                    mevcut = _yeniden_bagla(conn, sayfa, s, kimlik, tum_anahtarlar, excel_zaman)
                 if mevcut is None:
                     conn.execute("""INSERT INTO kayitlar(anahtar,proje,kategori,personel,uye_id,ana_uye_id,tip,link,link_turu,gorsel_dosya,tarih,tarih_ham,excel_satir,excel_durum,
                                     kt,kt_kaynak,aciklama,gorsel2,ek_not,ekleyen_id,ekleyen_ad,ekleyen_guven,ilk_gorulme,son_gorulme,guncelleme)
@@ -90,12 +101,9 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False):
                         guncel.update({"ekleyen_id": ek["ekleyen_id"], "ekleyen_ad": ek["ekleyen_ad"], "ekleyen_guven": ek["guven"]})
                     # bekleyen panel islemi varsa, o alanlari Excel'den ezme
                     bekleyen = mevcut["bekleyen_islem"]
-                    try:
-                        if mevcut["panel_uygulama"] and excel_zaman < datetime.strptime(mevcut["panel_uygulama"], "%Y-%m-%d %H:%M:%S") - timedelta(seconds=2):
-                            bekleyen = bekleyen or "eski_kopya"   # Excel kopyasi botun uygulamasindan eski
-                            korunan.add(mevcut["id"])
-                    except ValueError:
-                        pass
+                    if _eski_kopya(excel_zaman, mevcut["panel_uygulama"]):
+                        bekleyen = bekleyen or "eski_kopya"   # Excel kopyasi botun uygulamasindan eski
+                        korunan.add(mevcut["id"])
                     if bekleyen in ("duzenle", "eski_kopya"):
                         for k in ("kategori", "personel", "uye_id", "ana_uye_id", "tip", "aciklama"):
                             guncel.pop(k, None)
@@ -133,7 +141,9 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False):
         if rapor["yeni"] or rapor["degisen"] or rapor["silinen"] or islenen:
             db.ayar_yaz(conn, "son_degisiklik", _simdi())
     except Exception as e:
+        import traceback
         rapor["hata"] = f"{type(e).__name__}: {e}"
+        rapor["iz"] = traceback.format_exc()[-1500:]
     finally:
         rapor["sure_ms"] = int((time.time() - t0) * 1000)
         if not rapor.get("atlandi"):
@@ -145,6 +155,61 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False):
                 pass
         _kilit.release()
     return rapor
+
+
+def _eski_kopya(excel_zaman, panel_uygulama):
+    """Excel kopyasi, panel isleminin bot tarafindan uygulanmasindan eski mi?"""
+    try:
+        return bool(panel_uygulama) and excel_zaman < datetime.strptime(panel_uygulama, "%Y-%m-%d %H:%M:%S") - timedelta(seconds=2)
+    except ValueError:
+        return False
+
+
+def _yeniden_bagla(conn, sayfa, s, kimlik, tum_anahtarlar, excel_zaman):
+    """Bu okumada anahtari bulunmayan satir icin, bu okumada hic gorulmeyecek eski bir kayit ara:
+    linkli satirda ayni link (uye/personel uyani tercih), linksiz satirda ayni satir numarasi. Bulunursa anahtari guncellenir."""
+    if kimlik:
+        adaylar = conn.execute("SELECT * FROM kayitlar WHERE proje=? AND link=? ORDER BY silindi, id", (sayfa, s["link"])).fetchall()
+    else:
+        adaylar = conn.execute("SELECT * FROM kayitlar WHERE proje=? AND excel_satir=? AND link_turu IN ('bos','metin') AND silindi=0 ORDER BY id", (sayfa, s["satir"])).fetchall()
+    # bu okumada gorulecek anahtarlar ve bu kopyadan daha yeni panel degisikligi tasiyan kayitlar aday degil
+    adaylar = [a for a in adaylar if a["anahtar"] not in tum_anahtarlar and not _eski_kopya(excel_zaman, a["panel_uygulama"])]
+    if not adaylar:
+        return None
+    def puan(a):
+        return ((a["uye_id"] or "") == (s["uye"] or ""), (a["personel"] or "") == (s["personel"] or ""), not a["silindi"], -abs((a["excel_satir"] or 0) - s["satir"]))
+    secilen = max(adaylar, key=puan)
+    if kimlik and not ((secilen["uye_id"] or "") == (s["uye"] or "") or (secilen["personel"] or "") == (s["personel"] or "")) and len(adaylar) > 1:
+        return None   # ayni linkli birden fazla eski kayit var ama hicbiri uymuyor: tahmin etme
+    eski = secilen["anahtar"]
+    conn.execute("UPDATE kayitlar SET anahtar=? WHERE id=?", (s["anahtar"], secilen["id"]))
+    conn.execute("UPDATE denetim SET anahtar=? WHERE anahtar=?", (s["anahtar"], eski))
+    tum_anahtarlar.add(s["anahtar"])
+    return conn.execute("SELECT * FROM kayitlar WHERE id=?", (secilen["id"],)).fetchone()
+
+
+def _anahtar_yenile(conn, kid):
+    """Linksiz (parmak izi anahtarli) kayit panelden duzenlenince Excel'deki satirin parmak izi degisir;
+    kaydin anahtarini yeni degerlerle hesapla ki sonraki okumada 'yeni kayit + silinmis' diye ikiye bolunmesin."""
+    r = conn.execute("SELECT * FROM kayitlar WHERE id=?", (kid,)).fetchone()
+    if not r or "|h:" not in (r["anahtar"] or ""):
+        return
+    degerler = {"personel": r["personel"], "uye": r["uye_id"], "ana": r["ana_uye_id"], "tip": r["tip"], "kategori": r["kategori"], "tarih_ham": r["tarih_ham"], "link": r["link"]}
+    tur, kimlik = excel_oku.link_turu_ve_kimlik(r["link"] or "")
+    if kimlik and r["anahtar"].startswith(f"{r['proje']}|{tur}:{kimlik}|h:"):
+        yeni = f"{r['proje']}|{tur}:{kimlik}|h:" + excel_oku.parmak_ozeti(degerler, 8)
+    elif not kimlik:
+        yeni = f"{r['proje']}|h:" + excel_oku.parmak_ozeti(degerler)
+    else:
+        return
+    if yeni == r["anahtar"]:
+        return
+    aday, n = yeni, 1
+    while conn.execute("SELECT 1 FROM kayitlar WHERE anahtar=? AND id<>?", (aday, kid)).fetchone():
+        n += 1
+        aday = f"{yeni}#{n}"
+    conn.execute("UPDATE kayitlar SET anahtar=? WHERE id=?", (aday, kid))
+    conn.execute("UPDATE denetim SET anahtar=? WHERE anahtar=?", (aday, r["anahtar"]))
 
 
 def sonuc_isle(ayar, conn):
@@ -172,8 +237,15 @@ def sonuc_isle(ayar, conn):
                 conn.execute("UPDATE kayitlar SET excel_durum='silinmis' WHERE id=?", (r["id"],))
             if r["bekleyen_islem"] == "geri_al":
                 conn.execute("UPDATE kayitlar SET excel_durum='var' WHERE id=?", (r["id"],))
+            if r["bekleyen_islem"] == "duzenle":
+                _anahtar_yenile(conn, r["id"])
         else:
-            conn.execute("UPDATE kayitlar SET bekleyen_hata=?, guncelleme=? WHERE id=?", (str(s.get("mesaj") or s.get("durum") or "hata")[:500], _simdi(), r["id"]))
+            mesaj = str(s.get("mesaj") or s.get("durum") or "hata")[:500]
+            if r["bekleyen_islem"] == "sil":
+                # silme uygulanamadi: kayit silinmis gorunmesin (geri al dugmesi de gereksiz)
+                conn.execute("UPDATE kayitlar SET silindi=0, silen=NULL, silme_zamani=NULL, bekleyen_islem=NULL, bekleyen_id=NULL, bekleyen_hata=?, guncelleme=? WHERE id=?", ("silinemedi: " + mesaj, _simdi(), r["id"]))
+            else:
+                conn.execute("UPDATE kayitlar SET bekleyen_hata=?, guncelleme=? WHERE id=?", (mesaj, _simdi(), r["id"]))
     if yeni_offset != offset or yeni_son_id != son_id:
         db.ayar_yaz(conn, "kuyruk_sonuc_offset", yeni_offset)
         db.ayar_yaz(conn, "kuyruk_sonuc_son_id", yeni_son_id or "")

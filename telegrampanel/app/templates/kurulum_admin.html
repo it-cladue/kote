@@ -5,7 +5,7 @@
   <h2>İlk süper admin</h2>
   <p>Bot klasörü: <code>{{ bot_klasor }}</code><br>Henüz panel kullanıcısı yok. Süper admin hesabını oluşturun; diğer kullanıcıları sonra "Kullanıcılar" sayfasından açarsınız. Bu kullanıcı listesi bot klasöründe <code>panel_kullanicilar.json</code> olarak tutulur ve OneDrive ile tüm bilgisayarlarda geçerli olur.</p>
   {% if bekle %}
-  <div class="uyari-serit" style="margin-bottom:12px;border-radius:8px">Bu klasörde panel daha önce kullanılmış ama <code>{{ dosya }}</code> bu bilgisayarda henüz yok. Büyük olasılıkla OneDrive kullanıcı dosyasını henüz getirmedi: <b>birkaç dakika bekleyip sayfayı yenileyin</b>. Yeni bir süper admin oluşturmak dosyayı <u>sıfırlar</u>; bunu yalnızca bot sahibi, botun admin şifresini girerek yapabilir.</div>
+  <div class="uyari-serit" style="margin-bottom:12px;border-radius:8px">Bu klasörde panel daha önce kullanılmış ama <code>{{ dosya }}</code> bu bilgisayarda yok.<br><b>Bot sahibiyseniz</b> (ilk kurulumu siz yapıyorsanız): aşağıya botun admin şifresini (config.json içindeki <code>ADMIN_PASSWORD</code>) yazıp süper admini oluşturun.<br><b>Takım adminiyseniz</b>: OneDrive kullanıcı dosyasını henüz getirmemiş olabilir; birkaç dakika bekleyip sayfayı yenileyin. Yeni süper admin oluşturmak mevcut kullanıcı listesini sıfırlar.</div>
   {% endif %}
   {% if hata %}<div class="hata">{{ hata }}</div>{% endif %}
   <form method="post" autocomplete="off">

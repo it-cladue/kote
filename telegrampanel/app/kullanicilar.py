@@ -82,7 +82,8 @@ def _catisma_kopyalarini_birlestir(ayar, d):
 def once_kullanilmis(ayar):
     """Bu bot klasorunde panel daha once kurulmus mu (kullanici dosyasi OneDrive'dan henuz gelmemis olabilir)?"""
     kok = ayar["BOT_KLASOR"]
-    for ad in ("panel_kuyruk", "panel_kuyruk_sonuc.jsonl", "panel_kuyruk_islenen.txt", "panel_kuyruk_offset.json", "heartbeat.txt", "kayitlar.jsonl"):
+    # heartbeat.txt / kayitlar.jsonl BOT yazar (panel kurulmadan da olusur), onlar sayilmaz.
+    for ad in ("panel_kuyruk", "panel_kuyruk_sonuc.jsonl", "panel_kuyruk_islenen.txt", "panel_kuyruk_offset.json"):
         if os.path.exists(os.path.join(kok, ad)):
             return True
     return False
