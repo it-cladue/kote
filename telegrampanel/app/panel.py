@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from flask import Flask, g, request, session, redirect, url_for, render_template, jsonify, abort, send_file, flash
 from werkzeug.datastructures import MultiDict
 
-from . import db, yetki, excel_oku, ice_aktar, gorsel, kuyruk, bot_yonetim, log_oku, kullanicilar
+from . import db, yetki, excel_oku, ice_aktar, gorsel, kuyruk, bot_yonetim, log_oku, kullanicilar, liste_kontrol
 
 SURUM = "1.1.0"
 DONMUS = bool(getattr(sys, "frozen", False))
@@ -570,6 +570,19 @@ DISA_SUTUNLAR = [("Proje", "proje", 8), ("Kategori", "kategori", 10), ("Personel
                  ("Ekleyen (Telegram)", "ekleyen_ad", 18), ("Ekleyen ID", "ekleyen_id", 14), ("Aciklama", "aciklama", 30), ("Durum", "_durum", 12), ("Excel satiri", "excel_satir", 11), ("Gorsel dosyasi", "_gorsel", 40)]
 
 
+def _kayit_durum(d):
+    return "silindi" if d.get("silindi") else ("Excel'de yok" if d.get("excel_durum") == "silinmis" else ("bekliyor" if d.get("bekleyen_islem") else "aktif"))
+
+
+def _xlsx_satir(ws, degerler):
+    """Sayfaya satir ekle -> satir no. = + - @ ile baslayan metinler formul degil METIN olarak yazilir (formul enjeksiyonu onlemi)."""
+    ws.append(degerler)
+    for h in ws[ws.max_row]:
+        if isinstance(h.value, str) and h.value[:1] in "=+-@":
+            h.data_type = "s"
+    return ws.max_row
+
+
 def _disa_aktar_sorgu():
     c = baglanti()
     izinli = yetki.izinli_projeler(g.yk, projeler())
@@ -610,7 +623,7 @@ def disa_aktar_xlsx():
         h.alignment = Alignment(vertical="center")
     for r in rows:
         d = dict(r)
-        durum = "silindi" if d.get("silindi") else ("Excel'de yok" if d.get("excel_durum") == "silinmis" else ("bekliyor" if d.get("bekleyen_islem") else "aktif"))
+        durum = _kayit_durum(d)
         satir = []
         for _, k, _ in DISA_SUTUNLAR:
             if k == "_durum":
@@ -629,8 +642,7 @@ def disa_aktar_xlsx():
                 if v is None:
                     v = ""
             satir.append(v)
-        ws.append(satir)
-        n = ws.max_row
+        n = _xlsx_satir(ws, satir)
         link = d.get("link") or ""
         if link.startswith("http"):
             hucre = ws.cell(row=n, column=8)
@@ -666,8 +678,8 @@ def disa_aktar_xlsx():
         oz.append([p_] + sayac[p_])
     oz.append(["TOPLAM"] + [sum(v[i] for v in sayac.values()) for i in range(4)])
     oz.append([])
-    oz.append(["Filtre", f"projeler: {', '.join(f.get('proje', []))}; durum: {f.get('durum')}; tarih: {f.get('tarih1') or '-'} / {f.get('tarih2') or '-'}; kategori: {f.get('kategori') or '-'}; arama: {f.get('q') or '-'}"])
-    oz.append(["Olusturan", f"{g.k['kullanici_adi']} - {simdi()}"])
+    _xlsx_satir(oz, ["Filtre", f"projeler: {', '.join(f.get('proje', []))}; durum: {f.get('durum')}; tarih: {f.get('tarih1') or '-'} / {f.get('tarih2') or '-'}; kategori: {f.get('kategori') or '-'}; arama: {f.get('q') or '-'}"])
+    _xlsx_satir(oz, ["Olusturan", f"{g.k['kullanici_adi']} - {simdi()}"])
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
@@ -675,6 +687,179 @@ def disa_aktar_xlsx():
     ad = f"kanit_{projeler_ad}_{(f.get('tarih1') or 'bastan')}_{(f.get('tarih2') or 'bugun')}.xlsx".replace("/", "-")
     db.denetim_yaz(baglanti(), g.k["kullanici_adi"], "disa_aktar", yeni=f"{len(rows)} satir | {ad}", ip=ip())
     return send_file(bio, as_attachment=True, download_name=ad, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+# ==================== liste kontrolu (dosyadaki degerler kayitlarda var mi?) ====================
+LISTE_KAYIT_SUTUNLAR = [("Proje", "proje", 8), ("Kategori", "kategori", 10), ("Personel kodu", "personel", 14), ("Uye ID", "uye_id", 14), ("Ana uye ID", "ana_uye_id", 14),
+                        ("Tarih", "tarih", 19), ("Onay (KT)", "kt", 10), ("Link", "link", 50), ("Ekleyen (Telegram)", "ekleyen_ad", 18), ("Durum", "_durum", 12), ("Kayit ID", "id", 9)]
+
+
+def _liste_kayitlar(filtre, izinli):
+    """Filtreye (form ya da kaydedilmis filtre sozlugu) uyan kayitlar; yalnizca eslestirme/gosterim sutunlari."""
+    a = {k: (v if isinstance(v, list) else [v]) for k, v in dict(filtre).items()}
+    a.setdefault("durum", ["hepsi"])
+    where, par, f = _filtre_sql(MultiDict(a), izinli)
+    rows = baglanti().execute(f"SELECT id, proje, kategori, personel, uye_id, ana_uye_id, link, tarih, kt, silindi, excel_durum, bekleyen_islem, ekleyen_ad, aciklama FROM kayitlar WHERE {where} ORDER BY proje, COALESCE(tarih,'0000') DESC, id DESC", par).fetchall()
+    return [dict(r) for r in rows], f
+
+
+def _liste_esleme(form, genislik):
+    """Formdan esleme: [{"sutun": i, "alanlar": [...]}]"""
+    esleme = []
+    for sutun in form.getlist("kontrol"):
+        if sutun.isdigit() and int(sutun) < genislik:
+            alanlar = [a for a in form.getlist(f"alan_{sutun}") if a in liste_kontrol.ALAN_ADLARI]
+            if not alanlar:
+                raise ValueError(f"{int(sutun) + 1}. sutun icin panelde hangi alanda aranacagini secin.")
+            esleme.append({"sutun": int(sutun), "alanlar": alanlar})
+    if not esleme:
+        raise ValueError("Kontrol edilecek en az bir sutun isaretleyin.")
+    return esleme
+
+
+def _liste_basliklar(veri):
+    satirlar = veri["tablolar"][veri["sayfa"]]
+    return [(satirlar[0][e["sutun"]] if veri["baslik"] and satirlar and satirlar[0][e["sutun"]] else f"Sutun {e['sutun'] + 1}") for e in veri["esleme"]]
+
+
+def _liste_bulunamadi():
+    flash("Liste bulunamadi ya da suresi dolmus; dosyayi yeniden yukleyin.")
+    return redirect(url_for("disa_aktar_sayfasi"))
+
+
+@app.route("/liste-kontrol", methods=["GET", "POST"])
+@giris_gerekli
+def liste_kontrol_sayfasi():
+    onbellek = AYAR["ONBELLEK"]
+    izinli = yetki.izinli_projeler(g.yk, projeler())
+    adim = request.form.get("adim") if request.method == "POST" else "esleme"
+    if adim == "yukle":
+        dosya = request.files.get("dosya")
+        try:
+            if dosya and dosya.filename:
+                veri = liste_kontrol.coz(dosya.filename, dosya.read())
+                veri["dosya"] = os.path.basename(dosya.filename)[:80]
+            elif (request.form.get("metin") or "").strip():
+                veri = liste_kontrol.metin_coz(request.form["metin"])
+                veri["dosya"] = "yapistirilan liste"
+            else:
+                raise ValueError("bir dosya secin ya da listeyi kutuya yapistirin.")
+        except ValueError as e:
+            flash(f"Liste okunamadi: {e}")
+            return redirect(url_for("disa_aktar_sayfasi"))
+        veri.update(sahip=g.k["kullanici_adi"], sayfa=veri["sayfalar"][0])
+        veri["baslik"] = liste_kontrol.baslik_mi(veri["tablolar"][veri["sayfa"]])
+        return redirect(url_for("liste_kontrol_sayfasi", token=liste_kontrol.kaydet(onbellek, veri)))
+    token = request.values.get("token", "")
+    veri = liste_kontrol.yukle(onbellek, token, g.k["kullanici_adi"])
+    if not veri:
+        return _liste_bulunamadi()
+    hata = None
+    if adim in ("onizle", "kontrol"):
+        sayfa = request.form.get("sayfa")
+        if sayfa in veri["tablolar"] and sayfa != veri["sayfa"]:
+            veri["sayfa"] = sayfa
+            veri["baslik"] = liste_kontrol.baslik_mi(veri["tablolar"][sayfa])
+        else:
+            veri["baslik"] = request.form.get("baslik") == "1"
+        if adim == "kontrol":
+            try:
+                satirlar = veri["tablolar"][veri["sayfa"]]
+                veri["esleme"] = _liste_esleme(request.form, len(satirlar[0]) if satirlar else 0)
+                kayitlar, veri["filtre"] = _liste_kayitlar(request.form.to_dict(flat=False), izinli)
+                liste_kontrol.kaydet(onbellek, veri, token)
+                return _liste_sonuc_sayfasi(token, veri, kayitlar)
+            except ValueError as e:
+                hata = str(e)
+        liste_kontrol.kaydet(onbellek, veri, token)
+    satirlar = veri["tablolar"][veri["sayfa"]]
+    sutunlar = liste_kontrol.sutunlar(satirlar, veri["baslik"])
+    if veri.get("esleme"):   # sonuc sayfasindan geri donuldu: onceki secimler
+        secim = {e["sutun"]: e["alanlar"] for e in veri["esleme"]}
+        for st in sutunlar:
+            st["secili"], st["alanlar"] = st["no"] in secim, secim.get(st["no"], st["alanlar"])
+    kategoriler = [r[0] for r in baglanti().execute("SELECT DISTINCT upper(kategori) FROM kayitlar WHERE kategori<>'' ORDER BY 1").fetchall()]
+    return render_template("liste_kontrol.html", token=token, veri=veri, sutunlar=sutunlar, onizleme=satirlar[1 if veri["baslik"] else 0:][:liste_kontrol.ONIZLEME],
+                           satir_sayisi=len(satirlar) - (1 if veri["baslik"] else 0), alanlar=liste_kontrol.ALANLAR, izinli=izinli, kategoriler=kategoriler, f=veri.get("filtre") or {}, hata=hata)
+
+
+def _liste_sonuc_sayfasi(token, veri, kayitlar):
+    satirlar = veri["tablolar"][veri["sayfa"]]
+    sonuc = liste_kontrol.eslestir(satirlar, veri["baslik"], veri["esleme"], kayitlar)
+    bulunan, yok, proje_sayac = [], [], {}
+    for s in sonuc["satirlar"]:
+        if not s["eslesen"]:
+            yok.append(s)
+            continue
+        for p in {kayitlar[i]["proje"] for i in s["eslesen"]}:
+            proje_sayac[p] = proje_sayac.get(p, 0) + 1
+        bulunan.append({"no": s["no"], "degerler": s["degerler"], "kayitlar": [kayitlar[i] for i in s["eslesen"][:3]], "n": len(s["eslesen"])})
+    db.denetim_yaz(baglanti(), g.k["kullanici_adi"], "liste_kontrol", yeni=f"{sonuc['bulunan'] + sonuc['yok']} satir, bulunan {sonuc['bulunan']}, yok {sonuc['yok']}", ip=ip())
+    return render_template("liste_sonuc.html", token=token, veri=veri, sonuc=sonuc, bulunan=bulunan[:2000], yok=yok[:2000], proje_sayac=sorted(proje_sayac.items()),
+                           basliklar=_liste_basliklar(veri), f=veri["filtre"])
+
+
+@app.route("/liste-kontrol.xlsx")
+@giris_gerekli
+def liste_kontrol_xlsx():
+    import io
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    veri = liste_kontrol.yukle(AYAR["ONBELLEK"], request.args.get("token", ""), g.k["kullanici_adi"])
+    if not veri or not veri.get("esleme"):
+        return _liste_bulunamadi()
+    kayitlar, f = _liste_kayitlar(veri["filtre"], yetki.izinli_projeler(g.yk, projeler()))
+    sonuc = liste_kontrol.eslestir(veri["tablolar"][veri["sayfa"]], veri["baslik"], veri["esleme"], kayitlar)
+    dosya_basliklar = _liste_basliklar(veri)
+    wb = openpyxl.Workbook()
+
+    def sayfa(ad, basliklar, genislikler):
+        ws = wb.active if wb.active.title == "Sheet" else wb.create_sheet()
+        ws.title = ad
+        _xlsx_satir(ws, basliklar)
+        for i, gen in enumerate(genislikler, 1):
+            ws.column_dimensions[get_column_letter(i)].width = gen
+            ws.cell(row=1, column=i).font = Font(bold=True, color="FFFFFF")
+            ws.cell(row=1, column=i).fill = PatternFill("solid", fgColor="1F2937")
+        ws.freeze_panes = "A2"
+        return ws
+
+    ws = sayfa("Bulunamayanlar", ["Satir no"] + dosya_basliklar, [9] + [24] * len(dosya_basliklar))
+    for s in sonuc["satirlar"]:
+        if not s["eslesen"]:
+            _xlsx_satir(ws, [s["no"]] + s["degerler"])
+    ws = sayfa("Bulunanlar", ["Satir no"] + dosya_basliklar + ["Eslesme sayisi"] + [b for b, _, _ in LISTE_KAYIT_SUTUNLAR], [9] + [24] * len(dosya_basliklar) + [10] + [gen for _, _, gen in LISTE_KAYIT_SUTUNLAR])
+    sutun0 = len(dosya_basliklar) + 2   # kayit sutunlarinin basladigi yer
+    for s in sonuc["satirlar"]:
+        for i in s["eslesen"][:10]:   # satir basina en fazla 10 eslesme; toplam sayi ayri sutunda
+            d = kayitlar[i]
+            degerler = [_kayit_durum(d) if k == "_durum" else ("EVET" if d["kt"] else "HAYIR") if k == "kt" else (d.get(k) if d.get(k) is not None else "") for _, k, _ in LISTE_KAYIT_SUTUNLAR]
+            n = _xlsx_satir(ws, [s["no"]] + s["degerler"] + [len(s["eslesen"])] + degerler)
+            if (d.get("link") or "").startswith("http"):
+                ws.cell(row=n, column=sutun0 + 8).hyperlink = d["link"]
+                ws.cell(row=n, column=sutun0 + 8).font = Font(color="0563C1", underline="single")
+            renk_hex = renk(d["proje"]).lstrip("#")
+            if len(renk_hex) == 6:
+                ws.cell(row=n, column=sutun0 + 1).fill = PatternFill("solid", fgColor=renk_hex)
+                ws.cell(row=n, column=sutun0 + 1).font = Font(bold=True, color=metin_rengi("#" + renk_hex).lstrip("#"))
+    oz = sayfa("Ozet", ["Alan", "Deger"], [22, 90])
+    proje_sayac = {}
+    for s in sonuc["satirlar"]:
+        for p in {kayitlar[i]["proje"] for i in s["eslesen"]}:
+            proje_sayac[p] = proje_sayac.get(p, 0) + 1
+    ozet = [["Toplam satir", sonuc["bulunan"] + sonuc["yok"]], ["Bulunan", sonuc["bulunan"]], ["Bulunamayan", sonuc["yok"]], ["Birden fazla eslesen", sonuc["coklu"]], ["Bos satir (atlandi)", sonuc["bos"]]]
+    ozet += [[f"Bulunan ({p})", n] for p, n in sorted(proje_sayac.items())]
+    ozet += [["Dosya", veri.get("dosya", "") + (f" / sayfa: {veri['sayfa']}" if veri["sayfa"] else "") + (" (ilk satir baslik)" if veri["baslik"] else "")],
+             ["Esleme", " VE ".join(f"{b} -> {' / '.join(liste_kontrol.ALAN_ADLARI[a] for a in e['alanlar'])}" for b, e in zip(dosya_basliklar, veri["esleme"]))],
+             ["Filtre", f"projeler: {', '.join(f.get('proje', []))}; durum: {f.get('durum')}; tarih: {f.get('tarih1') or '-'} / {f.get('tarih2') or '-'}; kategori: {f.get('kategori') or '-'}"],
+             ["Olusturan", f"{g.k['kullanici_adi']} - {simdi()}"]]
+    for satir in ozet:
+        _xlsx_satir(oz, satir)
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    return send_file(bio, as_attachment=True, download_name=f"liste_kontrol_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @app.route("/kayit/<int:kid>")
@@ -1017,6 +1202,12 @@ def _403(e):
 @app.errorhandler(404)
 def _404(e):
     return render_template("hata.html", kod=404, mesaj="Bulunamadi."), 404
+
+
+@app.errorhandler(413)
+def _413(e):
+    flash(f"Dosya cok buyuk: en fazla {app.config['MAX_CONTENT_LENGTH'] // (1024 * 1024)} MB yuklenebilir.")
+    return redirect(url_for("disa_aktar_sayfasi"))
 
 
 # ==================== arka plan ice aktarim ====================

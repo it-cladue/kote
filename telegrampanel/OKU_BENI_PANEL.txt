@@ -133,6 +133,15 @@ Cikti        : Tarih araligi (ve istege bagli proje, durum, kategori, personel) 
                Gorsel dosyasi. Ikinci sayfada proje ozeti (toplam / onayli / bekleyen / silinen).
                Kayitlar sayfasindaki "Excel" dugmesi de o anki filtreyi indirir. Herkes yalnizca yetkili oldugu
                projeleri indirebilir; her indirme Denetim'e yazilir.
+               Liste kontrolu (ayni sayfada, alttaki kutu): elinizdeki bir listeyi (xlsx / csv / txt dosyasi ya da
+               kutuya yapistirilan liste, her satira bir deger) yukleyin; panel listedeki kisilerin / kayitlarin
+               panelde olup olmadigina bakar. 2. adimda dosyanin hangi sutununun hangi alanda (personel kodu,
+               uye ID, ana uye ID, link, kategori, ekleyen, aciklama) aranacagini siz secersiniz; bir sutun icin
+               birden fazla alan secilirse herhangi birinde bulunmasi yeter, birden fazla sutun isaretlenirse kayit
+               hepsine uymalidir. Proje / tarih / durum / kategori filtresi de verilebilir. Sonuc: kac satir var,
+               kac tanesi bulundu, bulunamayanlar listesi ve bulunanlarin eslestigi kayitlar (kaydi panelde acan
+               link ile). "Excel indir" sonucu 3 sayfa olarak (Bulunamayanlar, Bulunanlar, Ozet) verir. Yuklenen
+               dosya Excel'e ya da bot klasorune yazilmaz; panelin tmp klasorunde 24 saat durur, sonra silinir.
 Bot          : (super admin) Telegram'daki admin komutlarinin TAMAMI burada:
                /durum, /istatistik, /kayit_raporu (en cok kanit ekleyenler), /son_kullanicilar ve
                /kullanici_ara (kullanici listesinde arama + sure + durum + adet suzgeci), /onayla, /onayli_sil
