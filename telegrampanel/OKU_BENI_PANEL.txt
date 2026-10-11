@@ -164,9 +164,12 @@ Denetim      : (super admin) bu bilgisayardan kim ne yapti.
 Canli yenileme ve bildirim:
 - Panel 30 saniyede bir (YENILEME_SN) Excel degismis mi diye bakar; degistiyse sayilar ve listeler kendiliginden
   guncellenir (bir kayit penceresi acikken "Listeyi yenile" seridi cikar, pencere kapaninca yenilenir).
-- Yetkili oldugunuz projeye yeni kayit gelince sag ustteki zil (🔔) sayar, kutuda kayit gorunur,
-  "Kontrol et" tiklaninca kaydin penceresi acilir (onayla/duzenle/sil). "Masaustu bildirimlerini ac"
-  derseniz tarayici arka plandayken de Windows bildirimi gelir.
+- Yetkili oldugunuz projeye yeni kayit gelince sag ustte YALNIZCA o kayit icin kucuk bir uyari cikar ve
+  8 saniye sonra kendiliginden kapanir ("Kontrol et" ile kaydin penceresi acilir: onayla/duzenle/sil).
+  Zil (🔔) uzerindeki sayi okunmamis bildirim sayisidir; zile basinca liste acilir (disari tiklayinca kapanir).
+  Listede her bildirim okundu / okunmadi olarak gorunur: "Kontrol et" okundu sayar, yanindaki "okundu say /
+  okunmadi say" ile elle degistirilir, "Tumunu okundu say" hepsini kapatir. Liste tarayicida 7 gun saklanir.
+  "Masaustu" dugmesine basarsaniz tarayici arka plandayken de Windows bildirimi gelir.
 - Ayni anda birden fazla kisi (ayni ya da farkli bilgisayarda) giris yapabilir.
 
 Kayit rozetleri:

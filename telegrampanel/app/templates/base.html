@@ -40,10 +40,14 @@
 {% block icerik %}{% endblock %}
 </main>
 <div id="toast" class="toast gizli"></div>
-<div id="bildirim-kutu" class="bildirim-kutu gizli" aria-live="polite">
-  <div class="bildirim-baslik"><b>Yeni kayıtlar</b> <span id="bildirim-izin" class="gizli"><button type="button" class="btn kucuk" id="bildirim-izin-btn">Masaüstü bildirimlerini aç</button></span> <button type="button" class="btn kucuk" id="bildirim-temizle">Temizle</button></div>
+<div id="bildirim-kutu" class="bildirim-kutu gizli" aria-hidden="true">
+  <div class="bildirim-baslik"><b>Bildirimler</b> <span id="bildirim-ozet" class="kucukyazi"></span>
+    <span class="bildirim-araclar"><span id="bildirim-izin" class="gizli"><button type="button" class="btn kucuk" id="bildirim-izin-btn" title="Tarayıcı arka plandayken de Windows bildirimi gelsin">🔔 Masaüstü</button></span>
+    <button type="button" class="btn kucuk" id="bildirim-okundu">Tümünü okundu say</button> <button type="button" class="btn kucuk" id="bildirim-temizle" title="Listeyi boşalt">Temizle</button></span></div>
   <ul id="bildirim-liste"></ul>
+  <div id="bildirim-bos" class="bildirim-bos gizli">Bildirim yok. Yetkili olduğunuz projelere yeni kanıt gelince burada görünür.</div>
 </div>
+<div id="bildirim-uyari" class="bildirim-uyari gizli" role="status" aria-live="polite"></div>
 <div id="degisiklik-serit" class="degisiklik-serit gizli">Excel'de değişiklik var. <a href="#" id="degisiklik-yenile">Listeyi yenile</a></div>
 <script>window.PROJE_RENK = {{ AYAR.PROJE_RENK|tojson }};</script>
 <script src="{{ url_for('static', filename='panel.js') }}"></script>
