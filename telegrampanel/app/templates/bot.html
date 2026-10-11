@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block baslik %}Bot yönetimi{% endblock %}
 {% block icerik %}
-<h2>Bot yönetimi</h2>
+{% set akis_alanlari = {"tek_uye": "Personel kodu + Üye ID", "ark_ana": "Personel kodu + Arkadaş üye ID + Ana üye ID", "ana_only": "Personel kodu + Ana üye ID", "sessiz_tip": "Personel kodu + Üye ID + Sessiz/Telesekreter seçimi"} %}
+<h2>Bot yönetimi <small class="kucukyazi">Telegram'daki tüm admin komutlarının paneldeki karşılıkları</small></h2>
 {% if mesaj %}<div class="bilgi">{{ mesaj }}</div>{% endif %}
 
 <div class="durum-serit">
@@ -12,6 +13,9 @@
   <span class="durum-parca">Kuyrukta bekleyen: <b>{{ durum.kuyruk_bekleyen }}</b></span>
   <span class="durum-parca">Bakım modu: {% if bakim %}<b class="kirmizi">AÇIK</b>{% else %}<b class="yesil">kapalı</b>{% endif %}</span>
   <span class="durum-parca">Gyazo bakım: {% if gyazo_bakim %}<b class="turuncu">AÇIK (diske kaydediyor)</b>{% else %}<b class="yesil">kapalı (Gyazo açık)</b>{% endif %}</span>
+  <span class="durum-parca">Açık oturum: <b>{{ ist.oturum }}</b></span>
+  <span class="durum-parca">Excel yazma modu: <b>{{ ist.excel_mod }}</b></span>
+  {% if ist.son_hata %}<span class="durum-parca">Son hata: <b class="kirmizi" title="{{ ist.son_hata }}">{{ ist.son_hata[:90] }}{% if ist.son_hata|length > 90 %}…{% endif %}</b></span>{% endif %}
 </div>
 
 <div class="buton-satir">
@@ -44,39 +48,79 @@
 
 <div class="iki-kolon">
 <div class="kart">
-  <h3>Telegram kullanıcıları <small>({{ tg_kullanicilar|length }})</small></h3>
+  <h3>İstatistik <small>(/istatistik, /durum)</small></h3>
+  <div class="sayi-izgara">
+    <div class="sayi-btn"><b>{{ ist.defter }}</b><span>kullanıcı defteri</span></div>
+    <div class="sayi-btn onayli"><b>{{ ist.onayli }}</b><span>onaylı</span></div>
+    <div class="sayi-btn silinen"><b>{{ ist.engelli }}</b><span>engelli</span></div>
+    <div class="sayi-btn bekleyen"><b>{{ ist.oturum }}</b><span>açık oturum</span></div>
+    <div class="sayi-btn"><b>{{ ist.sayacli }}</b><span>kayıt sayaçlı kullanıcı</span></div>
+    <div class="sayi-btn"><b>{{ ist.db_toplam }}</b><span>panelde kayıt</span></div>
+    <div class="sayi-btn onayli"><b>{{ ist.db_onayli }}</b><span>KT onaylı</span></div>
+    <div class="sayi-btn bekleyen"><b>{{ ist.db_bekleyen }}</b><span>onay bekleyen</span></div>
+  </div>
+  <p class="kucukyazi" style="margin:8px 0 0">Projelere göre: {% for p_, n in ist.db_proje.items() %}<span class="proje-cip" style="--renk: {{ renk(p_) }}; --cipyazi: {{ metin_rengi(renk(p_)) }}">{{ p_ }} {{ n }}</span> {% endfor %}</p>
+</div>
+<div class="kart">
+  <h3>Kayıt raporu <small>(/kayit_raporu — en çok kanıt ekleyenler)</small></h3>
+  <div class="kaydir" style="max-height:260px">
+  <table class="tablo kucuk">
+    <thead><tr><th>#</th><th>Kullanıcı</th><th>Kayıt</th><th>Son kayıt</th></tr></thead>
+    <tbody>
+    {% for u in ist.kayit_raporu %}
+    <tr><td>{{ loop.index }}</td><td><a href="#" data-tg-detay="{{ u.id }}"><code>{{ u.id }}</code> {{ u.ad }}</a></td><td><b>{{ u.kayit }}</b></td><td class="kucukyazi nowrap">{{ u.son }} {{ u.proje }} {{ u.kategori }}</td></tr>
+    {% else %}<tr><td colspan="4">Henüz kayıt sayacı oluşmadı.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+</div>
+
+<div class="iki-kolon">
+<div class="kart">
+  <h3>Telegram kullanıcıları <small>({{ tg_kullanicilar|length }} / {{ tg_toplam }})</small> <small class="kucukyazi">— satıra tıklayınca canlı detay açılır</small></h3>
+  <form method="get" class="filtre-satir" autocomplete="off">
+    <input name="tg_q" value="{{ tg_f.q }}" placeholder="ara: ID / kullanıcı adı / ad" class="arama">
+    <select name="tg_sure"><option value="0" {{ 'selected' if not tg_f.sure }}>Tüm zamanlar</option><option value="1" {{ 'selected' if tg_f.sure == 1 }}>Son 1 saat</option><option value="2" {{ 'selected' if tg_f.sure == 2 }}>Son 2 saat</option><option value="24" {{ 'selected' if tg_f.sure == 24 }}>Son 24 saat</option><option value="168" {{ 'selected' if tg_f.sure == 168 }}>Son 7 gün</option><option value="720" {{ 'selected' if tg_f.sure == 720 }}>Son 30 gün</option></select>
+    <select name="tg_durum"><option value="" {{ 'selected' if not tg_f.durum }}>Hepsi</option><option value="onayli" {{ 'selected' if tg_f.durum == 'onayli' }}>Onaylı</option><option value="onaysiz" {{ 'selected' if tg_f.durum == 'onaysiz' }}>Onaysız</option><option value="engelli" {{ 'selected' if tg_f.durum == 'engelli' }}>Engelli</option><option value="oturum" {{ 'selected' if tg_f.durum == 'oturum' }}>Açık oturumu olan</option></select>
+    <select name="tg_adet"><option value="0" {{ 'selected' if not tg_f.adet }}>Hepsi</option><option value="20" {{ 'selected' if tg_f.adet == 20 }}>Son 20</option><option value="50" {{ 'selected' if tg_f.adet == 50 }}>Son 50</option><option value="100" {{ 'selected' if tg_f.adet == 100 }}>Son 100</option></select>
+    <button class="btn">Listele</button>
+    {% if tg_f.q or tg_f.sure or tg_f.durum or tg_f.adet %}<a class="btn" href="{{ url_for('bot_sayfasi') }}">Temizle</a>{% endif %}
+  </form>
   <form method="post" class="filtre-satir" autocomplete="off">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input name="tg_id" placeholder="Telegram ID" required pattern="[0-9]{5,15}">
     <input name="ad" placeholder="ad (isteğe bağlı)">
     <input name="sebep" placeholder="engel sebebi">
     <button class="btn" name="islem" value="onayla">Onayla</button>
-    <button class="btn tehlike" name="islem" value="engelle">Engelle</button>
+    <button class="btn tehlike" name="islem" value="engelle" data-onay="Bu kullanıcı engellensin mi?">Engelle</button>
   </form>
   <div class="kaydir">
-  <table class="tablo kucuk">
-    <thead><tr><th>ID</th><th>Kullanıcı</th><th>Son görülme</th><th>Kayıt</th><th>Durum</th><th></th></tr></thead>
+  <table class="tablo kucuk tiklanir">
+    <thead><tr><th>ID</th><th>Kullanıcı</th><th>Son görülme</th><th>Kayıt</th><th>Durum</th><th>Oturum</th><th></th></tr></thead>
     <tbody>
     {% for u in tg_kullanicilar %}
-    <tr>
+    <tr data-tg-detay="{{ u.id }}" title="Detay için tıklayın">
       <td><code>{{ u.id }}</code></td>
       <td>{{ u.username }}{% if u.first_name %} <small>{{ u.first_name }}</small>{% endif %}</td>
       <td class="nowrap">{{ u.last_seen or '' }}</td>
       <td>{{ u.kayit_sayisi }}</td>
-      <td>{% if u.engelli %}<b class="kirmizi">engelli</b> <small>{{ u.engel_sebep }}</small>{% elif u.onayli %}<span class="yesil">onaylı</span> <small>{{ u.onay_tarihi }}</small>{% else %}<span class="gri">onaysız</span>{% endif %}</td>
+      <td>{% if u.engelli %}<b class="kirmizi">engelli</b> <small>{{ u.engel_sebep }}</small>{% elif u.onayli %}<span class="yesil">onaylı</span> <small>{{ u.onay_tarihi }}</small>{% else %}<span class="gri">onaysız</span>{% endif %}
+        {% if u.deneme %}<small class="turuncu" title="hatalı şifre denemesi">deneme {{ u.deneme }}</small>{% endif %}</td>
+      <td class="kucukyazi">{% if u.oturum %}<span class="canli-nokta"></span>{{ u.oturum.adim }} {{ u.oturum.proje|upper }} {{ u.oturum.kategori|upper }}{% endif %}</td>
       <td class="nowrap">
         <form method="post" class="satir-form">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="tg_id" value="{{ u.id }}"><input type="hidden" name="ad" value="{{ u.username }}">
+          <button type="button" class="btn kucuk" data-tg-detay="{{ u.id }}">Detay</button>
           {% if u.engelli %}<button class="btn kucuk" name="islem" value="engel_kaldir">Engeli kaldır</button>
           {% else %}
-            {% if u.onayli %}<button class="btn kucuk" name="islem" value="onay_kaldir">Onayı kaldır</button>{% else %}<button class="btn kucuk" name="islem" value="onayla">Onayla</button>{% endif %}
-            <button class="btn kucuk tehlike" name="islem" value="engelle">Engelle</button>
+            {% if u.onayli %}<button class="btn kucuk" name="islem" value="onay_kaldir" data-onay="Onay kaldırılsın mı? Kullanıcı yeniden şifre yazmak zorunda kalır.">Onayı kaldır</button>{% else %}<button class="btn kucuk" name="islem" value="onayla">Onayla</button>{% endif %}
+            <button class="btn kucuk tehlike" name="islem" value="engelle" data-onay="Bu kullanıcı engellensin mi?">Engelle</button>
           {% endif %}
-          <button class="btn kucuk" name="islem" value="oturum_temizle" title="yarım kalan oturumu sil">Oturum</button>
         </form>
       </td>
     </tr>
-    {% endfor %}
+    {% else %}<tr><td colspan="7">Kullanıcı bulunamadı.</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>
@@ -84,38 +128,61 @@
 
 <div>
 <div class="kart">
-  <h3>Kategoriler</h3>
+  <h3>Kategoriler <small>(/kategori_liste, /kategori_bilgi, /kategori_ekle, /kategori_sil)</small></h3>
   <table class="tablo kucuk">
-    <thead><tr><th>Kod</th><th>Etiket</th><th>Mod</th><th></th></tr></thead>
+    <thead><tr><th>Kod</th><th>Etiket</th><th>Akış</th><th>Sorulacak alanlar</th><th></th></tr></thead>
     <tbody>
     {% for kat in kategoriler %}
-    <tr><td><code>{{ kat.code }}</code></td><td>{{ kat.label }}</td><td>{{ kat.mode }}</td>
+    <tr><td><code>{{ kat.code }}</code></td><td>{{ kat.label }}</td><td>{{ kat.mode }}</td><td class="kucukyazi">{{ akis_alanlari.get(kat.mode, akis_alanlari['tek_uye']) }}</td>
       <td><form method="post" class="satir-form" data-onay="{{ kat.code }} kategorisi silinsin mi?"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="kategori_sil"><input type="hidden" name="code" value="{{ kat.code }}"><button class="btn kucuk tehlike">Sil</button></form></td></tr>
     {% endfor %}
     </tbody>
   </table>
   <form method="post" class="filtre-satir" autocomplete="off">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="kategori_ekle">
-    <input name="code" placeholder="kod (örn: gm)" required pattern="[a-z0-9_]+">
-    <input name="label" placeholder="etiket (örn: 🎮 GM)" required>
-    <select name="mode"><option value="tek_uye">tek_uye</option><option value="ana_alt">ana_alt</option><option value="yazili">yazili</option></select>
+    <input name="code" placeholder="kod (örn: bonus)" required pattern="[a-z0-9_]+">
+    <input name="label" placeholder="etiket (örn: BONUS)" required>
+    <select name="mode">{% for m, a in akis_alanlari.items() %}<option value="{{ m }}">{{ m }} — {{ a }}</option>{% endfor %}</select>
     <button class="btn">Ekle / güncelle</button>
   </form>
+  <p class="kucukyazi">Yeni kategori, yeni görsel gönderen kullanıcıların seçim ekranında hemen görünür (/kategori_yayinla gerekmez).</p>
 </div>
 
 <div class="kart">
-  <h3>Açık oturumlar <small>({{ oturumlar|length }})</small></h3>
+  <h3>Açık oturumlar <small>({{ oturumlar|length }}) — /oturumlar</small></h3>
   {% if oturumlar %}
-  <table class="tablo kucuk">
+  <table class="tablo kucuk tiklanir">
     <thead><tr><th>ID</th><th>Adım</th><th>Proje</th><th>Kategori</th><th></th></tr></thead>
     <tbody>
     {% for o in oturumlar %}
-    <tr><td><code>{{ o.id }}</code></td><td>{{ o.step or o.adim or '' }}</td><td>{{ o.proje or '' }}</td><td>{{ o.kategori or '' }}</td>
+    <tr data-tg-detay="{{ o.id }}" title="Canlı detay için tıklayın"><td><code>{{ o.id }}</code></td><td><span class="canli-nokta"></span>{{ o.step or o.adim or '' }}</td><td>{{ (o.proje or '')|upper }}</td><td>{{ (o.kategori or '')|upper }}</td>
       <td><form method="post" class="satir-form"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="oturum_temizle"><input type="hidden" name="tg_id" value="{{ o.id }}"><button class="btn kucuk">Temizle</button></form></td></tr>
     {% endfor %}
     </tbody>
   </table>
   {% else %}<p class="kucukyazi">Açık oturum yok.</p>{% endif %}
+</div>
+
+<div class="kart">
+  <h3>Excel <small>(/excel_son_satir, /excel_mod)</small></h3>
+  <table class="tablo kucuk">
+    <thead><tr><th>Sayfa</th><th>Panelin bildiği son satır</th><th>Kayıt</th></tr></thead>
+    <tbody>
+    {% for p_ in projeler() %}<tr><td><span class="proje-cip" style="--renk: {{ renk(p_) }}; --cipyazi: {{ metin_rengi(renk(p_)) }}">{{ p_ }}</span></td><td>{{ ist.excel_satir.get(p_) or '-' }}</td><td>{{ ist.db_proje.get(p_, 0) }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  <form method="post" class="filtre-satir" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="excel_son_satir">
+    <select name="sayfa">{% for p_ in projeler() %}<option value="{{ p_ }}">{{ p_ }}</option>{% endfor %}</select>
+    <button class="btn">Bottan sor: yazılacak satır</button>
+    <small class="kucukyazi">cevap "Son işlemler" listesine düşer</small>
+  </form>
+  <form method="post" class="filtre-satir" autocomplete="off" data-onay="Excel yazma modu değiştirilsin mi?">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="excel_mod">
+    <select name="mod">{% for m in excel_modlari %}<option value="{{ m }}" {{ 'selected' if m == ist.excel_mod }}>{{ m }}</option>{% endfor %}</select>
+    <button class="btn">Yazma modunu değiştir</button>
+    <small class="kucukyazi">son_dolunun_altina: en son dolu satırın altına; ilk_bos_satir: aradaki ilk boş satıra</small>
+  </form>
 </div>
 
 <div class="kart">
@@ -128,12 +195,29 @@
 </div>
 
 <div class="kart">
-  <h3>Son hatalar</h3>
+  <h3>Son hatalar <small>(/son_hatalar)</small></h3>
   <pre class="log">{% for s in hatalar %}{{ s }}
 {% else %}(hata yok){% endfor %}</pre>
   <h3>Son log</h3>
   <pre class="log">{% for s in log %}{{ s }}
 {% endfor %}</pre>
 </div>
+
+<div class="kart tehlike-kart">
+  <h3>Tehlikeli işlemler</h3>
+  <form method="post" class="filtre-satir" autocomplete="off" data-onay="Bot DURDURULACAK. Yeniden başlatmak için bot bilgisayarında telebot.ps1 elle açılmalı. Emin misiniz?">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="kapat">
+    <input name="onay" placeholder="KAPAT yazın" required pattern="KAPAT|kapat" style="width:120px">
+    <button class="btn tehlike">⛔ Botu durdur (/kapat)</button>
+    <small class="kucukyazi">Bot bekleyen işi bitirip güvenli şekilde kapanır. Panel botu yeniden başlatamaz; Windows'ta bot bilgisayarında elle açılır.</small>
+  </form>
+</div>
+
+<div id="tg-modal" class="modal gizli" aria-hidden="true">
+  <div class="modal-icerik tg-modal-icerik">
+    <button class="modal-kapat" title="Kapat (Esc)">✕</button>
+    <div class="modal-bilgi" id="tg-icerik"><p>Yükleniyor…</p></div>
+  </div>
+</div>
 {% endblock %}
-{% block script %}<script>Panel.botSayfasi();</script>{% endblock %}
+{% block script %}<script>window.AC_TG = {{ ac_tg|tojson }}; Panel.botSayfasi();</script>{% endblock %}

@@ -123,8 +123,21 @@ Cikti        : Tarih araligi (ve istege bagli proje, durum, kategori, personel) 
                Gorsel dosyasi. Ikinci sayfada proje ozeti (toplam / onayli / bekleyen / silinen).
                Kayitlar sayfasindaki "Excel" dugmesi de o anki filtreyi indirir. Herkes yalnizca yetkili oldugu
                projeleri indirebilir; her indirme Denetim'e yazilir.
-Bot          : (super admin) Bot canli mi, bakim modu, Gyazo bakimi, Telegram kullanicilarini
-               onayla/engelle, kategoriler, acik oturumlar, yedek al, Excel'i hemen oku, son log.
+Bot          : (super admin) Telegram'daki admin komutlarinin TAMAMI burada:
+               /durum, /istatistik, /kayit_raporu (en cok kanit ekleyenler), /son_kullanicilar ve
+               /kullanici_ara (kullanici listesinde arama + sure + durum + adet suzgeci), /onayla, /onayli_sil
+               (onayi kaldir), /engelle, /engel_kaldir, /engel_kaldir_sifirla (TAM SIFIRLA), /oturumlar,
+               /oturum_temizle, /kullanici_durum (DETAY penceresi), /kategori_liste, /kategori_bilgi,
+               /kategori_ekle, /kategori_sil, /excel_son_satir (Bottan sor), /excel_mod, /yedekle, /bakim_ac,
+               /bakim_kapat, /gyazo_bakim_ac, /gyazo_bakim_kapat, /son_hatalar, /kapat (Botu durdur; onay
+               icin kutuya KAPAT yazilir). Excel'i hemen oku dugmesi paneli yeniler.
+               KULLANICI DETAYI: Telegram kullanicilari ya da acik oturumlar listesinde satira tiklayinca
+               CANLI bir pencere acilir (5 saniyede bir yenilenir): kullanici su an botun hangi ekraninda
+               kaldi (proje seciyor / kategori seciyor / personel kodu bekleniyor / uye ID / ana ID / tur /
+               Gyazo-dosya secimi / SON KONTROL onayi), o ana kadar girdigi bilgiler, gorsel alindi mi;
+               bot defterindeki sayaclar (kac kayit, hangi proje, hangi kategori), paneldeki kayitlari
+               (proje x kategori tablosu, onayli/bekleyen) ve son kayitlari (tiklayinca kaydin penceresi
+               acilir). Ayni pencereden onayla / engelle / oturumu temizle / tam sifirla yapilir.
                "Son islemler" listesinde her komutun durumu gorunur: bekliyor -> ok / hata.
 Kullanicilar : (super admin) panel kullanicilari ve yetkileri.
 Denetim      : (super admin) bu bilgisayardan kim ne yapti.

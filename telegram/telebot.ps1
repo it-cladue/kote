@@ -45,7 +45,7 @@ $BAKIM_DOSYA      = [string](Get-ConfigValue "BAKIM_DOSYA" (Join-Base "bakim_mod
 $BACKUP_KLASOR    = [string](Get-ConfigValue "BACKUP_KLASOR" (Join-Base "backups"))
 $KATEGORI_DOSYA   = [string](Get-ConfigValue "KATEGORI_DOSYA" (Join-Base "kategoriler.json"))
 $EXCEL_MOD_DOSYA  = [string](Get-ConfigValue "EXCEL_MOD_DOSYA" (Join-Base "excel_yazma_modu.txt"))
-# ==================== WEB PANELI KOPRUSU (surum 3) ====================
+# ==================== WEB PANELI KOPRUSU (surum 4) ====================
 # Web paneli (telegrampanel) Excel'e dogrudan yazmaz. Panelde yapilan onay (KT), duzenleme, silme ve geri alma
 # islemleri panel_kuyruk.jsonl dosyasina satir satir eklenir; bot bu dosyayi dongude okur, KENDI Excel
 # baglantisiyla uygular ve sonucu panel_kuyruk_sonuc.jsonl'a yazar. Boylece Excel'e tek yazan yine bottur.
@@ -1609,7 +1609,7 @@ function Add-ExcelRow($sayfaAdi, [array]$degerler, $gyazoUrl) {
 }
 
 
-# ==================== WEB PANELI KOPRUSU: FONKSIYONLAR (surum 3) ====================
+# ==================== WEB PANELI KOPRUSU: FONKSIYONLAR (surum 4) ====================
 function Write-JsonSatir($dosya, $nesne) {
     # BOM'suz UTF-8, CRLF satir sonu; panel (Python) satir satir okur.
     $kd = Split-Path -Parent $dosya
@@ -1991,9 +1991,39 @@ function Invoke-PanelBotIslemi($is) {
             return @{ durum = "ok"; mesaj = "onaylandi"; satir = $null }
         }
         "bot_onay_kaldir" {
+            # botun /onayli_sil komutu: onay kaydi + oturum + deneme sayaci (kullanici yeniden sifreye duser)
             if (-not $id) { return @{ durum = "hata"; mesaj = "ID bos"; satir = $null } }
             $b = Remove-Onayli $id
-            return @{ durum = "ok"; mesaj = $(if ($b) { "onay kaldirildi" } else { "onay kaydi yoktu" }); satir = $null }
+            try { Remove-Oturum $id; Reset-Deneme $id } catch {}
+            return @{ durum = "ok"; mesaj = $(if ($b) { "onay kaldirildi; oturum ve deneme temizlendi" } else { "onay kaydi yoktu; oturum ve deneme temizlendi" }); satir = $null }
+        }
+        "bot_tam_sifirla" {
+            # botun /engel_kaldir_sifirla komutu
+            if (-not $id) { return @{ durum = "hata"; mesaj = "ID bos"; satir = $null } }
+            $r = Clear-KullaniciTamSifirla $id
+            $bildirim = $false
+            try { $bildirim = Send-EngelKaldirildiBildirim $id } catch { $bildirim = $false }
+            return @{ durum = "ok"; mesaj = ("tam sifirlandi (engel silindi: $($r.EngelSilindi), onay silindi: $($r.OnaySilindi), deneme/oturum temizlendi)" + $(if ($bildirim) { ", kullaniciya bildirildi" } else { "" })); satir = $null }
+        }
+        "bot_excel_mod" {
+            # botun /excel_mod komutu
+            $mod = [string]$d.mod
+            if (Set-ExcelWriteMode $mod) { return @{ durum = "ok"; mesaj = "Excel yazma modu: $mod"; satir = $null } }
+            return @{ durum = "hata"; mesaj = "gecersiz mod: $mod (son_dolunun_altina | ilk_bos_satir)"; satir = $null }
+        }
+        "bot_excel_son_satir" {
+            # botun /excel_son_satir SAYFA komutu: botun kendi Excel baglantisindan
+            $sayfa = ([string]$d.sayfa).Trim().ToUpperInvariant()
+            if (-not $sayfa) { return @{ durum = "hata"; mesaj = "sayfa bos"; satir = $null } }
+            $info = Get-ExcelSheetWriteInfo $sayfa $HEADERS.Count
+            if (-not $info) { return @{ durum = "hata"; mesaj = "sayfa bulunamadi: $sayfa"; satir = $null } }
+            return @{ durum = "ok"; mesaj = "$($info.Sayfa): son dolu satir $($info.LastDataRow), ilk bos satir $($info.FirstEmptyRow), yeni kayit $($info.NextRow). satira yazilir (mod: $($info.Mode))"; satir = [int]$info.NextRow }
+        }
+        "bot_kapat" {
+            # botun /kapat komutu: dongu bu turdan sonra guvenli sekilde biter
+            $global:StopRequested = $true
+            Write-Log "! Panelden KAPAT komutu geldi; bot guvenli sekilde durduruluyor."
+            return @{ durum = "ok"; mesaj = "bot kapatiliyor (yeniden baslatmak icin bot bilgisayarinda telebot.ps1 acilmali)"; satir = $null }
         }
         "bot_engelle" {
             if (-not $id) { return @{ durum = "hata"; mesaj = "ID bos"; satir = $null } }

@@ -101,6 +101,146 @@ def yedek_al(ayar, conn, kim="panel"):
     return _op(ayar, conn, "bot_yedek", {}, kim, "Yedek al")
 
 
+def tam_sifirla(ayar, conn, tg_id, kim="panel"):
+    """Botun /engel_kaldir_sifirla komutu: engel + onay + deneme + oturum birlikte temizlenir, kullanici yeniden sifreye duser."""
+    tg_id = str(tg_id).strip()
+    return _op(ayar, conn, "bot_tam_sifirla", {"tg_id": tg_id}, kim, f"Tam sifirla {tg_id}")
+
+
+EXCEL_MODLARI = ("son_dolunun_altina", "ilk_bos_satir")
+
+
+def excel_mod_ayarla(ayar, conn, mod, kim="panel"):
+    """Botun /excel_mod komutu."""
+    mod = (mod or "").strip()
+    if mod not in EXCEL_MODLARI:
+        raise ValueError("Gecersiz Excel yazma modu")
+    return _op(ayar, conn, "bot_excel_mod", {"mod": mod}, kim, f"Excel yazma modu: {mod}")
+
+
+def excel_son_satir_sor(ayar, conn, sayfa, kim="panel"):
+    """Botun /excel_son_satir SAYFA komutu: bot kendi Excel baglantisindan son dolu / ilk bos / yazilacak satiri bildirir."""
+    sayfa = (sayfa or "").strip().upper()
+    if not sayfa or len(sayfa) > 31:
+        raise ValueError("Sayfa adi bos")
+    return _op(ayar, conn, "bot_excel_son_satir", {"sayfa": sayfa}, kim, f"Excel son satir sor: {sayfa}")
+
+
+def bot_kapat(ayar, conn, kim="panel"):
+    """Botun /kapat komutu: bot dongusu guvenli sekilde biter (yeniden baslatma bot bilgisayarindan yapilir)."""
+    return _op(ayar, conn, "bot_kapat", {}, kim, "BOTU DURDUR")
+
+
+# ---- salt okunur: botun /durum, /istatistik, /kullanici_durum, /kayit_raporu, /excel_mod karsiliklari ----
+def denemeler(ayar):
+    """denemeler.txt -> {tg_id: hatali sifre denemesi}"""
+    out = {}
+    for ln in _oku_satirlar(_yol(ayar, "denemeler.txt")):
+        p = [x.strip() for x in ln.split("|")]
+        if len(p) >= 2 and p[0]:
+            try:
+                out[p[0]] = int(p[1])
+            except ValueError:
+                pass
+    return out
+
+
+def excel_yazma_modu(ayar):
+    try:
+        with open(_yol(ayar, "excel_yazma_modu.txt"), encoding="utf-8-sig") as f:
+            m = f.read().strip()
+        return m if m in EXCEL_MODLARI else EXCEL_MODLARI[0]
+    except Exception:
+        return EXCEL_MODLARI[0]
+
+
+def kullanici_defteri(ayar):
+    yol = _yol(ayar, "kullanicilar.json")
+    try:
+        with open(yol, encoding="utf-8-sig") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _sozluk(v):
+    return {str(k): v[k] for k in v} if isinstance(v, dict) else {}
+
+
+def son_hata(ayar):
+    """Botun $global:LastErrorText karsiligi: logdaki son '!' satiri."""
+    for s in reversed(son_log(ayar, 400)):
+        if "] !" in s:
+            return s
+    return ""
+
+
+def istatistik(ayar, conn):
+    """Botun /istatistik + /kayit_raporu + /durum ozetleri (dosyalardan ve panel veritabanindan)."""
+    defter = kullanici_defteri(ayar)
+    ots = oturumlar(ayar)
+    sayacli = [u for u in defter.values() if isinstance(u, dict) and u.get("kayit_sayisi")]
+    rapor = sorted(sayacli, key=lambda u: -int(u.get("kayit_sayisi") or 0))[:15]
+    kayit_raporu = [{"id": str(u.get("id") or ""), "ad": " / ".join(x for x in (u.get("username"), u.get("first_name")) if x),
+                     "kayit": int(u.get("kayit_sayisi") or 0), "son": u.get("son_kayit_tarihi") or "",
+                     "proje": u.get("son_kayit_proje") or "", "kategori": u.get("son_kayit_kategori") or ""} for u in rapor]
+    db_proje = {r[0]: r[1] for r in conn.execute("SELECT proje, COUNT(*) FROM kayitlar WHERE silindi=0 GROUP BY proje").fetchall()}
+    db_kt = conn.execute("SELECT SUM(kt=1), SUM(kt=0) FROM kayitlar WHERE silindi=0").fetchone()
+    excel_satir = {r[0]: r[1] for r in conn.execute("SELECT proje, MAX(excel_satir) FROM kayitlar WHERE excel_durum<>'silinmis' GROUP BY proje").fetchall()}
+    return {"defter": len(defter), "onayli": len(onaylilar(ayar)), "engelli": len(engellenenler(ayar)), "oturum": len(ots),
+            "sayacli": len(sayacli), "bakim": bakim_modu(ayar), "gyazo_bakim": gyazo_bakim(ayar), "excel_mod": excel_yazma_modu(ayar),
+            "kayit_raporu": kayit_raporu, "db_proje": db_proje, "db_toplam": sum(db_proje.values()),
+            "db_onayli": int(db_kt[0] or 0), "db_bekleyen": int(db_kt[1] or 0), "excel_satir": excel_satir, "son_hata": son_hata(ayar)}
+
+
+def kullanici_detay(ayar, conn, tg_id):
+    """Botun /kullanici_durum ID komutunun genisi: kimlik, onay/engel/deneme, CANLI oturum (hangi adimda kaldi),
+    panel veritabanindan proje/kategori dagilimi ve son kayitlar."""
+    tg_id = str(tg_id).strip()
+    u = kullanici_defteri(ayar).get(tg_id)
+    u = u if isinstance(u, dict) else {}
+    onay = {o["id"]: o for o in onaylilar(ayar)}.get(tg_id)
+    engel = {e["id"]: e for e in engellenenler(ayar)}.get(tg_id)
+    ot = None
+    try:
+        with open(_yol(ayar, "oturumlar.json"), encoding="utf-8-sig") as f:
+            d = json.load(f)
+        v = d.get(tg_id) if isinstance(d, dict) else None
+        if isinstance(v, dict):
+            ot = {k: vv for k, vv in v.items() if k != "fileId"}
+            ot["gorsel_var"] = bool(v.get("fileId"))
+    except Exception:
+        ot = None
+    rows = conn.execute("SELECT id, proje, kategori, personel, uye_id, ana_uye_id, tarih, kt, silindi, excel_durum, bekleyen_islem FROM kayitlar WHERE ekleyen_id=? ORDER BY COALESCE(tarih,'0000') DESC, id DESC", (tg_id,)).fetchall()
+    proje, kategori, capraz = {}, {}, {}
+    onayli = bekleyen = silinen = 0
+    for r in rows:
+        if r["silindi"] or r["excel_durum"] == "silinmis":
+            silinen += 1
+            continue
+        proje[r["proje"]] = proje.get(r["proje"], 0) + 1
+        k = (r["kategori"] or "").upper() or "-"
+        kategori[k] = kategori.get(k, 0) + 1
+        capraz.setdefault(r["proje"], {})[k] = capraz.get(r["proje"], {}).get(k, 0) + 1
+        if r["kt"]:
+            onayli += 1
+        else:
+            bekleyen += 1
+    son = [{"id": r["id"], "proje": r["proje"], "kategori": r["kategori"] or "", "personel": r["personel"] or "", "uye_id": r["uye_id"] or "",
+            "ana_uye_id": r["ana_uye_id"] or "", "tarih": r["tarih"] or "", "kt": bool(r["kt"]),
+            "silindi": bool(r["silindi"] or r["excel_durum"] == "silinmis"), "bekleyen": r["bekleyen_islem"] or ""} for r in rows[:25]]
+    return {"id": tg_id, "username": u.get("username") or (onay or {}).get("ad") or "", "first_name": u.get("first_name") or "",
+            "last_seen": u.get("last_seen") or "", "status": u.get("status") or "",
+            "onayli": bool(onay), "onay_tarihi": (onay or {}).get("tarih", ""),
+            "engelli": bool(engel), "engel_sebep": (engel or {}).get("sebep", ""), "engel_tarihi": (engel or {}).get("tarih", ""),
+            "deneme": denemeler(ayar).get(tg_id, 0), "oturum": ot,
+            "bot_sayac": {"kayit": int(u.get("kayit_sayisi") or 0), "son_tarih": u.get("son_kayit_tarihi") or "", "son_proje": u.get("son_kayit_proje") or "",
+                          "son_kategori": u.get("son_kayit_kategori") or "", "proje": _sozluk(u.get("proje_sayilari")), "kategori": _sozluk(u.get("kategori_sayilari"))},
+            "panel": {"toplam": onayli + bekleyen, "onayli": onayli, "bekleyen": bekleyen, "silinen": silinen, "proje": proje, "kategori": kategori, "capraz": capraz, "son": son},
+            "zaman": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+
 def son_islemler(conn, n=30):
     return [dict(r) for r in conn.execute("SELECT * FROM islem_sonuclari ORDER BY zaman DESC, rowid DESC LIMIT ?", (n,)).fetchall()]
 
@@ -117,14 +257,48 @@ def telegram_kullanicilari(ayar):
             d = {}
     onay = {o["id"]: o for o in onaylilar(ayar)}
     engel = {e["id"]: e for e in engellenenler(ayar)}
-    ids = set(d.keys()) | set(onay.keys()) | set(engel.keys())
+    den = denemeler(ayar)
+    ots = {o["id"]: o for o in oturumlar(ayar)}
+    ids = set(d.keys()) | set(onay.keys()) | set(engel.keys()) | set(ots.keys())
     out = []
     for i in sorted(ids, key=lambda x: (x not in onay, x)):
         u = d.get(i, {}) if isinstance(d.get(i), dict) else {}
+        ot = ots.get(i)
         out.append({"id": i, "username": u.get("username", "") or onay.get(i, {}).get("ad", ""), "first_name": u.get("first_name", ""),
-                    "last_seen": u.get("last_seen", ""), "kayit_sayisi": u.get("kayit_sayisi", 0) or 0,
+                    "last_seen": u.get("last_seen", ""), "kayit_sayisi": u.get("kayit_sayisi", 0) or 0, "status": u.get("status", ""),
+                    "son_kayit": u.get("son_kayit_tarihi", ""), "son_proje": u.get("son_kayit_proje", ""), "son_kategori": u.get("son_kayit_kategori", ""),
                     "onayli": i in onay, "onay_tarihi": onay.get(i, {}).get("tarih", ""),
-                    "engelli": i in engel, "engel_sebep": engel.get(i, {}).get("sebep", "")})
+                    "engelli": i in engel, "engel_sebep": engel.get(i, {}).get("sebep", ""),
+                    "deneme": den.get(i, 0), "oturum": ({"adim": ot.get("adim") or ot.get("step") or "", "proje": ot.get("proje") or "", "kategori": ot.get("kategori") or ""} if ot else None)})
+    return out
+
+
+def kullanici_filtrele(liste, q="", sure_saat=0, durum="", adet=0):
+    """Botun /son_kullanicilar [adet] [sure] ve /kullanici_ara kelime komutlari: arama, sure, durum ve adet suzgeci."""
+    q = (q or "").strip().lower()
+    out = []
+    esik = None
+    if sure_saat and int(sure_saat) > 0:
+        from datetime import timedelta
+        esik = (datetime.now() - timedelta(hours=int(sure_saat))).strftime("%Y-%m-%d %H:%M:%S")
+    for u in liste:
+        if q and q not in f"{u['id']} {u['username']} {u['first_name']}".lower():
+            continue
+        if esik and (u.get("last_seen") or "") < esik:
+            continue
+        if durum == "onayli" and not (u["onayli"] and not u["engelli"]):
+            continue
+        if durum == "engelli" and not u["engelli"]:
+            continue
+        if durum == "onaysiz" and (u["onayli"] or u["engelli"]):
+            continue
+        if durum == "oturum" and not u.get("oturum"):
+            continue
+        out.append(u)
+    if esik or q or durum:
+        out.sort(key=lambda u: u.get("last_seen") or "", reverse=True)
+    if adet and int(adet) > 0:
+        out = out[:int(adet)]
     return out
 
 

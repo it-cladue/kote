@@ -286,14 +286,107 @@ window.Panel = (function () {
         }).join('') : '<tr><td colspan="5">Henüz işlem yok.</td></tr>';
         var b = document.getElementById('islem-bekleyen');
         if (b) { b.textContent = 'bekleyen: ' + d.bekleyen; b.classList.toggle('gizli', !d.bekleyen); }
-        if (degisti && !d.bekleyen) { toast('Bot işlemleri uyguladı; sayfa yenileniyor'); setTimeout(function () { location.reload(); }, 1200); }
+        if (degisti && !d.bekleyen && modal.classList.contains('gizli')) { toast('Bot işlemleri uyguladı; sayfa yenileniyor'); setTimeout(function () { location.reload(); }, 1200); }
       }).catch(function () {});
     }
     setInterval(yenile, 10000);
+
+    // ---- Telegram kullanici detayi: canli oturum + istatistik (botun /kullanici_durum komutunun genisi) ----
+    var modal = document.getElementById('tg-modal'), icerik = document.getElementById('tg-icerik');
+    var acikTg = null, sayac = null;
+    var ADIMLAR = ['proje', 'kategori', 'personel', 'uyeid', 'anaid', 'tip', 'kayit_secim', 'ozet'];
+    var ADIM_AD = { proje: 'Proje seçiyor', kategori: 'Kategori seçiyor', personel: 'Personel kodu yazması bekleniyor', uyeid: 'Üye ID yazması bekleniyor',
+      anaid: 'Ana üye ID yazması bekleniyor', tip: 'Sessiz / Telesekreter seçimi bekleniyor', kayit_secim: 'Gyazo mu, dosya mı? seçimi bekleniyor',
+      gyazo_bakim: 'Gyazo bakım uyarısında (dosyaya kaydet / iptal)', ozet: 'SON KONTROL ekranında: Onayla / İptal bekleniyor', lead_onay: 'Lead ID onayı bekleniyor (yazılı giriş)' };
+    var ADIM_KISA = { proje: 'Proje', kategori: 'Kategori', personel: 'Personel', uyeid: 'Üye ID', anaid: 'Ana ID', tip: 'Tür', kayit_secim: 'Gyazo/dosya', ozet: 'Onay' };
+    function cip(p) { var r = (window.PROJE_RENK || {})[p] || '#6b7280'; return '<span class="proje-cip" style="--renk:' + esc(r) + ';--cipyazi:' + (acik(r) ? '#111' : '#fff') + '">' + esc(p) + '</span>'; }
+    function acik(hex) { var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || ''); if (!m) return false; return (parseInt(m[1], 16) * 299 + parseInt(m[2], 16) * 587 + parseInt(m[3], 16) * 114) / 1000 > 150; }
+    function sayiListe(obj) { var k = Object.keys(obj || {}); if (!k.length) return '<span class="gri">yok</span>'; return k.sort().map(function (x) { return '<b>' + esc(x) + '</b> ' + esc(obj[x]); }).join(' · '); }
+    function form(islem, etiket, sinif, onay, ekstra) {
+      return '<form method="post" class="satir-form"' + (onay ? ' data-onay="' + esc(onay) + '"' : '') + '><input type="hidden" name="csrf" value="' + esc(csrf) + '"><input type="hidden" name="islem" value="' + islem + '"><input type="hidden" name="tg_id" value="' + esc(acikTg) + '">' + (ekstra || '') + '<button class="btn kucuk ' + (sinif || '') + '">' + etiket + '</button></form>';
+    }
+    function ciz(d) {
+      var ad = [d.username, d.first_name].filter(Boolean).join(' / ') || '(ad yok)';
+      var h = '<div class="detay-baslik"><h3>' + esc(ad) + ' <code>' + esc(d.id) + '</code></h3>';
+      h += d.engelli ? '<b class="kirmizi">ENGELLİ</b> <small>' + esc(d.engel_sebep) + ' ' + esc(d.engel_tarihi) + '</small>' : d.onayli ? '<span class="yesil">onaylı</span> <small>' + esc(d.onay_tarihi) + '</small>' : '<span class="gri">onaysız (şifre yazmadı)</span>';
+      h += '<small class="kucukyazi"><span class="canli-nokta"></span>canlı · ' + esc(d.zaman) + '</small></div>';
+      h += '<div class="modal-butonlar">';
+      if (d.engelli) h += form('engel_kaldir', 'Engeli kaldır', '', 'Engel kaldırılsın mı? Deneme sayacı ve oturum da sıfırlanır.');
+      else { h += d.onayli ? form('onay_kaldir', 'Onayı kaldır', '', 'Onay kaldırılsın mı? Kullanıcı yeniden şifre yazmak zorunda kalır (/onayli_sil).') : form('onayla', '✔ Onayla', 'basari', '', '<input type="hidden" name="ad" value="' + esc(d.username) + '">');
+        h += form('engelle', 'Engelle', 'tehlike', 'Bu kullanıcı engellensin mi?', '<input type="hidden" name="ad" value="' + esc(d.username) + '"><input type="hidden" name="sebep" value="panel">'); }
+      if (d.oturum) h += form('oturum_temizle', '🧹 Oturumu temizle', '', 'Yarım kalan oturum silinsin mi? Kullanıcı baştan başlar.');
+      h += form('tam_sifirla', '♻ Tam sıfırla', 'tehlike', 'Engel + onay + deneme + oturum birlikte temizlenir, kullanıcı yeniden şifreye düşer (/engel_kaldir_sifirla). Emin misiniz?');
+      h += '</div><div class="detay-izgara">';
+      // oturum
+      var o = d.oturum;
+      h += '<div class="detay-kutu' + (o ? ' oturum-aktif' : '') + '"><h4>Şu an nerede? <small>(canlı oturum)</small></h4>';
+      if (!o) { h += '<p class="kucukyazi" style="margin:0">Açık oturum yok: ya hiç başlamadı ya da son kaydı tamamladı.' + (d.status ? ' Bot durumu: <b>' + esc(d.status) + '</b>' : '') + '</p>'; }
+      else {
+        var adim = o.adim || o.step || '';
+        h += '<div><span class="adim-rozet">' + esc(ADIM_AD[adim] || ('Adım: ' + adim)) + '</span></div>';
+        var i = ADIMLAR.indexOf(adim);
+        h += '<div class="adim-akis">' + ADIMLAR.map(function (a, j) { return '<span class="' + (i < 0 ? '' : j < i ? 'gecti' : j === i ? 'simdi' : '') + '">' + esc(ADIM_KISA[a]) + '</span>'; }).join('') + '</div>';
+        var al = [['Proje', o.proje ? cip(String(o.proje).toUpperCase()) : ''], ['Kategori', o.kategori ? esc(String(o.kategori).toUpperCase()) : ''], ['Personel', esc(o.personel)], ['Üye ID', esc(o.uyeid)], ['Ana ID', esc(o.anaid)], ['Tür', esc(o.tip)],
+          ['Giriş tipi', esc(o.girisTipi === 'yazili' ? 'yazılı (Lead ID ' + (o.leadId || '') + ')' : o.girisTipi || 'resim')], ['Görsel', o.gorsel_var ? '✔ alındı' + (o.kayitModu ? ' (' + esc(o.kayitModu) + ')' : '') : '<span class="gri">henüz yok</span>']];
+        h += '<dl style="margin-top:8px">' + al.filter(function (a) { return a[1]; }).map(function (a) { return '<dt>' + a[0] + '</dt><dd>' + a[1] + '</dd>'; }).join('') + '</dl>';
+      }
+      h += '</div>';
+      // bot sayaclari + durum
+      h += '<div class="detay-kutu"><h4>Bot defteri <small>(kullanicilar.json)</small></h4><dl>';
+      h += '<dt>Son görülme</dt><dd>' + esc(d.last_seen || '-') + '</dd><dt>Bot durumu</dt><dd>' + esc(d.status || '-') + '</dd><dt>Hatalı şifre denemesi</dt><dd>' + (d.deneme ? '<b class="turuncu">' + d.deneme + '</b>' : '0') + '</dd>';
+      h += '<dt>Eklediği kayıt (bot)</dt><dd><b>' + d.bot_sayac.kayit + '</b></dd><dt>Son kayıt</dt><dd>' + esc([d.bot_sayac.son_tarih, d.bot_sayac.son_proje, d.bot_sayac.son_kategori].filter(Boolean).join(' / ') || '-') + '</dd>';
+      h += '<dt>Proje dağılımı</dt><dd>' + sayiListe(d.bot_sayac.proje) + '</dd><dt>Kategori dağılımı</dt><dd>' + sayiListe(d.bot_sayac.kategori) + '</dd></dl></div>';
+      // panel istatistigi
+      var p = d.panel;
+      h += '<div class="detay-kutu"><h4>Paneldeki kayıtları <small>(ekleyen = bu kullanıcı)</small></h4>';
+      h += '<p style="margin:0 0 6px"><b>' + p.toplam + '</b> kayıt · <span class="yesil">' + p.onayli + ' onaylı</span> · <span class="turuncu">' + p.bekleyen + ' bekliyor</span>' + (p.silinen ? ' · <span class="kirmizi">' + p.silinen + ' silinmiş</span>' : '') + '</p>';
+      var pr = Object.keys(p.capraz || {}).sort();
+      if (pr.length) {
+        h += '<table class="tablo kucuk"><thead><tr><th>Proje</th><th>Kategori</th><th>Adet</th></tr></thead><tbody>';
+        pr.forEach(function (pp) { var ks = Object.keys(p.capraz[pp]).sort(); ks.forEach(function (kk, j) { h += '<tr><td>' + (j === 0 ? cip(pp) + ' <small>' + p.proje[pp] + '</small>' : '') + '</td><td>' + esc(kk) + '</td><td>' + p.capraz[pp][kk] + '</td></tr>'; }); });
+        h += '</tbody></table>';
+      } else h += '<p class="kucukyazi" style="margin:0">Bu kullanıcıya bağlı kayıt yok (eski kayıtlarda "ekleyen" bilgisi olmayabilir).</p>';
+      h += '</div>';
+      // son kayitlar
+      h += '<div class="detay-kutu"><h4>Son kayıtları</h4>';
+      if (p.son.length) {
+        h += '<div class="kaydir" style="max-height:260px"><table class="tablo kucuk"><thead><tr><th>Tarih</th><th>Proje</th><th>Kategori</th><th>Personel</th><th>Üye</th><th>Onay</th></tr></thead><tbody>';
+        p.son.forEach(function (k) { h += '<tr' + (k.silindi ? ' style="opacity:.5"' : '') + '><td class="nowrap"><a href="/kayitlar?proje=' + encodeURIComponent(k.proje) + '&durum=hepsi&ac=' + k.id + '">' + esc(k.tarih || '-') + '</a></td><td>' + cip(k.proje) + '</td><td>' + esc(k.kategori) + '</td><td>' + esc(k.personel) + '</td><td>' + esc(k.uye_id || k.ana_uye_id) + '</td><td>' + (k.silindi ? '<span class="kirmizi">silindi</span>' : k.kt ? '<span class="yesil">✔</span>' : '<span class="turuncu">bekliyor</span>') + '</td></tr>'; });
+        h += '</tbody></table></div>';
+      } else h += '<p class="kucukyazi" style="margin:0">Kayıt yok.</p>';
+      h += '</div></div>';
+      icerik.innerHTML = h;
+    }
+    function yukle() {
+      if (!acikTg) return;
+      fetch('/bot/kullanici/' + encodeURIComponent(acikTg) + '.json', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { if (d && acikTg === d.id) ciz(d); else if (!d) icerik.innerHTML = '<p class="kirmizi">Kullanıcı bilgisi alınamadı.</p>'; }).catch(function () {});
+    }
+    function ac(id) {
+      acikTg = String(id);
+      modal.classList.remove('gizli'); modal.setAttribute('aria-hidden', 'false');
+      icerik.innerHTML = '<p>Yükleniyor…</p>';
+      yukle(); clearInterval(sayac); sayac = setInterval(yukle, 5000);
+    }
+    function kapat() { modal.classList.add('gizli'); modal.setAttribute('aria-hidden', 'true'); acikTg = null; clearInterval(sayac); }
+    if (modal) {
+      modal.querySelector('.modal-kapat').addEventListener('click', kapat);
+      modal.addEventListener('click', function (ev) { if (ev.target === modal) kapat(); });
+      document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && !modal.classList.contains('gizli')) kapat(); });
+      document.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t.closest && t.closest('form, a:not([data-tg-detay])') && !t.closest('[data-tg-detay]')) return;   // satirdaki butonlar / linkler
+        var e = t.closest ? t.closest('[data-tg-detay]') : null;
+        if (!e) return;
+        if (e.tagName === 'TR' && t.closest('form')) return;
+        ev.preventDefault(); ac(e.getAttribute('data-tg-detay'));
+      });
+      if (window.AC_TG) ac(window.AC_TG);
+    }
   }
 
   // Satir ici JS kullanilmaz: onay sorulari data-onay, kopyalama data-kopyala ile
-  document.addEventListener('submit', function (ev) { var f = ev.target; if (f && f.getAttribute && f.getAttribute('data-onay') && !confirm(f.getAttribute('data-onay'))) ev.preventDefault(); });
+  document.addEventListener('submit', function (ev) { var f = ev.target, b = ev.submitter; var m = (b && b.getAttribute && b.getAttribute('data-onay')) || (f && f.getAttribute && f.getAttribute('data-onay')); if (m && !confirm(m)) ev.preventDefault(); });
   document.addEventListener('click', function (ev) { var b = ev.target.closest ? ev.target.closest('[data-kopyala]') : null; if (b) { ev.preventDefault(); kopyala(b.getAttribute('data-kopyala')); } });
 
   return { kayitSayfasi: kayitSayfasi, botSayfasi: botSayfasi, bildirimler: bildirimler, toast: toast, kopyala: kopyala };

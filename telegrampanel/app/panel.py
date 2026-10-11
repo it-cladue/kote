@@ -835,6 +835,16 @@ def bot_sayfasi():
                 bot_yonetim.kategori_sil(AYAR, c, request.form.get("code") or "", kim)
             elif islem == "yedek":
                 bot_yonetim.yedek_al(AYAR, c, kim)
+            elif islem == "tam_sifirla":
+                bot_yonetim.tam_sifirla(AYAR, c, tg, kim)
+            elif islem == "excel_mod":
+                bot_yonetim.excel_mod_ayarla(AYAR, c, request.form.get("mod") or "", kim)
+            elif islem == "excel_son_satir":
+                bot_yonetim.excel_son_satir_sor(AYAR, c, request.form.get("sayfa") or "", kim)
+            elif islem == "kapat":
+                if (request.form.get("onay") or "").strip().upper() != "KAPAT":
+                    raise ValueError("Botu durdurmak icin kutuya KAPAT yazin.")
+                bot_yonetim.bot_kapat(AYAR, c, kim)
             elif islem == "yenile":
                 kuyrukta = False
                 rapor = ice_aktar.calistir(AYAR, c, AYAR["ONBELLEK"], COZUCU, zorla=True)
@@ -845,12 +855,37 @@ def bot_sayfasi():
             if kuyrukta:
                 mesaj = "Islem bota iletildi; bot uygulayinca asagidaki 'Son islemler' listesinde 'ok' olur (bot acikken birkac saniye, OneDrive uzerinden 1-2 dakika)."
             db.denetim_yaz(c, kim, f"bot_{islem}", yeni=f"{tg} {ad}".strip() or None, ip=ip())
+            if kuyrukta and tg:
+                return redirect(url_for("bot_sayfasi", tg=tg, m=1))
         except Exception as e:
             mesaj = f"Hata: {e}"
-    return render_template("bot.html", mesaj=mesaj, durum=durum_bilgisi(), tg_kullanicilar=bot_yonetim.telegram_kullanicilari(AYAR),
+    if request.args.get("m") and not mesaj:
+        mesaj = "Islem bota iletildi; bot uygulayinca 'Son islemler' listesinde 'ok' olur."
+    tg_f = {"q": (request.args.get("tg_q") or "").strip()[:60], "sure": _sayi(request.args.get("tg_sure"), 0), "durum": request.args.get("tg_durum") or "",
+            "adet": _sayi(request.args.get("tg_adet"), 0)}
+    tum = bot_yonetim.telegram_kullanicilari(AYAR)
+    tg_liste = bot_yonetim.kullanici_filtrele(tum, tg_f["q"], tg_f["sure"], tg_f["durum"], tg_f["adet"])
+    return render_template("bot.html", mesaj=mesaj, durum=durum_bilgisi(), tg_kullanicilar=tg_liste, tg_toplam=len(tum), tg_f=tg_f,
                            kategoriler=bot_yonetim.kategoriler(AYAR), bakim=bot_yonetim.bakim_modu(AYAR), gyazo_bakim=bot_yonetim.gyazo_bakim(AYAR),
                            oturumlar=bot_yonetim.oturumlar(AYAR), log=bot_yonetim.son_log(AYAR, 150), hatalar=bot_yonetim.son_log(AYAR, 40, True),
-                           cfg=bot_yonetim.config(AYAR), islemler=bot_yonetim.son_islemler(c))
+                           cfg=bot_yonetim.config(AYAR), islemler=bot_yonetim.son_islemler(c), ist=bot_yonetim.istatistik(AYAR, c),
+                           excel_modlari=bot_yonetim.EXCEL_MODLARI, ac_tg=(request.args.get("tg") or "").strip()[:20])
+
+
+def _sayi(v, varsayilan=0):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return varsayilan
+
+
+@app.route("/bot/kullanici/<tg_id>.json")
+@admin_gerekli
+def bot_kullanici_json(tg_id):
+    tg_id = tg_id.strip()
+    if not tg_id.isdigit() or len(tg_id) > 20:
+        abort(404)
+    return jsonify(bot_yonetim.kullanici_detay(AYAR, baglanti(), tg_id))
 
 
 @app.route("/bot/islemler.json")

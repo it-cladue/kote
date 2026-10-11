@@ -178,3 +178,28 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 10px; border-radius: 8px
 .degisiklik-serit a { color: #fde68a; font-weight: 600; margin-left: 6px; }
 @media (max-width: 700px) { .bildirim-kutu { right: 6px; left: 6px; width: auto; } }
 .sayac-degisti { color: var(--birincil) !important; transition: color .3s; }
+
+/* bot sayfasi: istatistik, kullanici detay penceresi */
+.sayi-izgara { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; }
+.sayi-izgara .sayi-btn { background: #f9fafb; border: 1px solid var(--cizgi); border-radius: 8px; }
+.proje-cip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--renk); color: var(--cipyazi); font-weight: 600; font-size: 12px; }
+.canli-nokta { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--yesil); margin-right: 5px; animation: canli 1.4s ease-in-out infinite; vertical-align: middle; }
+@keyframes canli { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+.tablo.tiklanir tbody tr { cursor: pointer; }
+.tablo.tiklanir tbody tr:hover td { background: #f3f4f6; }
+.tehlike-kart { border-color: #fca5a5; background: #fff7f7; }
+.tg-modal-icerik { width: min(980px, 100%); }
+.tg-modal-icerik .modal-bilgi { padding: 18px 22px; }
+.detay-baslik { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-right: 40px; margin-bottom: 8px; }
+.detay-baslik h3 { margin: 0; }
+.detay-izgara { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 800px) { .detay-izgara { grid-template-columns: 1fr; } }
+.detay-kutu { border: 1px solid var(--cizgi); border-radius: 8px; padding: 10px 12px; }
+.detay-kutu h4 { margin: 0 0 6px; font-size: 13px; color: #374151; }
+.detay-kutu dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 0; font-size: 13px; }
+.detay-kutu dt { color: var(--soluk); } .detay-kutu dd { margin: 0; }
+.detay-kutu.oturum-aktif { border-color: var(--yesil); background: #f0fdf4; }
+.adim-rozet { display: inline-block; padding: 2px 8px; border-radius: 6px; background: #fef3c7; color: #92400e; font-weight: 600; font-size: 12px; }
+.adim-akis { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.adim-akis span { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #e5e7eb; color: #374151; }
+.adim-akis span.gecti { background: #d1fae5; color: #065f46; } .adim-akis span.simdi { background: #fde68a; color: #92400e; font-weight: 700; }
