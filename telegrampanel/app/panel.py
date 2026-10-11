@@ -233,6 +233,8 @@ KURULUM_SERBEST = {"kurulum", "kurulum_admin", "static", "saglik", "cikis"}
 
 @app.before_request
 def _on():
+    if not istek_izinli_mi():
+        abort(403)
     g.k = kullanici_yukle()
     g.yk = yetki.coz(g.k["yetki"]) if g.k else yetki.coz("")
     if "csrf" not in session:
@@ -249,6 +251,16 @@ def _on():
     if not kullanicilar.var_mi(AYAR):
         return redirect(url_for("kurulum_admin"))
     return None
+
+
+@app.after_request
+def _basliklar(r):
+    r.headers.setdefault("X-Frame-Options", "DENY")
+    r.headers.setdefault("X-Content-Type-Options", "nosniff")
+    r.headers.setdefault("Referrer-Policy", "same-origin")
+    if request.path.endswith(".json") or request.path.startswith(("/kayit/", "/bildirim")):
+        r.headers.setdefault("Cache-Control", "no-store")
+    return r
 
 
 @app.context_processor
@@ -278,7 +290,54 @@ def admin_gerekli(f):
 
 
 def ip():
-    return request.headers.get("CF-Connecting-IP") or request.remote_addr
+    """Denetim kaydi icin istemci adresi. Basliklar (CF-Connecting-IP / X-Forwarded-For) ancak panel bir ters vekilin
+    (Cloudflare Tunnel vb.) arkasindaysa ve GUVENILIR_PROXY=1 ise dikkate alinir; yoksa herkes sahte adres yazabilirdi."""
+    if str(AYAR.get("GUVENILIR_PROXY", "0")).lower() in ("1", "true"):
+        return (request.headers.get("CF-Connecting-IP") or (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip() or request.remote_addr)
+    return request.remote_addr
+
+
+def yerel_istek():
+    return (request.remote_addr or "") in ("127.0.0.1", "::1", "")
+
+
+def ag_modu_mu():
+    return str(AYAR.get("DINLE", "127.0.0.1")) not in ("127.0.0.1", "localhost", "")
+
+
+import ipaddress as _ipa
+OZEL_AGLAR = [_ipa.ip_network(a) for a in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "fc00::/7", "fe80::/10", "::1/128")]
+
+
+def istek_izinli_mi():
+    """Ag modunda yalnizca ozel (ofis) aglardan gelen istekler kabul edilir: 10/8, 172.16/12, 192.168/16, link-local, loopback.
+    panel_ayar.json'a IZINLI_AGLAR: ["192.168.1.0/24", "10.0.0.0/8"] yazilirsa yalnizca o aglar (loopback her zaman serbest).
+    Yanlislikla internete acilmis (port yonlendirme) bir panel boylece disaridan kullanilamaz."""
+    import ipaddress
+    if yerel_istek() or not ag_modu_mu():
+        return True
+    try:
+        adres = ipaddress.ip_address((request.remote_addr or "").split("%")[0])
+    except ValueError:
+        return False
+    izinli = AYAR.get("IZINLI_AGLAR")
+    if izinli:
+        for ag in (izinli if isinstance(izinli, list) else str(izinli).split(",")):
+            try:
+                if adres in ipaddress.ip_network(str(ag).strip(), strict=False):
+                    return True
+            except ValueError:
+                continue
+        return False
+    return any(adres in ag for ag in OZEL_AGLAR)
+
+
+def guvenli_sonraki(s):
+    """Giristen sonra donulecek adres: yalnizca bu panelin kendi yolu (acik yonlendirme korumasi)."""
+    s = (s or "").strip()
+    if not s.startswith("/") or s.startswith("//") or "\\" in s or ":" in s.split("?")[0]:
+        return None
+    return s
 
 
 def kayit_izin(kayit, eylem):
@@ -291,6 +350,9 @@ def kurulum():
     gecerli = bot_klasoru_mu(AYAR.get("BOT_KLASOR"))
     if gecerli and not (g.k and g.yk["admin"]):
         return redirect(url_for("ana"))
+    if not gecerli and not yerel_istek():
+        # ag modunda baska bir bilgisayardan ilk kurulum yapilamaz: bot klasoru panelin calistigi bilgisayarda secilir
+        abort(403)
     hata = None
     if request.method == "POST":
         k = (request.form.get("klasor") or "").strip().strip('"')
@@ -317,7 +379,9 @@ def kurulum_admin():
     # Kullanici dosyasi yok ama klasorde panel daha once kullanilmis: buyuk olasilikla OneDrive dosyayi henuz
     # getirmedi (ya da biri sildi). Bot bilgisayari degilse yeni "ilk admin" olusturulmaz; botun admin sifresiyle
     # (config.json ADMIN_PASSWORD) acilabilir. Boylece iki bilgisayarin ayri ayri ilk admin yaratmasi onlenir.
-    bekle = kullanicilar.once_kullanilmis(AYAR) and not bot_yonetim.yerel_bot_sureci()
+    # Ag modunda (baska bilgisayardan gelen istek) ilk admin yalnizca botun ADMIN_PASSWORD'u ile olusturulabilir:
+    # kullanici dosyasi bir an icin yoksa bile ofis agindaki herhangi biri kendine super admin acamaz.
+    bekle = (kullanicilar.once_kullanilmis(AYAR) and not bot_yonetim.yerel_bot_sureci()) or not yerel_istek()
     hata = None
     if request.method == "POST":
         ad = (request.form.get("kullanici") or "").strip().lower()
@@ -354,7 +418,7 @@ def giris():
             session["kad"] = u["kullanici_adi"]
             session["csrf"] = secrets.token_hex(16)
             db.denetim_yaz(c, u["kullanici_adi"], "giris", ip=ip())
-            return redirect(request.args.get("sonraki") or url_for("ana"))
+            return redirect(guvenli_sonraki(request.args.get("sonraki")) or url_for("ana"))
         db.denetim_yaz(c, ad, "giris_hata", ip=ip())
         time.sleep(0.8)
     return render_template("giris.html", hata=hata)

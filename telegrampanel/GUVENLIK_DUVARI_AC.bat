@@ -6,6 +6,7 @@ if errorlevel 1 (
   exit /b
 )
 netsh advfirewall firewall delete rule name="KanitPaneli 8080" >nul 2>&1
-netsh advfirewall firewall add rule name="KanitPaneli 8080" dir=in action=allow protocol=TCP localport=8080
+rem yalnizca ofis (ozel) aglarindan: internetten dogrudan gelen baglantilar guvenlik duvarinda durur
+netsh advfirewall firewall add rule name="KanitPaneli 8080" dir=in action=allow protocol=TCP localport=8080 remoteip=localsubnet,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 echo Guvenlik duvari kurali eklendi (TCP 8080). Panel ag modunda acilinca diger bilgisayarlar baglanabilir.
 pause

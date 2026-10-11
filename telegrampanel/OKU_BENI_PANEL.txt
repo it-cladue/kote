@@ -94,6 +94,16 @@ c) Adminler bu adresi tarayicilarina yazar (ofis agi / VPN icinde; telefon da ol
 d) Bilgisayarin IP'si degismesin diye IT'den sabit IP ya da ad (ornek: http://kanitpc:8080) isteyin.
 Not: Ofis disindan (evden) erisim icin VPN ya da Cloudflare Tunnel gerekir; isterseniz kurulumunu yazarim.
 Guvenlik: bu modda sifreler ofis agi icinde sifresiz (http) gider; yalnizca guvendiginiz ag icinde kullanin.
+- Panel ag modunda yalnizca ofis (ozel) aglarindan gelen baglantilari kabul eder (10.x, 172.16-31.x, 192.168.x);
+  internetten gelen istekler 403 alir. Belirli aglarla sinirlamak icin panel_ayar.json'a
+  "IZINLI_AGLAR": ["192.168.1.0/24"] yazin (dosya: %LOCALAPPDATA%\KanitPaneli\panel_ayar.json).
+- Guvenlik duvari kurali da yalnizca ozel aglara acilir (GUVENLIK_DUVARI_AC.bat).
+- Ilk kurulum (bot klasoru secimi, ilk super admin) baska bilgisayardan yapilamaz; ilk admin uzaktan ancak botun
+  ADMIN_PASSWORD'u ile acilabilir. Hatali sifrede 5 denemeden sonra 15 dakika kilit vardir.
+- Sifreleri guclu secin (en az 8 karakter; harf + rakam). Panel sifreleri karma (hash) olarak saklar.
+- Daha guvenli secenekler: (1) sifreli baglanti icin Cloudflare Tunnel + Cloudflare Access (Microsoft hesabiyla giris,
+  evden de calisir, ucretsiz), (2) VPN / Tailscale, (3) IT'nin panel bilgisayari onune koyacagi HTTPS ters vekil
+  (bu durumda panel_ayar.json'a "GUVENILIR_PROXY": "1" ve "HTTPS": "1" yazilir). Isterseniz kurulumu yazarim.
 Panel kapaninca (siyah pencere kapatilinca) erisim de kapanir; bilgisayar acilinca otomatik baslamasi icin
 GOREV_KUR.bat (kaynak kod) ya da PANEL_AG.bat'in kisayolunu Baslangic klasorune koyma (Win+R -> shell:startup).
 
