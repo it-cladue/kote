@@ -1,0 +1,243 @@
+KANIT PANELI - KURULUM VE KULLANIM (exe + OneDrive)
+===================================================
+
+Panel, Telegram kanit botunun Excel'ine yazilan kayitlari tarayicida gosterir. Takim adminleri
+kendi projelerini (OF, PA, GA, BETA ...) acar, onay bekleyenleri kucuk resimli kartlar halinde
+gorur, karta tiklayinca acilan pencerede ONAYLA / DUZENLE / SIL yapar, personel koduyla arar.
+Super admin tum projeleri gorur ve botun admin komutlarini (onayla, engelle, bakim modu,
+Gyazo bakimi, kategori, yedek) panelden kullanir.
+
+NASIL CALISIR (ozet)
+- Program tek dosyadir: KanitPaneli.exe. Python ya da kurulum gerekmez.
+- Exe, OneDrive ile paylasilan bot klasorune (telegramkant) konur. Klasoru bilgisayarinda
+  esitlenmis (senkron) olan herkes exe'ye cift tiklayinca panel KENDI bilgisayarinda acilir
+  (tarayicida http://127.0.0.1:8080). Disaridan erisim yoktur, sunucu yoktur.
+- Panel Excel'e KENDISI YAZMAZ. Yaptiginiz islem bot klasorunde panel_kuyruk\<bilgisayar>.jsonl
+  dosyasina yazilir, OneDrive bunu botun bilgisayarina tasir, Excel'e yazan yine BOT olur.
+  Bot acikken bu 1-2 dakika surer (OneDrive esitleme). Panelde kayit "Excel'e yaziliyor..."
+  gorunur, bot uygulayinca kaybolur. Bot kapaliysa islem bekler, bot acilinca uygulanir.
+- Bu yuzden bot bilgisayarinda YENI telebot.ps1 (bu paketteki) calisiyor olmali.
+
+
+1) ILK KURULUM (bot sahibi, bir kez; tercihen BOT BILGISAYARINDA)
+----------------------------------------------------------------
+Dosyalar: bu paketin icinde (KanitPaneli.exe, telebot.ps1). Sonraki surumler GitHub'da:
+  https://github.com/it-cladue/kote/releases  -> en ustteki surum -> KanitPaneli.exe ve telebot.ps1
+a) Eski telebot.ps1'in yerine bu paketteki telebot.ps1'i koyun, botu yeniden baslatin.
+   (Ayni bot; ek olarak panel kuyrugunu okur, heartbeat.txt ve kayitlar.jsonl yazar. config.json aynen kalir.)
+b) KanitPaneli.exe dosyasini bot klasorune (OneDrive - Get Mails\telegramkant) kopyalayin.
+c) Exe'ye cift tiklayin. Windows "Bilgisayariniz korundu" derse: "Daha fazla bilgi" -> "Yine de calistir"
+   (exe imzali degildir; bir kez onaylanir). Siyah bir pencere acilir ve tarayici kendiliginden gelir.
+   Siyah pencere acik kaldigi surece panel calisir; kapatinca panel kapanir.
+d) Ilk ekran: bot klasoru. Exe bot klasorunun icindeyse otomatik bulunur; "Kaydet ve devam et".
+e) Sonraki ekran: ILK SUPER ADMIN. Kullanici adi ve sifre belirleyin. Bu liste bot klasorunde
+   panel_kullanicilar.json dosyasinda tutulur; OneDrive ile herkese gider, herkes ayni listeyi kullanir.
+   (Ilk kurulumu bot bilgisayarinda degil de baska bir bilgisayarda yapiyorsaniz ve ekran "bot admin
+   sifresi" sorarsa: config.json icindeki ADMIN_PASSWORD'u girin.)
+f) Giris yapin. "Kullanicilar" sayfasindan takim adminlerini acin (yetki ornekleri asagida).
+   Her kullaniciya bir GECICI sifre verilir; ilk giriste kendi sifresini belirler.
+
+
+2) TAKIM ADMINLERI (diger bilgisayarlar)
+----------------------------------------
+- Bot sahibi, OneDrive'daki telegramkant klasorunu bu kisiyle paylasmis ve kisi klasoru
+  OneDrive'ina eklemis olmali (OneDrive web > Paylasilanlar > klasor > "Dosyalarima kisayol ekle"),
+  boylece klasor onun bilgisayarinda da gorunur ve esitlenir.
+- Kisi klasordeki KanitPaneli.exe'ye cift tiklar; tarayici acilir; verilen kullanici adi/sifreyle girer.
+  Bot klasoru otomatik bulunur. Baska bir sey kurmaz.
+- Her bilgisayarda panelin kendi onbellegi (%LOCALAPPDATA%\KanitPaneli) olusur; bot klasorunde
+  ise sadece o bilgisayara ait panel_kuyruk\<bilgisayar>.jsonl dosyasi olusur.
+- Yeni bir bilgisayarda "Ilk super admin" ekrani cikarsa ve panel daha once kurulduysa: OneDrive
+  panel_kullanicilar.json dosyasini henuz getirmemistir; birkac dakika bekleyip sayfayi yenileyin.
+  (Bu ekran o durumda botun admin sifresini ister; kullanici listesinin yanlislikla sifirlanmasini onler.)
+- Iki bilgisayar ayni dakikada kullanici degistirirse OneDrive "panel_kullanicilar-<PC>.json" kopyasi
+  birakabilir; panel bu kopyalari okuyup birlestirir, kullanici kaybolmaz.
+
+DIKKAT: Klasoru paylasmak, klasordeki HER SEYI (config.json icindeki bot token'lari dahil)
+paylasmak demektir. Klasore erisen herkes Excel'i ve panel dosyalarini dogrudan da degistirebilir;
+panelin yetki sistemi "duzgun kullanim" icindir, kotu niyetli bir ortaga karsi koruma degildir.
+Yalnizca guvendiginiz kisilerle paylasin. Daha guvenlisi: yalnizca 4 gizli satiri
+(TELEGRAM_TOKEN, GYAZO_TOKEN, BOT_PASSWORD, ADMIN_PASSWORD) config.json'dan CIKARIP bot
+bilgisayarinda TELEBOT_TELEGRAM_TOKEN, TELEBOT_GYAZO_TOKEN, TELEBOT_BOT_PASSWORD,
+TELEBOT_ADMIN_PASSWORD ortam degiskenlerine tasimak (bot bunu destekler). config.json'u SILMEYIN:
+ADMIN_IDS ve GORSEL_* satirlari orada kalmali. Not: ADMIN_PASSWORD ortam degiskenine tasindiktan
+sonra panelin "ilk super admin yeniden olusturma" ekrani yalnizca bot bilgisayarinda calisir.
+Isterseniz bunu birlikte yapariz.
+
+
+2b) PAYLASIM KLASORU MODU (onerilen: bot klasoru sizde kalir, adminlere ayri klasor)
+------------------------------------------------------------------------------
+Bot klasorunu (token'lar, yedekler, arsivler) paylasmak istemiyorsaniz:
+a) OneDrive'da yeni bir klasor acin, ornek: OneDrive - Get Mails\KanitPaneli
+b) Bot klasorunde (telebot.ps1'in yaninda) Not Defteri ile "panel_klasor.txt" adli bir dosya olusturun ve icine
+   SADECE klasorun yolunu yazin, baska hicbir sey yazmayin:
+      C:\Users\KULLANICI\OneDrive - Get Mails\KanitPaneli
+   (Yolu Dosya Gezgini'nin adres cubugundan kopyalayin. config.json'a DOKUNMAYIN; orada tek bir yanlis karakter
+   botun token'lari okuyamamasina ve Telegram'dan "404 Not Found" hatasina yol acar.)
+c) Botu yeniden baslatin. Bot bir dakika icinde bu klasore kendisi koyar: panel_excel_kopya.xlsx (Excel'in
+   panel kopyasi), gorseller ve ekran_goruntuleri kopyalari, onaylilar/engellenenler/kategoriler/kullanicilar/
+   oturumlar/bot_log kopyalari, panel_bot_ayarlari.json (token'lar AYIKLANMIS ayarlar), heartbeat.txt.
+   Sonra kuyruk ve sonuc dosyalari da orada olusur. Bot bunlari degistikce gunceller (en fazla 60 sn gecikme).
+d) KanitPaneli.exe'yi BU klasore koyun, cift tiklayin; ilk super admini olusturun (kullanici listesi de burada
+   tutulur). Adminlere YALNIZCA bu klasoru paylasin. Bot klasorunde telebot.ps1 ve config.json kalir, kimse gormez.
+Bu modda panel ana Excel'i hic gormez; botun kopyasini okur. Onay/duzenleme/silme yine kuyruk -> bot -> ana Excel
+yoluyla uygulanir (bot ana Excel'i kendi klasorunde tutar). Ayni anda istediginiz kadar admin calisabilir.
+
+2c) AG MODU (OneDrive esitlemesi kapaliysa / kurum izin vermiyorsa)
+--------------------------------------------------------------------
+Panel yalnizca BOT bilgisayarinda calisir; adminler hicbir sey kurmadan kendi tarayicilarindan girer.
+a) Bot bilgisayarinda GUVENLIK_DUVARI_AC.bat'a cift tiklayin (bir kez; yonetici izni ister; 8080 portunu acar).
+b) KanitPaneli.exe yerine PANEL_AG.bat ile baslatin (ayni klasorde). Siyah pencerede "Diger bilgisayarlardan:"
+   satirinda adres yazar, ornek: http://192.168.1.25:8080/
+c) Adminler bu adresi tarayicilarina yazar (ofis agi / VPN icinde; telefon da olur), kullanici adi ve sifreyle girer.
+   Kullanici listesi, kuyruk, her sey bot bilgisayarinda kalir; OneDrive'a, kisayola gerek yok.
+d) Bilgisayarin IP'si degismesin diye IT'den sabit IP ya da ad (ornek: http://kanitpc:8080) isteyin.
+Not: Ofis disindan (evden) erisim icin VPN ya da Cloudflare Tunnel gerekir; isterseniz kurulumunu yazarim.
+Guvenlik: bu modda sifreler ofis agi icinde sifresiz (http) gider; yalnizca guvendiginiz ag icinde kullanin.
+- Panel ag modunda yalnizca ofis (ozel) aglarindan gelen baglantilari kabul eder (10.x, 172.16-31.x, 192.168.x);
+  internetten gelen istekler 403 alir. Belirli aglarla sinirlamak icin panel_ayar.json'a
+  "IZINLI_AGLAR": ["192.168.1.0/24"] yazin (dosya: %LOCALAPPDATA%\KanitPaneli\panel_ayar.json).
+- Guvenlik duvari kurali da yalnizca ozel aglara acilir (GUVENLIK_DUVARI_AC.bat).
+- Ilk kurulum (bot klasoru secimi, ilk super admin) baska bilgisayardan yapilamaz; ilk admin uzaktan ancak botun
+  ADMIN_PASSWORD'u ile acilabilir. Hatali sifrede 5 denemeden sonra 15 dakika kilit vardir.
+- Sifreleri guclu secin (en az 8 karakter; harf + rakam). Panel sifreleri karma (hash) olarak saklar.
+- Daha guvenli secenekler: (1) sifreli baglanti icin Cloudflare Tunnel + Cloudflare Access (Microsoft hesabiyla giris,
+  evden de calisir, ucretsiz), (2) VPN / Tailscale, (3) IT'nin panel bilgisayari onune koyacagi HTTPS ters vekil
+  (bu durumda panel_ayar.json'a "GUVENILIR_PROXY": "1" ve "HTTPS": "1" yazilir). Isterseniz kurulumu yazarim.
+Panel kapaninca (siyah pencere kapatilinca) erisim de kapanir; bilgisayar acilinca otomatik baslamasi icin
+GOREV_KUR.bat (kaynak kod) ya da PANEL_AG.bat'in kisayolunu Baslangic klasorune koyma (Win+R -> shell:startup).
+
+2d) CLOUDFLARE TUNNEL MODU (ofis disindan da erisim; guvenlik duvari ve IT izni gerekmez)
+-----------------------------------------------------------------------------------------
+Bot bilgisayarindaki kucuk bir program (cloudflared) baglantiyi ICERIDEN DISARIYA kurar; iceri acilan port yoktur.
+Adminler ofisten ya da evden https://kanit.sirketiniz.com gibi bir adresle girer; baglanti sifrelidir.
+Gerekenler: bir alan adi (domain), ucretsiz Cloudflare hesabi, bot bilgisayarina cloudflared.exe.
+a) Cloudflare'da (dash.cloudflare.com) alan adinizi ekleyin (alan adini Cloudflare'dan aldiysaniz hazirdir).
+b) Zero Trust (one.dash.cloudflare.com) > Networks > Tunnels > Create a tunnel > Cloudflared > ad verin (kanit).
+   Ekranda uzun bir "token" gorunur; onu kopyalayip Not Defteri ile tunel_token.txt adli dosyaya tek satir
+   olarak yapistirin, dosyayi KanitPaneli.exe'nin yanina koyun.
+c) Ayni ekranda "Public Hostname": Subdomain = kanit, Domain = sirketiniz.com, Type = HTTP, URL = localhost:8080.
+d) cloudflared-windows-amd64.exe dosyasini indirip adini cloudflared.exe yapin, KanitPaneli.exe'nin yanina koyun:
+   https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
+e) Paneli PANEL_TUNEL.bat ile, tuneli TUNEL_BASLAT.bat ile baslatin (ikisi de normal kullanici ile calisir).
+   Bilgisayar acilinca kendiliginden baslasin isterseniz her ikisinin kisayolunu shell:startup klasorune koyun.
+f) Adminler https://kanit.sirketiniz.com yazar, kullanici adi ve sifresiyle girer. Bot bilgisayarinda da bu
+   https adresi kullanilir (tunel modunda http://127.0.0.1 ile giris cerezi tasinmaz).
+g) (Onerilir) Zero Trust > Access > Applications > Add > Self-hosted: domain kanit.sirketiniz.com, policy olarak
+   adminlerin e-postalarini (ya da @sirketiniz.com) yazin. Boylece panelden once e-postaya gelen tek kullanimlik
+   kodla (ya da Microsoft hesabiyla) dogrulama yapilir; 50 kullaniciya kadar ucretsiz.
+Notlar: Ilk kurulum (bot klasoru / ilk admin) tunel uzerinden yapilamaz, once bot bilgisayarinda yapilir.
+Denetim kayitlarinda gercek istemci adresi (Cloudflare'in CF-Connecting-IP basligi) yazilir.
+Denemek icin alan adsiz "hizli tunel": cloudflared.exe tunnel --url http://localhost:8080 ; rastgele bir
+https://....trycloudflare.com adresi verir, her acilista degisir, onunde giris korumasi yoktur (sadece deneme).
+
+3) YETKI KISALTMALARI
+---------------------
+   admin           super admin: her sey
+   *               tum projeler, tam yetki (bot yonetimi yok)
+   OF              OF takim admini: bakar, onaylar, duzenler, siler
+   OF:oku          OF'ye sadece bakar (gorseller dahil)
+   OF:oku,kt       OF'ye bakar ve onay (KT) atar
+   OF,PP:oku GA    OF ve PP'ye bakar; GA'da tam yetki (bosluk ile birden cok kural)
+Eylemler: oku, gorsel, kt, duzenle, sil.
+Sifre unutulursa: super admin "Kullanicilar" sayfasindan "Sifre sifirla" (yeni gecici sifre).
+
+
+4) EKRANLAR
+-----------
+Ana sayfa    : Proje kartlari; "Onay bekleyen / Onayli / Silinen" sayilari. Ustte arama kutusu
+               (personel kodu, uye ID, link).
+Kayitlar     : Filtreler (proje, kategori, ekleyen, tarih araligi), 3 gorunum: Kart, Galeri, Tablo.
+               Karta tiklayinca sayfa degismez; pencere acilir: buyuk gorsel, bilgiler, link,
+               ONAYLA (KT), ONAYI KALDIR, DUZENLE, SIL, GERI AL. Klavye: Esc kapatir, sol/sag ok gezer.
+Gorseller    : Ayni filtrelerle gorsel galerisi.
+Cikti        : Tarih araligi (ve istege bagli proje, durum, kategori, personel) secip o aralikta eklenen
+               kanitlari Excel olarak indirir: Proje, Kategori, Personel kodu, Uye ID, Ana uye ID, Tur, Tarih,
+               Link (tiklanabilir), Onay, Onaylayan, Onay zamani, Ekleyen, Aciklama, Durum, Excel satiri,
+               Gorsel dosyasi. Ikinci sayfada proje ozeti (toplam / onayli / bekleyen / silinen).
+               Kayitlar sayfasindaki "Excel" dugmesi de o anki filtreyi indirir. Herkes yalnizca yetkili oldugu
+               projeleri indirebilir; her indirme Denetim'e yazilir.
+               Liste kontrolu (ayni sayfada, alttaki kutu): elinizdeki bir listeyi (xlsx / csv / txt dosyasi ya da
+               kutuya yapistirilan liste, her satira bir deger) yukleyin; panel listedeki kisilerin / kayitlarin
+               panelde olup olmadigina bakar. 2. adimda dosyanin hangi sutununun hangi alanda (personel kodu,
+               uye ID, ana uye ID, link, kategori, ekleyen, aciklama) aranacagini siz secersiniz; bir sutun icin
+               birden fazla alan secilirse herhangi birinde bulunmasi yeter, birden fazla sutun isaretlenirse kayit
+               hepsine uymalidir. Proje / tarih / durum / kategori filtresi de verilebilir. Sonuc: kac satir var,
+               kac tanesi bulundu, bulunamayanlar listesi ve bulunanlarin eslestigi kayitlar (kaydi panelde acan
+               link ile). "Excel indir" sonucu 3 sayfa olarak (Bulunamayanlar, Bulunanlar, Ozet) verir. Yuklenen
+               dosya Excel'e ya da bot klasorune yazilmaz; panelin tmp klasorunde 24 saat durur, sonra silinir.
+Bot          : (super admin) Telegram'daki admin komutlarinin TAMAMI burada:
+               /durum, /istatistik, /kayit_raporu (en cok kanit ekleyenler), /son_kullanicilar ve
+               /kullanici_ara (kullanici listesinde arama + sure + durum + adet suzgeci), /onayla, /onayli_sil
+               (onayi kaldir), /engelle, /engel_kaldir, /engel_kaldir_sifirla (TAM SIFIRLA), /oturumlar,
+               /oturum_temizle, /kullanici_durum (DETAY penceresi), /kategori_liste, /kategori_bilgi,
+               /kategori_ekle, /kategori_sil, /excel_son_satir (Bottan sor), /excel_mod, /yedekle, /bakim_ac,
+               /bakim_kapat, /gyazo_bakim_ac, /gyazo_bakim_kapat, /son_hatalar, /kapat (Botu durdur; onay
+               icin kutuya KAPAT yazilir). Excel'i hemen oku dugmesi paneli yeniler.
+               KULLANICI DETAYI: Telegram kullanicilari ya da acik oturumlar listesinde satira tiklayinca
+               CANLI bir pencere acilir (5 saniyede bir yenilenir): kullanici su an botun hangi ekraninda
+               kaldi (proje seciyor / kategori seciyor / personel kodu bekleniyor / uye ID / ana ID / tur /
+               Gyazo-dosya secimi / SON KONTROL onayi), o ana kadar girdigi bilgiler, gorsel alindi mi;
+               bot defterindeki sayaclar (kac kayit, hangi proje, hangi kategori), paneldeki kayitlari
+               (proje x kategori tablosu, onayli/bekleyen) ve son kayitlari (tiklayinca kaydin penceresi
+               acilir). Ayni pencereden onayla / engelle / oturumu temizle / tam sifirla yapilir.
+               "Son islemler" listesinde her komutun durumu gorunur: bekliyor -> ok / hata.
+Kullanicilar : (super admin) panel kullanicilari ve yetkileri.
+Denetim      : (super admin) bu bilgisayardan kim ne yapti.
+
+Canli yenileme ve bildirim:
+- Panel 30 saniyede bir (YENILEME_SN) Excel degismis mi diye bakar; degistiyse sayilar ve listeler kendiliginden
+  guncellenir (bir kayit penceresi acikken "Listeyi yenile" seridi cikar, pencere kapaninca yenilenir).
+- Yetkili oldugunuz projeye yeni kayit gelince sag ustte YALNIZCA o kayit icin kucuk bir uyari cikar ve
+  8 saniye sonra kendiliginden kapanir ("Kontrol et" ile kaydin penceresi acilir: onayla/duzenle/sil).
+  Zil (🔔) uzerindeki sayi okunmamis bildirim sayisidir; zile basinca liste acilir (disari tiklayinca kapanir).
+  Listede her bildirim okundu / okunmadi olarak gorunur: "Kontrol et" okundu sayar, yanindaki "okundu say /
+  okunmadi say" ile elle degistirilir, "Tumunu okundu say" hepsini kapatir. Liste tarayicida 7 gun saklanir.
+  "Masaustu" dugmesine basarsaniz tarayici arka plandayken de Windows bildirimi gelir.
+- Ayni anda birden fazla kisi (ayni ya da farkli bilgisayarda) giris yapabilir.
+
+Kayit rozetleri:
+  "Excel'e yaziliyor..." : panelde yapildi, bot henuz uygulamadi (bot acikken 1-2 dk).
+  "Excel hatasi"         : bot satiri bulamadi (Excel'de elle degismis/silinmis olabilir).
+  "Excel'de yok"         : satir Excel'den silinmis; panelde gecmis olarak durur.
+  "bot 15 dakikadir yanit vermedi": bot kapali ya da OneDrive esitlemiyor; islem kuyrukta bekliyor.
+
+
+5) DOSYALAR (bot klasorunde panelin kullandiklari)
+--------------------------------------------------
+  panel_kullanicilar.json     panel kullanicilari (sifreler karma/hash olarak)
+  panel_kuyruk\*.jsonl        her bilgisayarin bota gonderdigi islemler (panel yazar, bot okur)
+  panel_kuyruk_sonuc.jsonl    botun cevaplari (bot yazar, paneller okur)
+  panel_kuyruk_offset.json    botun nereye kadar okudugu
+  panel_excel_kopya.xlsx      botun panel icin yazdigi Excel kopyasi (bot acikken ana Excel kilitlidir; panel
+                              bunu okur, yazma yine bot uzerinden ana dosyaya yapilir)
+  panel_bot_ayarlari.json     (paylasim klasoru modu) config.json'un token'siz kopyasi
+Paylasim klasoru modunda bu dosyalar PANEL_KLASOR'de olusur; panel_kuyruk_offset.json ve panel_kuyruk_islenen.txt
+(botun kendi defteri) bot klasorunde kalir.
+  kayitlar.jsonl              bot: her kaydi kim ekledi (panelde "Ekleyen" kesinlesir)
+  heartbeat.txt               bot her dakika yazar ("Bot: calisiyor" gostergesi)
+Panelin kendi verisi (silinebilir, yeniden olusur): %LOCALAPPDATA%\KanitPaneli
+  panel_ayar.json (bot klasoru yolu, port)  panel.db (Excel'in kopyasi + denetim)  tmp\ (kucuk resimler)
+Bot klasorunu degistirmek icin: panel_ayar.json'u silin ya da super admin olarak /kurulum adresini acin.
+
+
+6) SORUN GIDERME
+----------------
+- Exe acilmiyor / hemen kapaniyor: Exe'yi sag tik > Ozellikler > "Engellemeyi kaldir" isaretleyin.
+  Antivirus engelliyorsa izin verin (PyInstaller ile derlenmis Python programi).
+- "Port 8080 kullanilamiyor": baska bir program 8080'i kullaniyor; %LOCALAPPDATA%\KanitPaneli\panel_ayar.json
+  dosyasini Not Defteri ile acip PORT satiri ekleyin. Dosyanin tamami su sekilde olmali (virgullere dikkat):
+      {
+        "GIZLI_ANAHTAR": "...oldugu gibi birakin...",
+        "BOT_KLASOR": "C:\\Users\\...\\telegramkant",
+        "PORT": 8090
+      }
+  Dosya bozuk kaydedilirse panel onu "panel_ayar.json.bozuk-..." adiyla kenara alir ve varsayilanlarla acilir.
+- Ana sayfada proje yok: Excel ilk okumada; 10 sn sonra yenileyin. Hala yoksa Bot sayfasinda
+  "Excel'i simdi oku" ve hata mesajina bakin.
+- "Bot: CALISMIYOR": bot kapali, eski telebot.ps1 ya da OneDrive heartbeat.txt'yi esitlemiyor.
+- Islemler "bekliyor"da kaliyor: botun bilgisayarinda OneDrive calisiyor mu? panel_kuyruk klasoru
+  orada gorunuyor mu? Bot logunda "Panel islemi:" satirlari var mi?
+- Gorseller gri "Gyazo" yaziyor: Gyazo o an cevap vermiyor; 1 saat sonra tekrar dener.
+
+Kaynak koddan calistirmak isteyenler icin (Python ile): KUR.bat, BASLAT.bat (bkz. README.md).
