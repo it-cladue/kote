@@ -27,4 +27,16 @@
   </form>
   <p class="kucukyazi" style="margin-top:12px">Not: Tarih, botun kaydı yazdığı andır. "Tarihsiz kayıtlar" seçeneği eski (tarih sütunu boş) satırları listeler; tarih aralığıyla birlikte kullanılamaz.</p>
 </div>
+
+<div class="kart" style="max-width: 760px" id="liste-kontrol">
+  <h2>Liste kontrolü</h2>
+  <p class="kucukyazi">Elinizdeki listedeki kişiler / kayıtlar panelde var mı? Bir Excel (.xlsx), CSV ya da metin dosyası yükleyin veya listeyi aşağıya yapıştırın. Sonraki adımda hangi sütunun hangi alanda (personel kodu, üye ID, ana üye ID, link, kategori…) aranacağını siz seçersiniz; panel kaç satırın bulunduğunu, bulunamayanları ve bulunanların eşleştiği kayıtları gösterir, sonucu Excel olarak indirebilirsiniz. Yalnızca yetkili olduğunuz projelerde aranır.</p>
+  <form method="post" action="{{ url_for('liste_kontrol_sayfasi') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="adim" value="yukle">
+    <label>Dosya (.xlsx, .csv, .txt · en fazla 4 MB, 20000 satır, 50 sütun)<input type="file" name="dosya" accept=".xlsx,.csv,.txt"></label>
+    <label>ya da listeyi buraya yapıştırın (her satıra bir değer; birden çok sütun için virgül, noktalı virgül ya da sekme ile ayırın)<textarea name="metin" rows="5" placeholder="487156079&#10;251&#10;https://i.gyazo.com/…"></textarea></label>
+    <button class="btn birincil">Devam →</button>
+  </form>
+</div>
 {% endblock %}

@@ -385,9 +385,19 @@ window.Panel = (function () {
     }
   }
 
+  // ---------------- liste kontrolu (2. adim): sayfa / baslik degisince onizlemeyi yenile ----------------
+  function listeSayfasi() {
+    var form = document.getElementById('esleme-form');
+    if (!form) return;
+    var onizle = form.querySelector('button[name=adim][value=onizle]');
+    Array.prototype.forEach.call(form.querySelectorAll('[data-onizle]'), function (el) {
+      el.addEventListener('change', function () { if (form.requestSubmit) form.requestSubmit(onizle); else onizle.click(); });
+    });
+  }
+
   // Satir ici JS kullanilmaz: onay sorulari data-onay, kopyalama data-kopyala ile
   document.addEventListener('submit', function (ev) { var f = ev.target, b = ev.submitter; var m = (b && b.getAttribute && b.getAttribute('data-onay')) || (f && f.getAttribute && f.getAttribute('data-onay')); if (m && !confirm(m)) ev.preventDefault(); });
   document.addEventListener('click', function (ev) { var b = ev.target.closest ? ev.target.closest('[data-kopyala]') : null; if (b) { ev.preventDefault(); kopyala(b.getAttribute('data-kopyala')); } });
 
-  return { kayitSayfasi: kayitSayfasi, botSayfasi: botSayfasi, bildirimler: bildirimler, toast: toast, kopyala: kopyala };
+  return { kayitSayfasi: kayitSayfasi, botSayfasi: botSayfasi, bildirimler: bildirimler, listeSayfasi: listeSayfasi, toast: toast, kopyala: kopyala };
 })();

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block baslik %}Liste kontrolü sonucu - Kanıt Paneli{% endblock %}
+{% block icerik %}
+{% set alan_adlari = {'personel': 'Personel kodu', 'uye_id': 'Üye ID', 'ana_uye_id': 'Ana üye ID', 'link': 'Link', 'kategori': 'Kategori', 'ekleyen_ad': 'Ekleyen', 'aciklama': 'Açıklama'} %}
+<div class="kart">
+  <h2>Liste kontrolü · sonuç</h2>
+  <p class="kucukyazi">Dosya: <b>{{ veri.dosya }}</b>{% if veri.sayfalar|length > 1 %} · sayfa {{ veri.sayfa }}{% endif %}
+    · aranan: {% for e in veri.esleme %}<b>{{ basliklar[loop.index0] }}</b> → {% for a in e.alanlar %}{{ alan_adlari[a] }}{{ ' / ' if not loop.last }}{% endfor %}{{ ' VE ' if not loop.last }}{% endfor %}
+    · projeler: {{ f.proje|join(', ') }} · durum: {{ f.durum }}{% if f.tarih1 or f.tarih2 %} · tarih: {{ f.tarih1 or '…' }} – {{ f.tarih2 or '…' }}{% endif %}{% if f.kategori %} · kategori: {{ f.kategori }}{% endif %}</p>
+  <div class="ozet-sayilar">
+    <div class="sayi-kutu"><b>{{ sonuc.bulunan + sonuc.yok }}</b><span>toplam satır</span></div>
+    <div class="sayi-kutu yesil"><b>{{ sonuc.bulunan }}</b><span>bulunan</span></div>
+    <div class="sayi-kutu kirmizi"><b>{{ sonuc.yok }}</b><span>bulunamayan</span></div>
+    <div class="sayi-kutu turuncu"><b>{{ sonuc.coklu }}</b><span>birden fazla eşleşen</span></div>
+  </div>
+  <div class="filtre-grup" style="margin-bottom:10px">
+    <span class="etiket">Bulunan satırlar, projeye göre:</span>
+    {% for p, n in proje_sayac %}<span class="rozet" style="background: {{ renk(p) }}; color: {{ metin_rengi(renk(p)) }}">{{ p }} · {{ n }}</span>{% else %}<span class="gri">—</span>{% endfor %}
+    {% if sonuc.bos %}<small>· {{ sonuc.bos }} boş satır atlandı</small>{% endif %}
+  </div>
+  <div class="buton-satir" style="margin-bottom:0">
+    <a class="btn birincil" href="{{ url_for('liste_kontrol_xlsx', token=token) }}">⬇ Excel indir (tamamı)</a>
+    <a class="btn" href="{{ url_for('liste_kontrol_sayfasi', token=token) }}">← Eşlemeyi / filtreyi değiştir</a>
+    <a class="btn" href="{{ url_for('disa_aktar_sayfasi') }}">Yeni liste</a>
+  </div>
+</div>
+
+<div class="kart">
+  <h3>Bulunamayanlar <span class="kirmizi">{{ sonuc.yok }}</span></h3>
+  {% if yok|length < sonuc.yok %}<p class="kucukyazi">İlk {{ yok|length }} satır gösteriliyor; tamamı Excel çıktısında.</p>{% endif %}
+  <div class="kaydir">
+    <table class="tablo kucuk" id="yok-tablo">
+      <thead><tr><th>Satır</th>{% for b in basliklar %}<th>{{ b }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for s in yok %}<tr><td class="gri">{{ s.no }}</td>{% for v in s.degerler %}<td>{{ v }}</td>{% endfor %}</tr>
+      {% else %}<tr><td colspan="{{ basliklar|length + 1 }}">Listedeki her satır bulundu.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="kart">
+  <h3>Bulunanlar <span class="yesil">{{ sonuc.bulunan }}</span></h3>
+  {% if bulunan|length < sonuc.bulunan %}<p class="kucukyazi">İlk {{ bulunan|length }} satır gösteriliyor; tamamı Excel çıktısında.</p>{% endif %}
+  <div class="kaydir">
+    <table class="tablo kucuk" id="bulunan-tablo">
+      <thead><tr><th>Satır</th>{% for b in basliklar %}<th>{{ b }}</th>{% endfor %}<th>Eşleşen kayıtlar (en fazla 3)</th></tr></thead>
+      <tbody>
+      {% for s in bulunan %}
+      <tr>
+        <td class="gri">{{ s.no }}</td>{% for v in s.degerler %}<td>{{ v }}</td>{% endfor %}
+        <td>
+          {% for k in s.kayitlar %}
+          <div class="eslesme">
+            <span class="rozet" style="background: {{ renk(k.proje) }}; color: {{ metin_rengi(renk(k.proje)) }}">{{ k.proje }}</span>
+            {{ k.kategori or '' }} · <b>{{ k.personel or '—' }}</b>{% if k.uye_id %} · üye {{ k.uye_id }}{% endif %}{% if k.ana_uye_id %} · ana {{ k.ana_uye_id }}{% endif %}
+            · <span class="nowrap">{{ (k.tarih or '')[:16] or 'tarihsiz' }}</span>
+            {% if k.kt %}<span class="kt-isaret" title="onaylı">✔</span>{% endif %}
+            {% if k.silindi %}<span class="etiket-kucuk kirmizi-arka">silindi</span>{% elif k.excel_durum == 'silinmis' %}<span class="etiket-kucuk gri-arka">Excel'de yok</span>{% endif %}
+            <a href="{{ url_for('kayitlar', proje=k.proje, durum=('hepsi' if k.kt else 'bekleyen'), ac=k.id) }}" title="Kaydı panelde aç">aç →</a>
+          </div>
+          {% endfor %}
+          {% if s.n > 3 %}<small>+{{ s.n - 3 }} kayıt daha (Excel çıktısında)</small>{% endif %}
+        </td>
+      </tr>
+      {% else %}<tr><td colspan="{{ basliklar|length + 2 }}">Hiçbir satır bulunamadı.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

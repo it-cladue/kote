@@ -203,3 +203,11 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 10px; border-radius: 8px
 .adim-akis { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
 .adim-akis span { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #e5e7eb; color: #374151; }
 .adim-akis span.gecti { background: #d1fae5; color: #065f46; } .adim-akis span.simdi { background: #fde68a; color: #92400e; font-weight: 700; }
+
+/* liste kontrolu */
+label textarea { display: block; width: 100%; margin-top: 4px; font: inherit; padding: 7px 9px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; resize: vertical; }
+label textarea:focus { outline: 2px solid #bfdbfe; border-color: var(--birincil); }
+.ozet-sayilar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.sayi-kutu { border: 1px solid var(--cizgi); border-radius: 8px; padding: 8px 16px; text-align: center; min-width: 120px; }
+.sayi-kutu b { display: block; font-size: 22px; } .sayi-kutu span { font-size: 11px; color: var(--soluk); }
+.eslesme { padding: 3px 0; border-bottom: 1px dashed var(--cizgi); white-space: nowrap; } .eslesme:last-of-type { border-bottom: 0; }
