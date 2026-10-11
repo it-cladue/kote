@@ -107,6 +107,30 @@ Guvenlik: bu modda sifreler ofis agi icinde sifresiz (http) gider; yalnizca guve
 Panel kapaninca (siyah pencere kapatilinca) erisim de kapanir; bilgisayar acilinca otomatik baslamasi icin
 GOREV_KUR.bat (kaynak kod) ya da PANEL_AG.bat'in kisayolunu Baslangic klasorune koyma (Win+R -> shell:startup).
 
+2d) CLOUDFLARE TUNNEL MODU (ofis disindan da erisim; guvenlik duvari ve IT izni gerekmez)
+-----------------------------------------------------------------------------------------
+Bot bilgisayarindaki kucuk bir program (cloudflared) baglantiyi ICERIDEN DISARIYA kurar; iceri acilan port yoktur.
+Adminler ofisten ya da evden https://kanit.sirketiniz.com gibi bir adresle girer; baglanti sifrelidir.
+Gerekenler: bir alan adi (domain), ucretsiz Cloudflare hesabi, bot bilgisayarina cloudflared.exe.
+a) Cloudflare'da (dash.cloudflare.com) alan adinizi ekleyin (alan adini Cloudflare'dan aldiysaniz hazirdir).
+b) Zero Trust (one.dash.cloudflare.com) > Networks > Tunnels > Create a tunnel > Cloudflared > ad verin (kanit).
+   Ekranda uzun bir "token" gorunur; onu kopyalayip Not Defteri ile tunel_token.txt adli dosyaya tek satir
+   olarak yapistirin, dosyayi KanitPaneli.exe'nin yanina koyun.
+c) Ayni ekranda "Public Hostname": Subdomain = kanit, Domain = sirketiniz.com, Type = HTTP, URL = localhost:8080.
+d) cloudflared-windows-amd64.exe dosyasini indirip adini cloudflared.exe yapin, KanitPaneli.exe'nin yanina koyun:
+   https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
+e) Paneli PANEL_TUNEL.bat ile, tuneli TUNEL_BASLAT.bat ile baslatin (ikisi de normal kullanici ile calisir).
+   Bilgisayar acilinca kendiliginden baslasin isterseniz her ikisinin kisayolunu shell:startup klasorune koyun.
+f) Adminler https://kanit.sirketiniz.com yazar, kullanici adi ve sifresiyle girer. Bot bilgisayarinda da bu
+   https adresi kullanilir (tunel modunda http://127.0.0.1 ile giris cerezi tasinmaz).
+g) (Onerilir) Zero Trust > Access > Applications > Add > Self-hosted: domain kanit.sirketiniz.com, policy olarak
+   adminlerin e-postalarini (ya da @sirketiniz.com) yazin. Boylece panelden once e-postaya gelen tek kullanimlik
+   kodla (ya da Microsoft hesabiyla) dogrulama yapilir; 50 kullaniciya kadar ucretsiz.
+Notlar: Ilk kurulum (bot klasoru / ilk admin) tunel uzerinden yapilamaz, once bot bilgisayarinda yapilir.
+Denetim kayitlarinda gercek istemci adresi (Cloudflare'in CF-Connecting-IP basligi) yazilir.
+Denemek icin alan adsiz "hizli tunel": cloudflared.exe tunnel --url http://localhost:8080 ; rastgele bir
+https://....trycloudflare.com adresi verir, her acilista degisir, onunde giris korumasi yoktur (sadece deneme).
+
 3) YETKI KISALTMALARI
 ---------------------
    admin           super admin: her sey

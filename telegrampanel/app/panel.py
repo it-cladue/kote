@@ -301,7 +301,9 @@ def ip():
 
 
 def yerel_istek():
-    return (request.remote_addr or "") in ("127.0.0.1", "::1", "")
+    """Istek bu bilgisayardan mi? Tunel/ters vekil arkasinda (GUVENILIR_PROXY=1) gercek istemci adresine bakilir;
+    yoksa tunelden gelen herkes 'yerel' sayilirdi."""
+    return (ip() or "") in ("127.0.0.1", "::1", "")
 
 
 def ag_modu_mu():
@@ -1247,7 +1249,7 @@ def _arka_plan():
 
 # ==================== komut satiri ====================
 def komut(argv):
-    if not argv or argv[0] in ("--ac", "--ag", "--port"):
+    if not argv or argv[0] in ("--ac", "--ag", "--port", "--tunel"):
         return False
     if argv[0] == "--surum":
         print("KanitPaneli", SURUM)
@@ -1309,6 +1311,15 @@ def calistir():
     ag_modu = "--ag" in sys.argv or str(AYAR.get("DINLE", "127.0.0.1")) not in ("127.0.0.1", "localhost", "")
     if "--ag" in sys.argv:
         AYAR["DINLE"] = "0.0.0.0"
+    # --tunel: Cloudflare Tunnel (cloudflared) arkasinda. Panel yalnizca 127.0.0.1 dinler, tunel ona baglanir;
+    # gercek istemci adresi CF-Connecting-IP basligindan alinir, oturum cerezi yalnizca https ile tasinir.
+    tunel_modu = "--tunel" in sys.argv
+    if tunel_modu:
+        AYAR["DINLE"] = "127.0.0.1"
+        AYAR["GUVENILIR_PROXY"] = "1"
+        AYAR["HTTPS"] = "1"
+        app.config["SESSION_COOKIE_SECURE"] = True
+        ag_modu = False
     for i, a in enumerate(sys.argv):
         if a == "--port" and i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit():
             AYAR["PORT"] = int(sys.argv[i + 1])
@@ -1328,7 +1339,7 @@ def calistir():
             print("kullanici tasima hatasi:", e)
     threading.Thread(target=_arka_plan, daemon=True).start()
     print("=" * 60)
-    print(f"  KANIT PANELI {SURUM}" + ("  [AG MODU]" if ag_modu else ""))
+    print(f"  KANIT PANELI {SURUM}" + ("  [AG MODU]" if ag_modu else "") + ("  [TUNEL MODU]" if tunel_modu else ""))
     print(f"  Adres      : {url}")
     if ag_modu:
         try:
@@ -1338,6 +1349,9 @@ def calistir():
             print(f"  (ya da http://{socket.gethostname()}:{port}/ ). Guvenlik duvarinda {port} portu acik olmali: GUVENLIK_DUVARI_AC.bat")
         except Exception:
             pass
+    if tunel_modu:
+        print("  Cloudflare Tunnel: TUNEL_BASLAT.bat ile cloudflared'i acin; adminler https://<tunel adresiniz> ile girer.")
+        print("  Bu bilgisayarda da https adresini kullanin (http://127.0.0.1 ile giris cerezi tasinmaz).")
     print(f"  Bot klasoru: {AYAR.get('BOT_KLASOR') or '(bulunamadi - tarayicida secilecek)'}")
     print(f"  Veri       : {VERI_KOK}")
     print("  Bu pencere acik kaldigi surece panel calisir. Kapatmak icin pencereyi kapatin.")
