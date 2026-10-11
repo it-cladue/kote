@@ -60,10 +60,10 @@ def izin(yk, proje, eylem):
     return bool(p and eylem in p)
 
 
-def izinli_projeler(yk, tum_projeler):
-    if yk.get("admin") or yk.get("hepsi"):
-        return list(tum_projeler)
-    return [p for p in tum_projeler if p in yk.get("projeler", {})]
+def izinli_projeler(yk, tum_projeler, eylem="oku"):
+    """Kullanicinin EYLEM yapabildigi projeler (liste/cikti/bildirim icin 'oku'). 'OF:kt' gibi okuma izni olmayan
+    bir yetki listeye proje eklemez."""
+    return [p for p in tum_projeler if izin(yk, p, eylem)]
 
 
 def ozet(metin):

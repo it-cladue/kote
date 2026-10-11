@@ -113,7 +113,8 @@ def _kt(v):
     return 1 if s in ("true", "1", "x", "evet", "ok", "kt", "✓") else 0
 
 
-GYAZO_ID = re.compile(r"gyazo\.com/(?:[a-z0-9_-]+/)*([0-9a-f]{32})", re.I)
+# yalnizca gyazo.com alan adinda (https://evil/x/gyazo.com/... gibi sahte yollar gyazo sayilmaz)
+GYAZO_ID = re.compile(r"(?:^|://|\s|[(\[<\"'])(?:[a-z0-9-]+\.)*gyazo\.com/(?:[a-z0-9_-]+/)*([0-9a-f]{32})", re.I)
 
 
 def link_turu_ve_kimlik(link):

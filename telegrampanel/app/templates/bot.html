@@ -105,7 +105,7 @@
       <td>{{ u.username }}{% if u.first_name %} <small>{{ u.first_name }}</small>{% endif %}</td>
       <td class="nowrap">{{ u.last_seen or '' }}</td>
       <td>{{ u.kayit_sayisi }}</td>
-      <td>{% if u.engelli %}<b class="kirmizi">engelli</b> <small>{{ u.engel_sebep }}</small>{% elif u.onayli %}<span class="yesil">onaylı</span> <small>{{ u.onay_tarihi }}</small>{% else %}<span class="gri">onaysız</span>{% endif %}
+      <td>{% if u.engelli %}<b class="kirmizi">engelli</b> <small>{{ u.engel_sebep }}</small>{% elif u.onayli %}<span class="yesil">onaylı</span> <small class="nowrap">{{ u.onay_tarihi[:10] }}</small>{% else %}<span class="gri">onaysız</span>{% endif %}
         {% if u.deneme %}<small class="turuncu" title="hatalı şifre denemesi">deneme {{ u.deneme }}</small>{% endif %}</td>
       <td class="kucukyazi">{% if u.oturum %}<span class="canli-nokta"></span>{{ u.oturum.adim }} {{ u.oturum.proje|upper }} {{ u.oturum.kategori|upper }}{% endif %}</td>
       <td class="nowrap">

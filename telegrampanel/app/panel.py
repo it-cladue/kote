@@ -13,7 +13,7 @@ from werkzeug.datastructures import MultiDict
 
 from . import db, yetki, excel_oku, ice_aktar, gorsel, kuyruk, bot_yonetim, log_oku, kullanicilar
 
-SURUM = "1.1.0"
+SURUM = "1.2.0"
 DONMUS = bool(getattr(sys, "frozen", False))
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))          # kaynak kodu koku
 KAYNAK_KOK = getattr(sys, "_MEIPASS", None) or KOK                            # sablon / statik (exe icinde)
@@ -234,7 +234,10 @@ KURULUM_SERBEST = {"kurulum", "kurulum_admin", "static", "saglik", "cikis"}
 @app.before_request
 def _on():
     if not istek_izinli_mi():
-        abort(403)
+        if request.remote_addr not in _REDDEDILEN and len(_REDDEDILEN) < 500:
+            _REDDEDILEN.add(request.remote_addr)
+            print(f"[AG] {request.remote_addr} adresinden istek reddedildi (ofis agi disinda). Izin vermek icin panel_ayar.json IZINLI_AGLAR.")
+        abort(403, f"AG:{request.remote_addr}")
     g.k = kullanici_yukle()
     g.yk = yetki.coz(g.k["yetki"]) if g.k else yetki.coz("")
     if "csrf" not in session:
@@ -306,7 +309,8 @@ def ag_modu_mu():
 
 
 import ipaddress as _ipa
-OZEL_AGLAR = [_ipa.ip_network(a) for a in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "fc00::/7", "fe80::/10", "::1/128")]
+OZEL_AGLAR = [_ipa.ip_network(a) for a in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "fc00::/7", "fe80::/10", "::1/128")]
+_REDDEDILEN = set()
 
 
 def istek_izinli_mi():
@@ -410,7 +414,11 @@ def giris():
     if request.method == "POST":
         ad = (request.form.get("kullanici") or "").strip().lower()
         sifre = request.form.get("sifre") or ""
-        u, hata = kullanicilar.dogrula(AYAR, ad, sifre)
+        tok = request.form.get("csrf") or request.headers.get("X-CSRF")
+        if not tok or tok != session.get("csrf"):
+            # giris formu da CSRF korumali (baskasinin hesabina zorla giris yaptirma); eski/kapanmis oturum: sayfa yenilenir
+            return render_template("giris.html", hata="Sayfa zaman asimina ugradi; lutfen tekrar deneyin."), 400
+        u, hata = kullanicilar.dogrula(AYAR, ad, sifre, request.remote_addr)
         c = baglanti()
         if u:
             session.clear()
@@ -438,7 +446,7 @@ def sifre_degistir():
     hata = None
     if request.method == "POST":
         eski, yeni, yeni2 = request.form.get("eski", ""), request.form.get("yeni", ""), request.form.get("yeni2", "")
-        u, _ = kullanicilar.dogrula(AYAR, g.k["kullanici_adi"], eski)
+        u, _ = kullanicilar.dogrula(AYAR, g.k["kullanici_adi"], eski, request.remote_addr)
         if not u:
             hata = "Eski sifre hatali."
         elif len(yeni) < 8:
@@ -1005,12 +1013,17 @@ def bildirim_json():
 @app.route("/saglik")
 def saglik():
     resp = app.make_response("OK")
-    resp.headers["X-Kanit-Paneli"] = SURUM
+    if yerel_istek():   # surum bilgisi yalnizca ayni bilgisayara (tek kopya kontrolu); agdan surum okunamaz
+        resp.headers["X-Kanit-Paneli"] = SURUM
     return resp
 
 
 @app.errorhandler(403)
 def _403(e):
+    acik = str(getattr(e, "description", "") or "")
+    if acik.startswith("AG:"):
+        mesaj = f"Bu adresten ({acik[3:]}) panele erisim kapali: panel yalnizca ofis (ozel) agindan acilabilir. Gerekiyorsa panel bilgisayarinda panel_ayar.json icine IZINLI_AGLAR yazilir."
+        return render_template("hata.html", kod=403, mesaj=mesaj), 403
     return render_template("hata.html", kod=403, mesaj="Bu islem icin yetkiniz yok."), 403
 
 

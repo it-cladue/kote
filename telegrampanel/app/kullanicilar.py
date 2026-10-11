@@ -11,7 +11,23 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 DOSYA_ADI = "panel_kullanicilar.json"
 _kilit = threading.RLock()
-_hatali = {}   # kullanici_adi -> [sayi, kilit_bitis(datetime|None)]
+_hatali = {}      # (kaynak_ip, kullanici_adi) -> [sayi, kilit_bitis(datetime|None)]  5 deneme / 15 dk
+_hatali_ip = {}   # kaynak_ip -> [sayi, kilit_bitis]                                   20 deneme / 15 dk (tum adlar)
+KILIT_DK = 15
+
+
+def _kilitli(d, k):
+    h = d.get(k)
+    return bool(h and h[1] and h[1] > datetime.now())
+
+
+def _hata_say(d, k, esik):
+    h = d.get(k)
+    n = (h[0] if h and not (h[1] and h[1] <= datetime.now()) else 0) + 1
+    d[k] = [0 if n >= esik else n, datetime.now() + timedelta(minutes=KILIT_DK) if n >= esik else None]
+    if len(d) > 5000:   # eski kayitlari at
+        for kk in [kk for kk, v in d.items() if not v[1] or v[1] <= datetime.now()][:2500]:
+            d.pop(kk, None)
 
 
 def yol(ayar):
@@ -153,18 +169,20 @@ def guncelle(ayar, ad, **alanlar):
         return u
 
 
-def dogrula(ayar, ad, sifre):
-    """-> (kullanici|None, hata_mesaji|None)"""
+def dogrula(ayar, ad, sifre, kaynak=None):
+    """-> (kullanici|None, hata_mesaji|None). Kilit, deneyen bilgisayara (kaynak IP) baglidir: agdaki biri yanlis
+    sifre yazarak baskasinin hesabini kilitleyemez; kendi adresi kilitlenir."""
     ad = (ad or "").strip().lower()
-    h = _hatali.get(ad)
-    if h and h[1] and h[1] > datetime.now():
+    kaynak = str(kaynak or "")
+    if _kilitli(_hatali_ip, kaynak) or _kilitli(_hatali, (kaynak, ad)):
         return None, "Cok fazla hatali deneme; 15 dakika sonra tekrar deneyin."
     u = bul(ayar, ad)
     if u and u.get("aktif", True) and check_password_hash(u.get("sifre_hash", ""), sifre or ""):
-        _hatali.pop(ad, None)
+        _hatali.pop((kaynak, ad), None)
+        _hatali_ip.pop(kaynak, None)
         return u, None
-    n = (h[0] if h else 0) + 1
-    _hatali[ad] = [0 if n >= 5 else n, datetime.now() + timedelta(minutes=15) if n >= 5 else None]
+    _hata_say(_hatali, (kaynak, ad), 5)
+    _hata_say(_hatali_ip, kaynak, 20)
     return None, "Kullanici adi veya sifre hatali."
 
 
