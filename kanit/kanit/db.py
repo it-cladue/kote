@@ -840,3 +840,41 @@ def yedekle(conn, hedef_yol):
     finally:
         hedef.close()
     return hedef_yol
+
+
+# ---- eklenen: ice_aktar / disa_aktar ----
+def proje_ekle_yoksa(conn, kod, ad=None, renk="#999999", emoji="", kim=""):
+    """Aktarici: Excel'de projeler tablosunda olmayan bir sayfa (orn. 'cennet kt' -> CENNET) gelirse sona ekler. -> eklendi mi"""
+    kod = (kod or "").strip().upper()
+    if not kod or conn.execute("SELECT 1 FROM projeler WHERE kod=?", (kod,)).fetchone():
+        return False
+    with islem(conn):
+        sira = conn.execute("SELECT COALESCE(MAX(sira),0)+1 FROM projeler").fetchone()[0]
+        conn.execute("INSERT INTO projeler(kod, ad, renk, emoji, sira, aktif) VALUES(?,?,?,?,?,1)", (kod, ad or kod, renk, emoji, sira))
+        denetim_yaz(conn, kim, "proje_ekle", proje=kod, yeni=kod)
+    return True
+
+
+def ice_aktarim_yaz(conn, tur, rapor, kim="aktarim"):
+    """ice_aktarimlar tablosuna rapor (JSON). -> id"""
+    cur = conn.execute("INSERT INTO ice_aktarimlar(zaman, tur, kullanici, rapor) VALUES(?,?,?,?)",
+                       (simdi(), tur, kim or "", json.dumps(rapor, ensure_ascii=False, default=str)))
+    return cur.lastrowid
+
+
+def ice_aktarimlar(conn, n=20):
+    out = []
+    for r in conn.execute("SELECT * FROM ice_aktarimlar ORDER BY id DESC LIMIT ?", (n,)).fetchall():
+        d = dict(r)
+        try:
+            d["rapor"] = json.loads(d["rapor"])
+        except Exception:
+            pass
+        out.append(d)
+    return out
+
+
+def eski_anahtarlar(conn):
+    """Aktarilmis kayitlarin Excel anahtarlari -> {eski_anahtar: {id, kt, silindi}} (ikinci calismada atlamak icin)."""
+    return {r["eski_anahtar"]: {"id": r["id"], "kt": r["kt"], "silindi": r["silindi"]}
+            for r in conn.execute("SELECT id, eski_anahtar, kt, silindi FROM kayitlar WHERE eski_anahtar<>''").fetchall()}
