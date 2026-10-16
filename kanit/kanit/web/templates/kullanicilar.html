@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block baslik %}Panel kullanıcıları{% endblock %}
+{% block icerik %}
+<h2>Panel kullanıcıları</h2>
+{% if mesaj %}<div class="bilgi">{{ mesaj }}</div>{% endif %}
+
+<div class="iki-kolon">
+<div class="kart">
+  <h3>Yeni kullanıcı</h3>
+  <form method="post" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="ekle">
+    <label>Kullanıcı adı<input name="kullanici" required autocapitalize="off"></label>
+    <label>Görünen ad<input name="ad"></label>
+    <label>Yetki<input name="yetki" required placeholder="örn: OF  veya  OF:oku,kt  veya  admin"></label>
+    <label>Şifre <small>(boş bırakılırsa üretilir; kullanıcı ilk girişte değiştirir)</small><input name="sifre"></label>
+    <button class="btn birincil">Ekle</button>
+  </form>
+</div>
+<div class="kart yardim">
+  <h3>Yetki kısaltmaları</h3>
+  <table class="tablo kucuk">
+    <tr><td><code>admin</code></td><td>Süper admin: her şey (tüm projeler, bot ve kullanıcı yönetimi, arşiv)</td></tr>
+    <tr><td><code>*</code></td><td>Tüm projeler, tam yetki (bot yönetimi yok)</td></tr>
+    <tr><td><code>OF</code></td><td>OF takım admini: OF sayfasında bakar, onaylar, düzenler, siler</td></tr>
+    <tr><td><code>OF:oku</code></td><td>OF sayfasına sadece bakar (görsel dahil, yorum yazabilir)</td></tr>
+    <tr><td><code>OF:oku,kt</code></td><td>OF sayfasına bakar ve onay (KT) atar</td></tr>
+    <tr><td><code>OF,PP:oku  GA</code></td><td>OF ve PP'ye bakar; GA'da tam yetki (boşlukla birden çok kural)</td></tr>
+  </table>
+  <p class="kucukyazi">Eylemler: <code>oku</code> <code>gorsel</code> <code>kt</code> <code>duzenle</code> <code>sil</code>. Projeler: {{ tum_projeler|join(', ') }}</p>
+</div>
+</div>
+
+<table class="tablo duyarli">
+  <thead><tr><th>Kullanıcı</th><th>Ad</th><th>Yetki</th><th>Oluşturma</th><th>Son giriş</th><th>Durum</th><th></th></tr></thead>
+  <tbody>
+  {% for u_ in kullanicilar %}
+  <tr class="{{ 'soluk' if not u_.aktif }}">
+    <td data-b="Kullanıcı"><b>{{ u_.kullanici_adi }}</b></td>
+    <td data-b="Ad">{{ u_.ad or '' }}</td>
+    <td data-b="Yetki">
+      <form method="post" class="satir-form">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="yetki"><input type="hidden" name="kullanici_adi" value="{{ u_.kullanici_adi }}">
+        <input name="yetki" value="{{ u_.yetki }}" title="{{ u_.ozet }}"> <button class="btn kucuk">Kaydet</button>
+      </form>
+      <div class="kucukyazi">{{ u_.ozet }}</div>
+    </td>
+    <td data-b="Oluşturma" class="nowrap">{{ (u_.olusturma or '')[:10] }}{% if u_.olusturan %} <small>({{ u_.olusturan }})</small>{% endif %}</td>
+    <td data-b="Son giriş" class="nowrap kucukyazi">{{ (u_.son_giris or '-')[:16] }}</td>
+    <td data-b="Durum">{% if u_.aktif %}aktif{% else %}<b>pasif</b>{% endif %}{% if u_.sifre_degistir %} <small>(geçici şifre)</small>{% endif %}</td>
+    <td class="nowrap">
+      <form method="post" class="satir-form" data-onay="{{ u_.kullanici_adi }} için yeni geçici şifre üretilsin mi?">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="sifre"><input type="hidden" name="kullanici_adi" value="{{ u_.kullanici_adi }}">
+        <button class="btn kucuk">Şifre sıfırla</button>
+      </form>
+      <form method="post" class="satir-form">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="pasif"><input type="hidden" name="kullanici_adi" value="{{ u_.kullanici_adi }}">
+        <button class="btn kucuk {{ 'tehlike' if u_.aktif }}">{{ 'Pasife al' if u_.aktif else 'Aktif et' }}</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

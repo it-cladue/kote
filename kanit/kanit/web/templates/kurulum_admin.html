@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block baslik %}İlk süper admin - Kanıt Merkezi{% endblock %}
+{% block icerik %}
+<div class="kart dar">
+  <h2>İlk süper admin</h2>
+  {% if kilitli %}
+  <p>Henüz panel kullanıcısı yok, ama bu istek sunucunun kendisinden gelmiyor. Güvenlik için ilk süper admin yalnızca:</p>
+  <ul>
+    <li>sunucuda <code>python -m kanit kullanici-ekle &lt;ad&gt; admin</code> komutuyla, ya da</li>
+    <li>panel başlatılırken konsola yazılan <b>tek kullanımlık anahtar</b> ile bu sayfadan oluşturulabilir.</li>
+  </ul>
+  {% if anahtar_girildi %}<div class="hata">Anahtar hatalı ya da süresi dolmuş.</div>{% endif %}
+  <form method="get" autocomplete="off">
+    <label>Tek kullanımlık anahtar<input name="anahtar" required autofocus></label>
+    <button class="btn birincil">Devam</button>
+  </form>
+  {% else %}
+  <p>Henüz panel kullanıcısı yok. Süper admin hesabını oluşturun; diğer kullanıcıları sonra "Kullanıcılar" sayfasından açarsınız.</p>
+  {% if hata %}<div class="hata">{{ hata }}</div>{% endif %}
+  <form method="post" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if anahtar %}<input type="hidden" name="anahtar" value="{{ anahtar }}">{% endif %}
+    <label>Kullanıcı adı<input name="kullanici" required autofocus autocapitalize="off" pattern="[A-Za-z0-9_.]+"></label>
+    <label>Görünen ad<input name="ad"></label>
+    <label>Şifre (en az 8 karakter)<input name="sifre" type="password" minlength="8" required></label>
+    <label>Şifre (tekrar)<input name="sifre2" type="password" minlength="8" required></label>
+    <button class="btn birincil">Oluştur</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

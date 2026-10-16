@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block baslik %}Kanıt Merkezi{% endblock %}</title>
+<meta name="csrf" content="{{ csrf }}">
+<link rel="icon" href="/favicon.ico" type="image/svg+xml">
+<link rel="stylesheet" href="{{ url_for('static', filename='stil.css') }}">
+</head>
+<body data-sayfa="{% block sayfa %}{{ ep }}{% endblock %}"{% block body_attr %}{% endblock %}>
+{% if k %}
+<header class="ust">
+  <a class="marka" href="{{ u('ana') }}">📋 Kanıt Merkezi</a>
+  <nav class="menu">
+    <a href="{{ u('ana') }}" class="{{ 'aktif' if ep == 'ana' }}">Ana sayfa</a>
+    <a href="{{ u('kayitlar') }}" class="{{ 'aktif' if ep == 'kayitlar' and request.args.get('gorunum','kart') != 'galeri' }}">Kayıtlar</a>
+    <details class="acilir" id="projeler-menu">
+      <summary class="{{ 'aktif' if ep == 'tablo' }}">Projeler ▾</summary>
+      <div class="acilir-liste">
+        {% for p in projeler() %}<a href="{{ u('tablo', proje=p) }}" class="{{ 'aktif' if ep == 'tablo' and request.view_args.get('proje') == p }}"><span class="renk-nokta" style="background: {{ renk(p) }}"></span>{{ p }} <small>tablo</small></a>{% else %}<span class="kucukyazi" style="padding:6px 10px;display:block">Proje yetkiniz yok</span>{% endfor %}
+      </div>
+    </details>
+    <a href="{{ u('kayitlar', gorunum='galeri', durum='hepsi') }}" class="{{ 'aktif' if ep == 'kayitlar' and request.args.get('gorunum') == 'galeri' }}">Görseller</a>
+    <a href="{{ u('disa_aktar_sayfasi') }}" class="{{ 'aktif' if ep in ('disa_aktar_sayfasi', 'liste_kontrol_sayfasi') }}">Çıktı</a>
+    {% if yk.admin %}
+    <a href="{{ u('bot_sayfasi') }}" class="{{ 'aktif' if ep == 'bot_sayfasi' }}">Bot</a>
+    <a href="{{ u('yonetim_kullanicilar') }}" class="{{ 'aktif' if ep == 'yonetim_kullanicilar' }}">Kullanıcılar</a>
+    <a href="{{ u('denetim') }}" class="{{ 'aktif' if ep == 'denetim' }}">Denetim</a>
+    <a href="{{ u('arsiv_sayfasi') }}" class="{{ 'aktif' if ep == 'arsiv_sayfasi' }}">Arşiv</a>
+    {% endif %}
+  </nav>
+  <div class="kullanici">
+    {% set okunmamis = okunmamis_bildirim() %}
+    <button type="button" id="zil" class="zil" title="Bildirimler" aria-label="Bildirimler">🔔<span id="zil-sayi" class="zil-sayi {{ 'gizli' if not okunmamis }}">{{ okunmamis }}</span></button>
+    <span title="{{ k.yetki }}">{{ k.ad or k.kullanici_adi }}{% if yk.admin %} <small>(süper admin)</small>{% endif %}</span>
+    <a href="{{ u('sifre_degistir') }}">Şifre</a>
+    <a href="{{ u('cikis') }}">Çıkış</a>
+  </div>
+</header>
+{% if k.sifre_degistir %}
+<div class="uyari-serit">Geçici şifre ile girdiniz. Lütfen <a href="{{ u('sifre_degistir') }}">şifrenizi değiştirin</a>.</div>
+{% endif %}
+{% endif %}
+{% with mesajlar = get_flashed_messages() %}
+  {% if mesajlar %}<div class="bilgi-serit">{% for m in mesajlar %}<div>{{ m }}</div>{% endfor %}</div>{% endif %}
+{% endwith %}
+<main class="icerik">
+{% block icerik %}{% endblock %}
+</main>
+<div id="toast" class="toast gizli"></div>
+{% if k %}
+<div id="bildirim-kutu" class="bildirim-kutu gizli" aria-hidden="true">
+  <div class="bildirim-baslik"><b>Bildirimler</b> <span id="bildirim-ozet" class="kucukyazi"></span>
+    <span class="bildirim-araclar"><span id="bildirim-izin" class="gizli"><button type="button" class="btn kucuk" id="bildirim-izin-btn" title="Tarayıcı arka plandayken de masaüstü bildirimi gelsin">🔔 Masaüstü</button></span>
+    <button type="button" class="btn kucuk" id="bildirim-okundu">Tümünü okundu say</button></span></div>
+  <ul id="bildirim-liste"></ul>
+  <div id="bildirim-bos" class="bildirim-bos gizli">Bildirim yok. Yetkili olduğunuz projelerde yeni kanıt, onay, düzenleme ya da yorum olunca burada görünür.</div>
+</div>
+<div id="bildirim-uyari" class="bildirim-uyari gizli" role="status" aria-live="polite"></div>
+{% endif %}
+<script id="proje-renk" type="application/json">{{ proje_renkleri()|tojson }}</script>
+<script src="{{ url_for('static', filename='panel.js') }}"></script>
+</body>
+</html>

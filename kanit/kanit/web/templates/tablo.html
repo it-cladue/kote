@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block baslik %}{{ proje }} tablosu - Kanıt Merkezi{% endblock %}
+{% block sayfa %}tablo{% endblock %}
+{% block body_attr %} data-durum="{{ f.durum }}" data-proje="{{ proje }}"{% endblock %}
+{% block icerik %}
+{% set excel_args = request.args.to_dict(flat=False) %}
+{% set _ = excel_args.update({'proje': [proje]}) %}
+{% if 'durum' not in excel_args %}{% set _ = excel_args.update({'durum': [f.durum]}) %}{% endif %}
+<div class="proje-sekmeler">
+  {% for p in izinli %}<a class="proje-sekme {{ 'aktif' if p == proje }}" style="--renk: {{ renk(p) }}; --cipyazi: {{ metin_rengi(renk(p)) }}" href="{{ u('tablo', proje=p, durum=f.durum) }}">{{ p }}</a>{% endfor %}
+</div>
+{% with gizli=[], temizle_url=u('tablo', proje=proje, durum=f.durum), proje_sabit=proje, excel_args=excel_args %}{% include "_filtre.html" %}{% endwith %}
+
+<div class="sekme-satir">
+  <div class="sekmeler">
+    {% for d in ['bekleyen', 'onayli', 'silinen', 'hepsi'] %}
+    <a class="sekme {{ 'aktif' if f.durum == d }} {{ d }}" href="{{ url_degistir(durum=d) }}">{{ DURUM_ADLARI[d] }} <b>{{ sayac[d] }}</b></a>
+    {% endfor %}
+  </div>
+  <div class="gorunumler">
+    <span class="kucukyazi">Sayfa boyu:</span>
+    {% for b in boylar %}<a class="{{ 'aktif' if b == boy }}" href="{{ url_degistir(boy=b) }}">{{ b if b else 'hepsi' }}</a>{% endfor %}
+  </div>
+</div>
+<p class="kucukyazi">{{ toplam }} kayıt{% if sayfa_sayisi > 1 %} · sayfa {{ sayfa }} / {{ sayfa_sayisi }}{% endif %} · başlığa tıklayınca sıralanır · satıra tıklayınca kayıt açılır{% if son_ziyaret %} · <span class="yeni-aciklama">▎</span> son ziyaretinizden ({{ son_ziyaret[:16] }}) sonra eklenenler{% endif %}</p>
+
+{% macro bas(ad, etiket, sinif='') -%}
+<th class="{{ sinif }}"><a href="{{ url_degistir(sirala=ad, yon=('asc' if sirala == ad and yon == 'desc' else 'desc') if sirala == ad else ('asc' if ad in ('personel','uye_id','ana_uye_id','tip','kategori','link','gorsel2','aciklama','ekleyen') else 'desc')) }}" class="sirala {{ 'aktif' if sirala == ad }}">{{ etiket }}{% if sirala == ad %} <span class="yon">{{ '▲' if yon == 'asc' else '▼' }}</span>{% endif %}</a></th>
+{%- endmacro %}
+<div class="tablo-kaydir">
+<table class="tablo kayit-tablo yogun duyarli" id="proje-tablo">
+  <thead><tr>
+    {{ bas('personel', 'Personel Kodu') }}{{ bas('uye_id', 'Üye ID') }}{{ bas('ana_uye_id', 'Ana Üye ID') }}{{ bas('tip', 'Tür') }}{{ bas('link', 'Link / Görsel') }}
+    {{ bas('kategori', 'Kategori') }}{{ bas('tarih', 'Tarih') }}{{ bas('kt', 'KT', 'orta') }}{{ bas('gorsel2', 'Görsel 2') }}{{ bas('aciklama', 'Açıklama') }}
+    {{ bas('ekleyen', 'Ekleyen') }}{{ bas('yorum', 'Yorum', 'orta') }}{{ bas('durum', 'Durum') }}
+  </tr></thead>
+  <tbody>
+  {% for k in kayitlar %}
+  <tr class="kayit {{ 'onayli' if k.kt and not k.silindi }} {{ 'silindi' if k.silindi }} {{ 'yeni' if k.yeni }}" data-id="{{ k.id }}">
+    <td data-b="Personel"><b>{{ k.personel or '' }}</b></td>
+    <td data-b="Üye ID">{{ k.uye_id or '' }}</td>
+    <td data-b="Ana üye ID">{{ k.ana_uye_id or '' }}</td>
+    <td data-b="Tür">{{ k.tip or '' }}</td>
+    <td data-b="Link" class="link-hucre">{% if k.gorsel_var and k.izin_gorsel %}<img class="mini" loading="lazy" src="{{ u('kucuk_goster', kid=k.id) }}" alt="">{% endif %}{% if k.dis_link %}<a href="{{ k.dis_link }}" target="_blank" rel="noopener" data-dur title="{{ k.link }}">{{ k.link_turu }} ↗</a>{% elif k.link %}<span class="kucukyazi" title="{{ k.link }}">{{ k.link[:24] }}</span>{% endif %}</td>
+    <td data-b="Kategori">{{ k.kategori or '' }}</td>
+    <td data-b="Tarih" class="nowrap">{{ (k.tarih or k.tarih_ham or '')[:16] }}</td>
+    <td data-b="KT" class="orta"><input type="checkbox" class="kt-kutu" data-kt="{{ k.id }}" {{ 'checked' if k.kt }} {{ 'disabled' if not izin_kt or k.silindi }} title="{% if k.kt %}{{ k.kt_kim }} {{ k.kt_zaman or '' }}{% else %}KT ver{% endif %}"></td>
+    <td data-b="Görsel 2" class="kucukyazi">{{ k.gorsel2 or '' }}</td>
+    <td data-b="Açıklama" class="kucukyazi">{{ (k.aciklama or '')[:60] }}</td>
+    <td data-b="Ekleyen" class="kucukyazi">{{ k.ekleyen_ad or k.ekleyen_tg_id or '' }}</td>
+    <td data-b="Yorum" class="orta">{% if k.yorum_sayisi %}<span class="yorum-rozet {{ 'okunmamis' if k.okunmamis_yorum }}">💬 {{ k.yorum_sayisi }}</span>{% endif %}</td>
+    <td data-b="Durum">{% if k.silindi %}<span class="etiket-kucuk kirmizi-arka" title="{{ k.silen }} {{ k.silme_zamani or '' }}: {{ k.silme_nedeni }}">silindi</span>{% elif k.kt %}<span class="yesil">onaylı</span>{% else %}<span class="turuncu">bekliyor</span>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="13">Kayıt bulunamadı.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if sayfa_sayisi > 1 %}
+<div class="sayfalama">
+  {% if sayfa > 1 %}<a class="btn" href="{{ url_degistir(s=sayfa - 1) }}">‹ Önceki</a>{% endif %}
+  <span>{{ sayfa }} / {{ sayfa_sayisi }}</span>
+  {% if sayfa < sayfa_sayisi %}<a class="btn" href="{{ url_degistir(s=sayfa + 1) }}">Sonraki ›</a>{% endif %}
+</div>
+{% endif %}
+{% include "_modal.html" %}
+{% endblock %}

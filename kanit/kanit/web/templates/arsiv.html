@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block baslik %}Arşiv - Kanıt Merkezi{% endblock %}
+{% block icerik %}
+<h2>Arşiv <small class="kucukyazi">eklenen her kaydın dokunulmaz kopyası</small></h2>
+<div class="kart">
+  <p class="kucukyazi" style="margin:0 0 10px">Bu liste <b>salt okunurdur</b>: bir kayıt her eklendiğinde (bot, panel ya da Excel aktarımı) o anki tam kopyası arşive yazılır; sonraki her değişiklik de ayrı bir kopya olarak eklenir.
+    Arşiv tablosu veritabanı düzeyinde değiştirilemez ve silinemez (tetikleyici). Panelde silinen kayıtlar bile burada ilk halleriyle durur. Toplam arşiv kopyası: <b>{{ arsiv_toplam }}</b>.</p>
+  <div class="filtre-satir">
+    <form method="get" class="filtre-satir" style="margin:0">
+      <select name="proje"><option value="">Tüm projeler</option>{% for p in tum_projeler() %}<option value="{{ p }}" {{ 'selected' if p == proje }}>{{ p }}</option>{% endfor %}</select>
+      <input name="q" value="{{ q }}" placeholder="personel / üye ID / link">
+      <select name="boy"><option value="200" {{ 'selected' if boy == 200 }}>200</option><option value="500" {{ 'selected' if boy == 500 }}>500</option><option value="0" {{ 'selected' if boy == 0 }}>hepsi</option></select>
+      <button class="btn">Listele</button>
+    </form>
+    <form method="post" action="{{ u('arsiv_yedek') }}" class="satir-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn birincil" title="Veritabanının tutarlı bir kopyasını VERI/yedek altına alır ve indirir">🗜 Yedek al</button>
+    </form>
+  </div>
+  {% if yedekler %}<p class="kucukyazi" style="margin:8px 0 0">Son yedekler: {% for y in yedekler %}<code>{{ y.ad }}</code> ({{ y.boyut_kb }} KB){{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
+</div>
+
+<p class="kucukyazi">{{ toplam }} kayıt{% if sayfa_sayisi > 1 %} · sayfa {{ sayfa }} / {{ sayfa_sayisi }}{% endif %}</p>
+<div class="tablo-kaydir">
+<table class="tablo yogun duyarli" id="arsiv-tablo">
+  <thead><tr><th>Kayıt</th><th>Eklenme</th><th>Olay</th><th>Kim</th><th>Proje</th><th>İlk hali: Personel</th><th>Üye ID</th><th>Ana üye ID</th><th>Kategori</th><th>Link</th><th>Şimdiki durum</th><th>Şimdiki hali</th><th>Kopya</th></tr></thead>
+  <tbody>
+  {% for a in kayitlar %}
+  <tr class="{{ 'silindi' if a.silindi }}">
+    <td data-b="Kayıt"><a href="{{ u('kayitlar', proje=a.proje, durum='hepsi', ac=a.kayit_id) }}">#{{ a.kayit_id }}</a></td>
+    <td data-b="Eklenme" class="nowrap">{{ a.zaman }}</td>
+    <td data-b="Olay"><code>{{ a.olay }}</code></td>
+    <td data-b="Kim">{{ a.kim or '' }}</td>
+    <td data-b="Proje"><span class="rozet" style="background: {{ renk(a.proje) }}; color: {{ metin_rengi(renk(a.proje)) }}">{{ a.proje }}</span></td>
+    <td data-b="Personel"><b>{{ a.ilk.personel or '' }}</b></td>
+    <td data-b="Üye ID">{{ a.ilk.uye_id or '' }}</td>
+    <td data-b="Ana üye ID">{{ a.ilk.ana_uye_id or '' }}</td>
+    <td data-b="Kategori">{{ a.ilk.kategori or '' }}</td>
+    <td data-b="Link" class="kucukyazi kirp">{{ (a.ilk.link or '')[:40] }}</td>
+    <td data-b="Şimdiki durum">{% if a.silindi %}<span class="etiket-kucuk kirmizi-arka">silindi</span>{% elif a.kt %}<span class="yesil">onaylı</span>{% else %}<span class="turuncu">bekliyor</span>{% endif %} <small>v{{ a.surum }}</small></td>
+    <td data-b="Şimdiki hali" class="kucukyazi">{{ a.personel }} / {{ a.uye_id }} / {{ a.ana_uye_id }} / {{ a.kategori }}{% if a.personel != a.ilk.personel or a.uye_id != a.ilk.uye_id or a.ana_uye_id != a.ilk.ana_uye_id %} <b class="turuncu" title="ilk halinden farklı">değişti</b>{% endif %}</td>
+    <td data-b="Kopya"><a href="{{ u('arsiv_json', kid=a.kayit_id) }}" title="Tüm arşiv kopyaları (JSON)">{{ a.kopya }}</a></td>
+  </tr>
+  {% else %}<tr><td colspan="13">Arşivde kayıt yok.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% if sayfa_sayisi > 1 %}
+<div class="sayfalama">
+  {% if sayfa > 1 %}<a class="btn" href="{{ url_degistir(s=sayfa - 1) }}">‹ Önceki</a>{% endif %}
+  <span>{{ sayfa }} / {{ sayfa_sayisi }}</span>
+  {% if sayfa < sayfa_sayisi %}<a class="btn" href="{{ url_degistir(s=sayfa + 1) }}">Sonraki ›</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

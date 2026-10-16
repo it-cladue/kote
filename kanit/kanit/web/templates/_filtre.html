@@ -1,0 +1,25 @@
+{# Ortak filtre formu. proje_sabit verilirse proje çipleri gösterilmez. #}
+<form class="filtre" method="get" id="filtre-form">
+  {% for gizli_ad, gizli_deger in gizli %}<input type="hidden" name="{{ gizli_ad }}" value="{{ gizli_deger }}">{% endfor %}
+  <input type="hidden" name="durum" value="{{ f.durum }}">
+  {% if not proje_sabit %}
+  <div class="filtre-grup">
+    <span class="etiket">Proje</span>
+    {% for p in izinli %}
+    <label class="cip" style="--renk: {{ renk(p) }}; --cipyazi: {{ metin_rengi(renk(p)) }}">
+      <input type="checkbox" name="proje" value="{{ p }}" {{ 'checked' if p in f.proje and f.proje|length != izinli|length }}><span>{{ p }}</span>
+    </label>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="filtre-grup">
+    <input name="q" value="{{ f.q }}" placeholder="Personel kodu / üye ID / link" class="arama">
+    <select name="kategori"><option value="">Tüm kategoriler</option>{% for kat in kategoriler %}<option value="{{ kat }}" {{ 'selected' if kat|upper == f.kategori|upper }}>{{ kat }}</option>{% endfor %}</select>
+    <input name="ekleyen" value="{{ f.ekleyen }}" placeholder="Ekleyen (Telegram adı/ID)">
+    <input type="date" name="tarih1" value="{{ f.tarih1 }}" title="başlangıç"> <input type="date" name="tarih2" value="{{ f.tarih2 }}" title="bitiş">
+    <label class="cip" style="--renk:#2563eb;--cipyazi:#fff" title="Yalnızca yorum yazılmış kayıtlar"><input type="checkbox" name="yorumlu" value="1" {{ 'checked' if f.yorumlu }}><span>💬 Yorumlu olanlar</span></label>
+    <button class="btn birincil">Filtrele</button>
+    <a class="btn" href="{{ temizle_url }}">Temizle</a>
+    <a class="btn" href="{{ u('disa_aktar_xlsx', **excel_args) }}" title="Bu filtredeki kayıtları Excel olarak indir">⬇ Excel{% if proje_sabit %} (bu görünüm){% endif %}</a>
+  </div>
+</form>

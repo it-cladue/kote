@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block baslik %}Şifre değiştir{% endblock %}
+{% block icerik %}
+<div class="kart dar">
+  <h2>Şifre değiştir</h2>
+  {% if hata %}<div class="hata">{{ hata }}</div>{% endif %}
+  <form method="post" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Eski şifre<input name="eski" type="password" required></label>
+    <label>Yeni şifre (en az 8 karakter)<input name="yeni" type="password" minlength="8" required></label>
+    <label>Yeni şifre (tekrar)<input name="yeni2" type="password" minlength="8" required></label>
+    <button class="btn birincil">Kaydet</button>
+  </form>
+</div>
+{% endblock %}
