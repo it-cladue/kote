@@ -1,0 +1,35 @@
+# Kanit Merkezi - web paneli (Flask + waitress, DINLE:PORT, varsayilan 0.0.0.0:8080)
+# Kurulum: deploy/kur.sh bu dosyayi /etc/systemd/system/ altina kopyalar.
+# Ayarlar /opt/kanit/.env dosyasindan okunur (EnvironmentFile). Degisiklikten sonra:
+#   systemctl daemon-reload && systemctl restart kanit-web
+[Unit]
+Description=Kanit Merkezi web paneli
+Documentation=file:/opt/kanit/src/deploy/ISLETME.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kanit
+Group=kanit
+WorkingDirectory=/opt/kanit/src/kanit
+EnvironmentFile=/opt/kanit/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=KANIT_ENV=/opt/kanit/.env
+Environment=HOME=/opt/kanit
+ExecStart=/opt/kanit/venv/bin/python -m kanit web
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+StandardOutput=append:/opt/kanit/veri/log/web.log
+StandardError=append:/opt/kanit/veri/log/web.log
+# Sertlestirme: veri klasoru disinda yazma yok
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/kanit/veri
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

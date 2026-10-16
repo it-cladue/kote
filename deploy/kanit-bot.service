@@ -1,0 +1,36 @@
+# Kanit Merkezi - Telegram botu (long polling; disariya baglanir, port acmaz)
+# Kurulum: deploy/kur.sh bu dosyayi /etc/systemd/system/ altina kopyalar ama BASLATMAZ;
+# veri aktarimi (ice-aktar --uygula) bittikten sonra:  systemctl enable --now kanit-bot
+# Ayni token ile iki bot ayni anda calisamaz (Telegram getUpdates cakisir): eski Windows botu
+# kapatilmadan gercek token'i .env'e yazmayin (bkz. ISLETME.md, gecis sirasi).
+[Unit]
+Description=Kanit Merkezi Telegram botu
+Documentation=file:/opt/kanit/src/deploy/ISLETME.md
+After=network-online.target kanit-web.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kanit
+Group=kanit
+WorkingDirectory=/opt/kanit/src/kanit
+EnvironmentFile=/opt/kanit/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=KANIT_ENV=/opt/kanit/.env
+Environment=HOME=/opt/kanit
+ExecStart=/opt/kanit/venv/bin/python -m kanit bot
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+StandardOutput=append:/opt/kanit/veri/log/bot.log
+StandardError=append:/opt/kanit/veri/log/bot.log
+# Sertlestirme: veri klasoru disinda yazma yok
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/kanit/veri
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
