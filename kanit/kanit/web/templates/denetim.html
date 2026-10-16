@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block baslik %}Denetim kaydı{% endblock %}
+{% block icerik %}
+<h2>Denetim kaydı <small>(son 500)</small></h2>
+<form class="filtre-satir" method="get">
+  <input name="q" value="{{ q }}" placeholder="kullanıcı / işlem / kayıt no / içerik">
+  <select name="islem"><option value="">Tüm işlemler</option>{% for i in islemler %}<option value="{{ i }}" {{ 'selected' if i == f.islem }}>{{ i }}</option>{% endfor %}</select>
+  <select name="kullanici"><option value="">Tüm kullanıcılar</option>{% for i in kullanicilar %}<option value="{{ i }}" {{ 'selected' if i == f.kullanici }}>{{ i }}</option>{% endfor %}</select>
+  <select name="proje"><option value="">Tüm projeler</option>{% for p in tum_projeler() %}<option value="{{ p }}" {{ 'selected' if p == f.proje }}>{{ p }}</option>{% endfor %}</select>
+  <input type="date" name="tarih1" value="{{ f.tarih1 }}"> <input type="date" name="tarih2" value="{{ f.tarih2 }}">
+  <button class="btn">Ara</button>
+  <a class="btn" href="{{ u('denetim') }}">Temizle</a>
+</form>
+<table class="tablo duyarli">
+  <thead><tr><th>Zaman</th><th>Kullanıcı</th><th>İşlem</th><th>Proje</th><th>Kayıt</th><th>Eski</th><th>Yeni</th><th>IP</th></tr></thead>
+  <tbody>
+  {% for r in kayitlar %}
+  <tr>
+    <td data-b="Zaman" class="nowrap">{{ r.zaman }}</td><td data-b="Kullanıcı">{{ r.kullanici }}</td><td data-b="İşlem"><code>{{ r.islem }}</code></td><td data-b="Proje">{{ r.proje or '' }}</td>
+    <td data-b="Kayıt" class="kucukyazi">{% if r.kayit_id %}<a href="{{ u('kayitlar', proje=r.proje, durum='hepsi', ac=r.kayit_id) }}">#{{ r.kayit_id }}</a>{% endif %}</td>
+    <td data-b="Eski" class="kucukyazi kirp">{{ r.eski or '' }}</td><td data-b="Yeni" class="kucukyazi kirp">{{ r.yeni or '' }}</td><td data-b="IP" class="kucukyazi">{{ r.ip or '' }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="8">Kayıt yok.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

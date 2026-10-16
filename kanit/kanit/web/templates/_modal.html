@@ -1,0 +1,55 @@
+<!-- Kayıt penceresi (modal): Bilgi / Yorumlar / Geçmiş sekmeleri -->
+<div id="modal" class="modal gizli" aria-hidden="true">
+  <div class="modal-icerik">
+    <button class="modal-kapat" type="button" title="Kapat (Esc)">✕</button>
+    <button class="modal-onceki" type="button" title="Önceki (←)">‹</button>
+    <button class="modal-sonraki" type="button" title="Sonraki (→)">›</button>
+    <div class="modal-govde">
+      <div class="modal-gorsel">
+        <a id="m-gorsel-link" href="#" target="_blank" rel="noopener"><img id="m-gorsel" alt=""></a>
+        <div id="m-gorsel-yok" class="gizli"></div>
+      </div>
+      <div class="modal-bilgi">
+        <div class="modal-baslik"><span id="m-proje" class="rozet"></span> <span id="m-kategori"></span> <span id="m-kt" class="kt-isaret gizli">✔ onaylı</span> <span id="m-durum"></span></div>
+        <div class="sekmeler modal-sekmeler" role="tablist">
+          <button type="button" class="sekme aktif" data-sekme="bilgi">Bilgi</button>
+          <button type="button" class="sekme" data-sekme="yorumlar">Yorumlar <b id="m-yorum-sayi">0</b></button>
+          <button type="button" class="sekme" data-sekme="gecmis">Geçmiş</button>
+        </div>
+        <div id="m-catisma" class="catisma-serit gizli"></div>
+        <section id="m-sekme-bilgi" class="m-sekme">
+          <dl id="m-alanlar" class="alanlar"></dl>
+          <div id="m-link" class="kucukyazi"></div>
+          <div id="m-butonlar" class="modal-butonlar"></div>
+          <form id="m-duzenle" class="duzenle-form gizli" autocomplete="off">
+            <input type="hidden" name="surum" value="">
+            <label>Personel kodu<input name="personel"></label>
+            <label>Üye ID<input name="uye_id"></label>
+            <label>Ana üye ID<input name="ana_uye_id"></label>
+            <label>Tür<input name="tip"></label>
+            <label>Kategori<input name="kategori" list="kategori-listesi"></label>
+            <label>Görsel 2<input name="gorsel2"></label>
+            <label>Açıklama<input name="aciklama"></label>
+            <div><button class="btn birincil" type="submit">Kaydet</button> <button class="btn" type="button" id="m-duzenle-iptal">Vazgeç</button></div>
+          </form>
+          <form id="m-sil" class="duzenle-form gizli" autocomplete="off">
+            <label>Silme nedeni (zorunlu)<input name="neden" required maxlength="200" placeholder="örn: mükerrer kayıt"></label>
+            <div><button class="btn tehlike" type="submit">Evet, sil</button> <button class="btn" type="button" id="m-sil-iptal">Vazgeç</button></div>
+          </form>
+        </section>
+        <section id="m-sekme-yorumlar" class="m-sekme gizli">
+          <ul id="m-yorumlar" class="yorumlar"></ul>
+          <form id="m-yorum-form" class="yorum-form" autocomplete="off">
+            <textarea name="metin" rows="3" maxlength="2000" placeholder="Yorum yazın… (Ctrl+Enter ile gönder)"></textarea>
+            <div><button class="btn birincil" type="submit">Gönder</button></div>
+          </form>
+        </section>
+        <section id="m-sekme-gecmis" class="m-sekme gizli">
+          <ul id="m-gecmis" class="gecmis"></ul>
+          <p id="m-arsiv" class="kucukyazi"></p>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+<datalist id="kategori-listesi">{% for kat in kategoriler %}<option value="{{ kat }}">{% endfor %}</datalist>
