@@ -15,7 +15,7 @@ from PIL import Image, UnidentifiedImageError
 from . import db, yetki, kullanicilar, gorsel, bot_yonetim
 from .settings import AYAR, ROOT
 
-SURUM = '2.1.0'
+SURUM = '2.2.0'
 secret_path = Path(AYAR['BOT_KLASOR']) / 'session.key'
 secret = os.getenv('SESSION_SECRET')
 if not secret:
@@ -143,7 +143,8 @@ def context():
     return dict(k=safe_user if g.get('k') else None,yk=g.get('yk'),renk=renk,metin_rengi=metin_rengi,
                 url_degistir=url_degistir,url_filtre=url_filtre,csrf=session.get('csrf',''),projeler=lambda:allowed,
                 proje_renkleri={p['code']:p['color'] for p in info},proje_bilgileri=info,
-                izin=lambda p,e:yetki.izin(g.yk,p,e),simdi=simdi,SURUM=SURUM)
+                izin=lambda p,e:yetki.izin(g.yk,p,e),simdi=simdi,SURUM=SURUM,
+                rol_adi=('Süperadmin' if g.get('yk') and g.yk['admin'] else 'Admin') if g.get('k') else '')
 
 
 def giris_gerekli(f):
@@ -204,7 +205,7 @@ def sifre_degistir():
         u,_=kullanicilar.dogrula(AYAR,g.k['kullanici_adi'],request.form.get('eski',''))
         s=request.form.get('yeni','')
         if not u: hata='Eski parola hatalı.'
-        elif len(s)<12: hata='Parola en az 12 karakter olmalı.'
+        elif len(s)<8: hata='Parola en az 8 karakter olmalı.'
         elif s!=request.form.get('yeni2'): hata='Yeni parolalar aynı değil.'
         else:
             u=kullanicilar.guncelle(AYAR,g.k['kullanici_adi'],sifre=s,sifre_degistir=0)
@@ -219,17 +220,45 @@ def durum_bilgisi():
             'log_son':db.ayar_al(c,'son_degisiklik'),'kuyruk_bekleyen':0,'bekleyen_islem':0,
             'surum':SURUM,'veritabani':'SQLite WAL','gorsel_klasor':'Özel yerel arşiv','paylasim_modu':False}
 
+def _acik_sorular(allowed):
+    """Bana yöneltilmiş ve henüz yanıtlanmamış soru sayısı (yalnız izinli projeler)."""
+    if not allowed:return 0
+    places=','.join('?' for _ in allowed)
+    return baglanti().execute('''SELECT COUNT(*) FROM yorumlar y JOIN kayitlar k ON k.id=y.kayit_id
+        WHERE y.tur='soru' AND y.alici=? AND k.proje IN ('''+places+''')
+        AND NOT EXISTS (SELECT 1 FROM yorumlar r WHERE r.yanit_id=y.id)''',(g.k['kullanici_adi'],*allowed)).fetchone()[0]
+
+def _son_islemler(allowed,limit=10):
+    """İşlem Geçmişi ile aynı kapsam kuralı: süperadmin her şeyi, admin yalnız izinli kayıt hareketlerini görür."""
+    from .guvenli_log import log_row
+    if g.yk['admin']:where,params='1=1',[]
+    elif allowed:where,params='k.proje IN ('+','.join('?' for _ in allowed)+')',list(allowed)
+    else:return []
+    rows=[]
+    for row in baglanti().execute('SELECT d.*,k.id record_id FROM denetim d LEFT JOIN kayitlar k ON k.anahtar=d.anahtar WHERE '+where+' ORDER BY d.id DESC LIMIT ?',[*params,limit]):
+        item=log_row(row)
+        if item.get('proje') and item['proje'] not in allowed and not g.yk['admin']:continue
+        rows.append(item)
+    return rows
+
+ISLEM_ADLARI={'giris':'Giriş yaptı','giris_hata':'Hatalı giriş denemesi','onayla':'Kaydı onayladı','onay_kaldir':'Onayı kaldırdı','duzenle':'Kaydı düzenledi','sil':'Kaydı sildi','geri_al':'Kaydı geri aldı','yorum_ekle':'Yorum yazdı','soru_yonelt':'Soru yöneltti','yanit_ekle':'Yanıt verdi','gyazo_istek':'Gyazo dönüşümü istedi','disa_aktar':'Excel çıktısı aldı','dosya_kontrol':'Dosya kontrolü yaptı','kullanici_ekle':'Kullanıcı ekledi','kullanici_guncelle':'Kullanıcıyı güncelledi','sifre_degisti':'Parolasını değiştirdi','arsiv_esle':'Arşiv görseli eşledi','beklenen_proje':'Beklenen projeyi atadı','yeni_kayit':'Yeni kanıt ekledi','sunucu_hata':'Sunucu hatası'}
+
 @app.route('/')
 @giris_gerekli
 def ana():
-    cards=[]
-    for p in yetki.izinli_projeler(g.yk,projeler()):
+    cards=[];allowed=_allowed();kpi=dict(bekleyen=0,bugun=0,bugun_onay=0,toplam=0,onayli=0)
+    for p in allowed:
         row=baglanti().execute('''SELECT SUM(kt=0 AND silindi=0) bekleyen,
             SUM(kt=1 AND silindi=0) onayli,SUM(silindi=1) silinen,
-            SUM(date(tarih)=date('now','localtime') AND silindi=0) bugun,COUNT(*) toplam
+            SUM(date(tarih)=date('now','localtime') AND silindi=0) bugun,
+            SUM(kt=1 AND silindi=0 AND date(kt_zaman)=date('now','localtime')) bugun_onay,COUNT(*) toplam
             FROM kayitlar WHERE proje=?''',(p,)).fetchone()
-        cards.append({'proje':p,**{k:row[k] or 0 for k in row.keys()}})
-    return render_template('ana.html',kartlar=cards,durum=durum_bilgisi())
+        card={'proje':p,**{k:row[k] or 0 for k in row.keys()}}
+        card['etiket']=next((x['label'] for x in _all_project_info() if x['code']==p),p)
+        cards.append(card)
+        for key in kpi:kpi[key]+=card[key]
+    kpi['acik_soru']=_acik_sorular(allowed)
+    return render_template('ana.html',kartlar=cards,durum=durum_bilgisi(),kpi=kpi,son_islemler=_son_islemler(allowed),islem_adlari=ISLEM_ADLARI)
 
 def _filtre_sql(args,izinli):
     selected=_selected_projects(args,izinli)
@@ -887,14 +916,43 @@ def saglik():
 def route_manifest():
     return jsonify(routes=[{'path':p,'title':t} for p,t in [('/','Ana sayfa'),('/giris','Giriş'),('/sifre','Parola'),('/kayitlar','Kayıtlar'),('/arsiv','Arşiv'),('/excel-kontrol','Excel kontrol'),('/bot','Bot'),('/yonetim/kullanicilar','Kullanıcılar'),('/denetim','Denetim'),('/disa-aktar','Çıktı'),('/telegram/kullanici/:tg_id/kanitlar','Ekleyen kanıt profili'),('/bot/kullanici/:tg_id','Telegram kullanıcı durumu')]])
 
+def _json_bekleniyor():
+    """fetch() ile çağrılan uç noktalar hata sayfası yerine JSON hata gövdesi alır."""
+    if request.is_json or request.headers.get('X-CSRF') or request.headers.get('X-Requested-With')=='XMLHttpRequest':return True
+    return request.accept_mimetypes.best_match(['application/json','text/html'])=='application/json'
+
+HATA_BASLIKLARI={400:'Geçersiz istek',403:'Yetkiniz yok',404:'Sayfa bulunamadı',405:'Bu yöntem desteklenmiyor',409:'Kayıt değişti',413:'Dosya çok büyük',429:'Çok fazla deneme',500:'Beklenmeyen hata'}
+
 @app.errorhandler(400)
 @app.errorhandler(403)
 @app.errorhandler(404)
+@app.errorhandler(405)
 @app.errorhandler(409)
 @app.errorhandler(413)
+@app.errorhandler(429)
 def handle_error(error):
-    messages={400:'Geçersiz işlem.',403:'Bu işlem için yetkiniz yok.',404:'Bulunamadı.',409:'Kayıt değişti; sayfayı yenileyip tekrar deneyin.',413:'Dosya boyutu sınırı aşıldı.'}
-    return render_template('hata.html',kod=error.code,mesaj=messages[error.code]),error.code
+    messages={400:'Gönderilen bilgi geçersiz veya eksik. Sayfayı yenileyip tekrar deneyin.',403:'Bu sayfa veya işlem için hesabınızın yetkisi yok. Gerekirse süperadminden proje yetkisi isteyin.',404:'Aradığınız sayfa ya da kayıt bulunamadı; bağlantı eski olabilir.',405:'Bu adres bu şekilde çağrılamaz.',409:'Kayıt bu arada başka bir kullanıcı tarafından değiştirildi. Sayfayı yenileyip tekrar deneyin.',413:'Dosya boyutu sınırı (12 MB) aşıldı.',429:'Çok fazla istek gönderildi. Birkaç dakika bekleyip tekrar deneyin.'}
+    ozel=error.description if isinstance(getattr(error,'description',None),str) and error.code in (400,409) and error.description and not error.description.startswith('The ') else None
+    if _json_bekleniyor():
+        return jsonify(ok=False,hata=ozel or messages[error.code]),error.code
+    return render_template('hata.html',kod=error.code,baslik=HATA_BASLIKLARI.get(error.code,'Hata'),mesaj=ozel or messages[error.code]),error.code
+
+@app.errorhandler(500)
+def handle_server_error(error):
+    ref=datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+secrets.token_hex(3).upper()
+    original=getattr(error,'original_exception',None) or error
+    app.logger.error('Beklenmeyen hata [kayit no %s] %s %s',ref,request.method,request.path,exc_info=(type(original),original,original.__traceback__))
+    try:
+        c=db.baglan(AYAR['DB'])
+        try:
+            db.denetim_yaz(c,(g.get('k') or {}).get('kullanici_adi') or 'anonim','sunucu_hata',yeni={'kayit_no':ref,'yol':request.path,'tur':type(original).__name__},ip=ip(),hedef_turu='sistem',hedef_id=ref,sonuc='hata')
+        finally:c.close()
+    except Exception:
+        pass
+    mesaj='Beklenmeyen hata, kayıt no '+ref+'. Ayrıntı sunucu günlüğüne yazıldı; sorun sürerse bu numarayı yöneticinize iletin.'
+    if _json_bekleniyor():
+        return jsonify(ok=False,hata=mesaj,kayit_no=ref),500
+    return render_template('hata.html',kod=500,baslik=HATA_BASLIKLARI[500],mesaj=mesaj,kayit_no=ref),500
 
 
 def _start_web_converter():

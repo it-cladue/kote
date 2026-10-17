@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Kanıt Paneli 2.0 -> 2.1 güvenli uygulama-kodu güncellemesi.
+# Kanıt Paneli 2.1 -> 2.2 güvenli uygulama-kodu güncellemesi.
 # Bu betik ZIP açmaz, paket indirmez, pip/apt ile kurulum yapmaz ve Plesk/Nginx/HTTPS
 # yapılandırmasına dokunmaz. Kaynak kök, bu deploy dizininin bir üstüdür.
 set -Eeuo pipefail
@@ -78,7 +78,7 @@ done
 [[ -f "$HELPER" && ! -L "$HELPER" && -r "$HELPER" ]] || \
     fatal 11 "update-support.py kaynak pakette okunabilir normal dosya değil. ZIP'i önce kullanıcı olarak açın."
 [[ "$SOURCE_ROOT" != "$DEST" ]] || \
-    fatal 11 "Kaynak paket /opt/kanit-paneli olamaz; açılmış 2.1 paketin deploy/apply-update.sh betiğini çalıştırın."
+    fatal 11 "Kaynak paket /opt/kanit-paneli olamaz; açılmış 2.2 paketin deploy/apply-update.sh betiğini çalıştırın."
 
 # Yalnız okuyan kaynak derleme denetimi: __pycache__ oluşturmaz.
 if ! python3 "$HELPER" source-check --root "$SOURCE_ROOT" >/dev/null; then
@@ -124,7 +124,7 @@ BOT_WAS_ACTIVE=0
 if service_is_active "$WEB_SERVICE"; then WEB_WAS_ACTIVE=1; fi
 if service_is_active "$BOT_SERVICE"; then BOT_WAS_ACTIVE=1; fi
 
-printf '%s\n' 'Kanit Paneli 2.1 güncelleme planı'
+printf '%s\n' 'Kanit Paneli 2.2 güncelleme planı'
 printf '%s\n' "Kaynak kod: $SOURCE_ROOT"
 printf '%s\n' "Hedef: $DEST (yalnız app dizini atomik değiştirilecek)"
 printf '%s\n' "Web servisi: $(status_label "$WEB_WAS_ACTIVE"); bot servisi: $(status_label "$BOT_WAS_ACTIVE")"

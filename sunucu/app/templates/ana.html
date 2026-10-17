@@ -1,21 +1,34 @@
 {% extends "base.html" %}
-{% block baslik %}Kanıt Paneli{% endblock %}
+{% block baslik %}Ana sayfa — Kanıt Paneli{% endblock %}
 {% block icerik %}
-<section class="sayfa-baslik ana-baslik">
-  <div><p class="ust-etiket">Kanıt operasyonu</p><h1>İş akışınız</h1><p>Yeni kanıtlar yalnız Telegram üzerinden gelir. Burada kayıtları kontrol edin, onaylayın ve takip edin.</p></div>
-  <div class="baslik-eylemler"><a class="btn birincil" href="{{ url_for('kayitlar', durum='bekleyen') }}">Onay bekleyenleri aç</a><a class="btn" href="{{ url_for('kayitlar', durum='hepsi') }}">Tüm kayıtlar</a></div>
+<section class="hero" aria-labelledby="hero-baslik">
+  <div>
+    <p class="ust-etiket">Kanıt operasyonu</p>
+    <h1 id="hero-baslik">Hoş geldiniz, {{ k.ad or k.kullanici_adi }}</h1>
+    <p>Yeni kanıtlar yalnız Telegram üzerinden gelir. Burada kayıtları kontrol edin, onaylayın, soru sorun ve takip edin.</p>
+    <div class="baslik-eylemler"><a class="btn birincil" href="{{ url_for('kayitlar', durum='bekleyen') }}">Onay bekleyenleri aç</a><a class="btn" href="{{ url_for('kayitlar', durum='hepsi') }}">Tüm kayıtlar</a><a class="btn" href="{{ url_for('disa_aktar_sayfasi') }}">Excel çıktısı</a></div>
+  </div>
+  <form class="arama-buyuk" method="get" action="{{ url_for('kayitlar') }}" role="search">
+    <input type="hidden" name="durum" value="hepsi">
+    <label class="ekran-okuyucu" for="ana-arama">Kayıtlarda hızlı ara</label>
+    <input id="ana-arama" name="q" placeholder="Personel kodu, üye ID veya Lead ID ile ara" autocomplete="off">
+    <button class="btn birincil" type="submit">Ara</button>
+  </form>
 </section>
-<form class="arama-buyuk" method="get" action="{{ url_for('kayitlar') }}" role="search">
-  <input type="hidden" name="durum" value="hepsi">
-  <label class="ekran-okuyucu" for="ana-arama">Kayıtlarda ara</label>
-  <input id="ana-arama" name="q" placeholder="Personel kodu, üye ID veya Lead ID ile ara" autocomplete="off">
-  <button class="btn birincil">Ara</button>
-</form>
-<section class="ozet-baslik" aria-labelledby="proje-ozet-baslik"><div><p class="ust-etiket">Yetkili projeler</p><h2 id="proje-ozet-baslik">İş yükü özeti</h2></div><p class="kucukyazi">Sayılar arka planda güncellenir; ekran kendiliğinden yenilenmez.</p></section>
+
+<section aria-label="Genel sayılar" class="kpi-izgara">
+  <a class="kpi bekleyen" href="{{ url_for('kayitlar', durum='bekleyen') }}"><b data-kpi="bekleyen">{{ kpi.bekleyen }}</b><span>Onay bekleyen kayıt</span></a>
+  <a class="kpi bugun" href="{{ url_for('kayitlar', durum='hepsi', tarih1=simdi()[:10], tarih2=simdi()[:10]) }}"><b>{{ kpi.bugun }}</b><span>Bugün eklenen</span></a>
+  <a class="kpi onay" href="{{ url_for('kayitlar', durum='onayli') }}"><b>{{ kpi.bugun_onay }}</b><span>Bugün onaylanan</span></a>
+  <a class="kpi soru" href="{{ url_for('bildirim_sayfasi', tur='soru', okundu='0') }}"><b>{{ kpi.acik_soru }}</b><span>Bana yöneltilmiş açık soru</span></a>
+</section>
+
+<section class="ozet-baslik" aria-labelledby="proje-ozet-baslik"><div><p class="ust-etiket">Yetkili projeler</p><h2 id="proje-ozet-baslik">Proje bazında iş yükü</h2></div><p class="kucukyazi">Sayılar arka planda güncellenir; sayfa kendiliğinden yenilenmez.</p></section>
 <div class="proje-izgara">
 {% for kart in kartlar %}
-  <article class="proje-kart" style="--proje-renk:{{ renk(kart.proje) }}">
+  <article class="proje-kart" style="--proje-renk:{{ renk(kart.proje) }}" aria-label="{{ kart.proje }} projesi">
     <div class="proje-baslik"><span class="rozet" style="background:{{ renk(kart.proje) }};color:{{ metin_rengi(renk(kart.proje)) }}">{{ kart.proje }}</span><small><span data-sayac="{{ kart.proje }}:toplam">{{ kart.toplam }}</span> kayıt</small></div>
+    {% if kart.etiket and kart.etiket != kart.proje %}<div class="proje-ad" title="{{ kart.etiket }}">{{ kart.etiket }}</div>{% endif %}
     <div class="proje-butonlar">
       <a class="sayi-btn bekleyen" href="{{ url_for('kayitlar',proje=kart.proje,durum='bekleyen') }}"><b data-sayac="{{ kart.proje }}:bekleyen">{{ kart.bekleyen }}</b><span>Bekleyen</span></a>
       <a class="sayi-btn onayli" href="{{ url_for('kayitlar',proje=kart.proje,durum='onayli') }}"><b data-sayac="{{ kart.proje }}:onayli">{{ kart.onayli }}</b><span>Onaylı</span></a>
@@ -24,7 +37,35 @@
     <a class="metin-baglanti" href="{{ url_for('kayitlar',proje=kart.proje,durum='hepsi') }}">Proje kayıtlarını incele <span aria-hidden="true">→</span></a>
   </article>
 {% else %}
-  <div class="bos-durum"><h2>Yetkili proje yok</h2><p>Bu hesap için henüz proje yetkisi tanımlanmamış.</p></div>
+  <div class="bos-durum"><h2>Yetkili proje yok</h2><p>Bu hesap için henüz proje yetkisi tanımlanmamış. Süperadminden proje yetkisi isteyin.</p></div>
 {% endfor %}
+</div>
+
+<div class="ana-alt-izgara">
+  <section class="kart" aria-labelledby="son-islemler-baslik">
+    <div class="kart-baslik"><div><p class="ust-etiket">İzlenebilirlik</p><h2 id="son-islemler-baslik">Son işlemler</h2></div><a class="btn kucuk" href="{{ url_for('denetim') }}">Tüm geçmiş</a></div>
+    <ul class="son-islemler">
+    {% for r in son_islemler %}
+      <li>
+        <time datetime="{{ r.zaman }}">{{ r.zaman }}</time>
+        <div class="islem-metin"><b>{{ r.kullanici or 'Sistem' }}</b> · {{ islem_adlari.get(r.islem, r.islem) }}{% if r.proje %} <span class="rozet" style="background:{{ renk(r.proje) }};color:{{ metin_rengi(renk(r.proje)) }}">{{ r.proje }}</span>{% endif %}{% if r.record_id %}<small>Kayıt #{{ r.record_id }}</small>{% elif r.hedef_turu == 'hesap' and r.hedef_id %}<small>Hesap: {{ r.hedef_id }}</small>{% endif %}</div>
+        <span>{% if r.record_id %}<a class="btn kucuk hayalet" href="{{ url_for('kayitlar', proje=r.proje, durum='hepsi', ac=r.record_id) }}">Kaydı aç</a>{% elif r.sonuc == 'hata' %}<span class="durum-etiket silinen">Hata</span>{% endif %}</span>
+      </li>
+    {% else %}
+      <li><div class="bos-tablo">Henüz görüntülenecek işlem yok.</div></li>
+    {% endfor %}
+    </ul>
+  </section>
+  <section class="kart" aria-labelledby="hizli-baslik">
+    <div class="kart-baslik"><div><p class="ust-etiket">Kısayollar</p><h2 id="hizli-baslik">Sık kullanılan sayfalar</h2></div></div>
+    <div class="hizli-baglantilar">
+      <a href="{{ url_for('kayitlar', durum='bekleyen') }}">Onay bekleyen kayıtlar <small>Kayıtlar</small></a>
+      <a href="{{ url_for('disa_aktar_sayfasi') }}">Excel çıktısı al <small>Çıktı</small></a>
+      <a href="{{ url_for('excel_kontrol') }}">Listeyi kayıtlarla karşılaştır <small>Kanıt Kontrolü</small></a>
+      <a href="{{ url_for('bildirim_sayfasi') }}">Bildirim geçmişi <small>Bildirimler</small></a>
+      {% if yk.admin %}<a href="{{ url_for('katalog_yonetim') }}">Proje ve kategori yönetimi <small>Yönetim</small></a><a href="{{ url_for('yonetim_kullanicilar') }}">Panel kullanıcıları <small>Yönetim</small></a>{% endif %}
+    </div>
+    <p class="kucukyazi" style="margin:14px 0 0">Sürüm {{ SURUM }} · {% if durum.bot.canli %}Bot çalışıyor{% else %}Bot bağlantısı kontrol edilmeli{% endif %}</p>
+  </section>
 </div>
 {% endblock %}

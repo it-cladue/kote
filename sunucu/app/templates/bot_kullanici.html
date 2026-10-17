@@ -1,1 +1,24 @@
-{% extends "base.html" %}{% block baslik %}Telegram kullanıcı durumu{% endblock %}{% block icerik %}<div class="kart"><h1>Telegram kullanıcı durumu</h1><a class="btn" href="{{ url_for('bot_sayfasi',q=u.id) }}">Kullanıcı işlemlerine dön</a><table class="tablo"><tr><th>ID</th><td>{{ u.id }}</td></tr><tr><th>Kullanıcı / ad</th><td>{{ u.username }} / {{ u.first_name }}</td></tr><tr><th>Onay</th><td>{{ 'onaylı' if u.onayli else 'onaysız' }} · {{ u.onay_tarihi or '' }}</td></tr><tr><th>Engel</th><td>{{ 'engelli' if u.engelli else 'yok' }} · {{ u.engel_sebep or '' }}</td></tr><tr><th>Deneme</th><td>{{ u.deneme }}</td></tr><tr><th>Son görülme</th><td>{{ u.last_seen or '' }}</td></tr><tr><th>Yeni kayıt sayacı</th><td>{{ u.kayit_sayisi }}</td></tr></table><p><a class="btn birincil" href="{{ url_for('telegram_kayitlari',tg_id=u.id) }}">Kişinin kanıtları / proje dışı kayıtlar</a></p><h2>Açık oturumlar</h2><table class="tablo"><tr><th>Bot</th><th>Adım</th><th>Proje</th><th>Son işlem</th></tr>{% for o in u.oturumlar %}<tr><td>{{ o.bot_id }}</td><td>{{ o.step }}</td><td>{{ o.proje or '' }}</td><td>{{ o.guncelleme }}</td></tr>{% else %}<tr><td colspan="4">Açık oturum yok.</td></tr>{% endfor %}</table></div>{% endblock %}
+{% extends "base.html" %}
+{% block baslik %}Telegram kullanıcısı {{ u.id }} — Kanıt Paneli{% endblock %}
+{% block icerik %}
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">Bot yönetimi</p><h1>{{ u.first_name or u.username or ('Telegram kullanıcısı #' ~ u.id) }}</h1><p>Telegram ID <code>{{ u.id }}</code>{% if u.username %} · @{{ u.username }}{% endif %} · Botla ilgili durum ve açık oturumlar.</p></div>
+  <div class="baslik-eylemler"><a class="btn birincil" href="{{ url_for('telegram_kayitlari',tg_id=u.id) }}">Kişinin kanıtları</a><a class="btn" href="{{ url_for('bot_sayfasi',q=u.id) }}">Bot yönetimine dön</a></div>
+</section>
+<div class="iki-kolon">
+<section class="kart" aria-labelledby="durum-baslik">
+  <h2 id="durum-baslik">Bot durumu</h2>
+  <dl class="deger-liste">
+    <dt>Onay</dt><dd>{% if u.onayli %}<span class="durum-etiket onayli">Onaylı</span>{% else %}<span class="durum-etiket notr">Onaysız</span>{% endif %}{% if u.onay_tarihi %} <small>{{ u.onay_tarihi }}</small>{% endif %}</dd>
+    <dt>Engel</dt><dd>{% if u.engelli %}<span class="durum-etiket silinen">Engelli</span>{% if u.engel_sebep %} <small>{{ u.engel_sebep }}</small>{% endif %}{% else %}Yok{% endif %}</dd>
+    <dt>Hatalı deneme</dt><dd>{{ u.deneme }}</dd>
+    <dt>Son görülme</dt><dd>{{ u.last_seen or '—' }}</dd>
+    <dt>Yeni kayıt sayacı</dt><dd>{{ u.kayit_sayisi }}</dd>
+  </dl>
+</section>
+<section class="kart" aria-labelledby="oturum-baslik">
+  <h2 id="oturum-baslik">Açık oturumlar</h2>
+  <div class="tablo-sarici"><table class="tablo kucuk" style="min-width:0"><thead><tr><th>Bot</th><th>Adım</th><th>Proje</th><th>Son işlem</th></tr></thead><tbody>{% for o in u.oturumlar %}<tr><td>{{ o.bot_id }}</td><td>{{ o.step }}</td><td>{{ o.proje or '' }}</td><td>{{ o.guncelleme }}</td></tr>{% else %}<tr><td colspan="4"><div class="bos-tablo">Açık oturum yok.</div></td></tr>{% endfor %}</tbody></table></div>
+</section>
+</div>
+{% endblock %}

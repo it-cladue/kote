@@ -1,32 +1,25 @@
-# Kanıt Paneli 2.1 — test sonuçları
+# Kanıt Paneli 2.2 — test sonuçları
 
-17 Ekim 2026 son kaynak koşusu: `python3 -m pytest -q tests` → **84 passed**, 19,71 saniye. Tek uyarı, kötü niyetli/bozuk ZIP kontrolü testinde bilerek oluşturulan yinelenen `content.xml` üyesinden gelir; bu dosya reddi test edilir. Python, JavaScript ve güncelleme Bash sözdizimleri doğrulandı.
+17 Ekim 2026 kaynak koşusu: `python3 -m pytest -q tests` → **94 passed**, yaklaşık 25 saniye (2.1'deki 84 teste 2.2 için 10 yeni test eklendi: `tests/test_genel_v22.py`). Tek uyarı, kötü niyetli/bozuk ZIP kontrolü testinde bilerek oluşturulan yinelenen `content.xml` üyesinden gelir; bu dosyanın reddi test edilir. Python (`ast`), JavaScript (`node --check`) ve güncelleme Bash (`bash -n`) sözdizimleri doğrulandı.
 
-## Doğrulanan kapsam
+## 2.2 ile eklenen doğrulamalar
 
 | Alan | Sonuç |
 |---|---|
-| Bot | İlk giriş, görsel/belge ve yazılı Lead; sıralı eski/yeni sorular; aktif ekranın sohbet altına gelmesi; eski/yanlış callback kurtarma; onay, geri/iptal ve kayıt tekrarının önlenmesi |
-| Gyazo | Kalıcı iş kuyruğu, arka plan yükleme, kayıt bağlanmadan bildirim üretmeme, belirsiz sonuç koruması; görsel değişirse linkin uygulanmaması ve yanlış başarı söylememesi |
-| Dinamik katalog | Yeni aktif proje seçim/callback/final kaydına kadar işler; proje-kategori üyeliği, sıralı hazır/özel soru ve değişmez eski soru görüntüsü korunur |
-| Panel | CSRF, oturum/parola güvenliği, sürüm çatışması, onay/düzenleme/silme/geri alma, görünür onaylayan/geçmiş ve Lead ID/özel cevapların detay/raporda korunması |
-| Proje yetkisi | Kart, filtre, kategori, renk, profil, bildirim, görsel ve rapor kapsamı; değiştirilmiş proje/ID/form reddi; eski wildcard’ın gelecekteki projeleri açmaması |
-| Bildirim ve konuşma | Kullanıcıya özel geçmiş, okunmuşluk ve yeni proje yetkisi; kayıt içi soru/yanıt/yorum, aktör/tarih ve karşı taraf bildirimi |
-| Dosya kontrolü | XLSX, CSV/TSV, ODS, TXT ID/tablo; ayraç/kodlama/sayfa/başlık değişimi, gerçek kimlik eşleştirme, sıfırlar, eksik/boş/belirsiz/çoklu sonuç, kapsam ve indirme yetkisi |
-| Eşzamanlı kullanım | Sekiz bağımsız oturum aynı kayıt sürümünü paralel düzenledi: yalnız bir yazma kabul edildi, yedi eski-sürüm isteği 409 ile reddedildi; kayıp güncelleme oluşmadı |
-| Özel ayar | Sahte anahtarlarla ayar birleştirme; HTTPS/port/oturum değeri korunması, yinelenen satır temizliği ve açık izinli özel dosyanın reddi |
-| Aktarım/arşiv | Önceki Excel aktarımının tekrar güvenliği, boş uzantılar, tahmini sahiplik, ikinci görsel, izinli kök ve belirsiz arşiv eşlemesi regresyonları |
+| Menü ve sürüm | Süperadmin menüsünde Ana sayfa / Kayıtlar / Çıktı / Kanıt Kontrolü / Bildirimler / İşlem Geçmişi / Yönetim bağlantıları; normal adminde yönetim bağlantılarının bulunmaması; sayfa başlıkları, `aria-current`, hamburger ve zil kutusu, `v=2.2.0` varlık sürümü, `/saglik` başlığı `2.2.0` |
+| BETA projesi | Yeni kurulumda ve BETA'sız 2.1 veritabanında bir kez eklenir (renk `#FFA500`, aktif, aktif kategoriler bağlı); admin pasife alır/yeniden adlandırırsa sonraki bağlantılar geri getirmez; mevcut proje satırları değişmez; kullanıcı formu, çıktı ve bot istatistiğinde katalogdan görünür |
+| Şifre kuralı | 7 karakter reddi, 8 karakter kabulü (hesap ekleme, güncelleme, `/sifre`, yönetim formu); `minlength="8"` ipuçları |
+| CLI | `admin-ekle --password-env`, `sifre-sifirla --password-env` (ilk girişte değişim) ve `--kalici` (kalıcı parola, hesap aktif); kısa parola ve boş ortam değişkeni hataları |
+| Hata sayfaları | 404'te başlık, açıklama ve **Geri dön**; tarayıcı isteğinde HTML, `fetch` isteğinde JSON (`ok:false, hata`); CSRF hatasının özel metni; 500'de "Beklenmeyen hata, kayıt no …", ham hata metninin kullanıcıya sızmaması, `sunucu_hata` denetim satırı ve JSON karşılığı |
+| Ana sayfa | KPI sayıları (bekleyen, bugün eklenen, bugün onaylanan, açık soru) ve **Son işlemler** listesi yalnız yetkili projeleri kapsar; yetkisiz projenin kodu, kişisi veya kaydı HTML'de yer almaz; süperadmin tüm hareketleri görür; yanıtlanan soru sayaçtan düşer |
+| Diğer sayfalar | Bildirimler, İşlem Geçmişi, Arşiv, Bot, Telegram kullanıcı durumu, ekleyen profili, Kanıt Kontrolü, Çıktı, Katalog, Kullanıcılar ve Şifre sayfaları 200 döner; sayfaya özel `<title>`, üst etiket + `h1` düzeni; satır içi `onclick` yok; giriş sayfası yeni kart düzeni |
 
-## Gerçek tarayıcı kontrolü
+2.1 kapsamı (bot, Gyazo, katalog, yetki, bildirim/konuşma, dosya kontrolü, eşzamanlı sürüm çatışması, özel ayar, aktarım/arşiv) değişmeden geçmektedir; `test_katalog` içindeki aktif proje sayısı BETA nedeniyle 6 → 7 olarak güncellendi.
 
-Üretim anahtarı ve verileri kullanılmadan ayrı test paneli açıldı. Yönetim dropdownunda üst `overflow:auto` nedeniyle kırpılma gerçek DOM ölçümüyle doğrulandı; `overflow:visible` düzeltmesinden sonra menüden katalog sayfasına tıklamayla geçildi. Yeni kategori bölümü açıldı; hazır şablon soruları, özel soru ekleme ve yukarı taşıma gerçek istemciyle doğrulandı. Katalog iki sütunlu grid ve proje seçimi flex düzeni ölçüldü. Eski CSS önbelleğini ayırmak için teslim varlıklarına sürüm parametresi eklendi.
+## Gerçek tarayıcı kontrolü (Playwright / Chromium)
 
-Tam sayfa otomatik yenileme kaldırılmıştır. Bildirim/sayaç yoklaması sürer; açık filtre ve yorum/düzenleme taslağı zorla silinmez. Arka plan Gyazo sonucu açık çalışma taslağını yenilemeyle ezmez.
+Geçici SQLite, örnek kayıtlar ve üç hesapla panel `waitress` üzerinde başlatıldı; masaüstü (1366×900) ve telefon (390×844) görünümlerinde açık ve koyu tema için giriş, ana sayfa, kayıtlar, çıktı, kanıt kontrolü, bildirimler, işlem geçmişi, katalog, kullanıcılar, bot, arşiv, şifre, 404 ve ekleyen profili sayfalarının ekran görüntüleri alındı. Yönetim açılır menüsünün tıklamayla açılıp ekran dışına taşmadığı ve Esc ile kapandığı, zil kutusunun açıldığı, telefonda hamburger menünün yönetim bağlantılarını gösterdiği ve kayıt ayrıntı penceresinin açıldığı gerçek DOM ölçümüyle doğrulandı. Telefonda yatay sayfa kaydırması yok. Konsolda yalnız bilerek açılan 404 sayfasının kendi "404" kaynağı görüldü; başka JavaScript hatası veya başarısız istek yok.
 
 ## Dış doğrulamalar ve sınırlamalar
 
-Bu 2.1 revizyonu henüz kullanıcının canlı sunucusuna uygulanmadı. Gerçek verilen Gyazo access token ile bu revizyonda yükleme yapılmadı; sağlayıcı testleri sahte HTTP/Telegram ile çalıştı. Dönüşümün canlı başarısı özel ayar birleştirilip sunucu botunda seçim yapılarak doğrulanacak. Önceki 2.0 gerçek Telegram #4361 kaydı bu yeni arayüzün canlı onayı sayılmaz.
-
-Gerçek 2 GB görsel arşivi geliştirme ortamına verilmedi; tüm gerçek arşivin eşleşme sayısı bilinmiyor. Sekiz oturumluk doğrulama kapasite/yük garantisi değildir. Sunucu kaynakları ve gerçek trafik ayrıca ölçülmelidir.
-
-Güncelleme Plesk/Nginx/Apache veya HTTPS sertifika yenilemesini değiştirmez. Özel anahtarlar, parolalar ve kullanıcı verileri herkese açık kaynak ZIP’inde değildir; özel ayar ayrı teslim edilir. Otomatik IP sertifika yenilemesi kullanıcı isteğiyle hâlâ ertelenmiştir.
+Bu 2.2 paketi henüz kullanıcının canlı sunucusuna uygulanmadı; `deploy/apply-update.sh` mantığı 2.1 ile aynıdır (yalnız başlık metni güncellendi). Gerçek Gyazo erişimi, gerçek Telegram botu ve 2 GB görsel arşivi geliştirme ortamında yoktur; ilgili testler sahte sağlayıcılarla çalışır. Tarayıcı kontrolü örnek veriyle yapıldı; canlı kurulumda eski CSS önbelleği için Ctrl+F5 gerekebilir (varlıklar `v=2.2.0` ile sürümlenmiştir).

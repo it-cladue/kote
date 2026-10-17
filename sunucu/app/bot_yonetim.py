@@ -281,6 +281,15 @@ def son_log(ayar, n=200, sadece_hata=False):
     return [_redact(s) for s in lines[-max(1, min(int(n), 500)):]]
 
 
+def _katalog_proje_kodlari(conn, ayar):
+    """Aktif katalog projeleri; katalog okunamazsa eski sabit liste."""
+    try:
+        from . import katalog
+        return [row["code"] for row in katalog.list_projects(conn, active_only=True)]
+    except Exception:
+        return list(ayar.get("PROJELER", []))
+
+
 def config(ayar):
     """Sadece sır içermeyen çalışma görünümü; config/.env dosyaları okunmaz."""
     conn = _baglan(ayar)
@@ -291,7 +300,7 @@ def config(ayar):
             "Veritabanı": os.path.basename(ayar["DB"]),
             "Medya kökü": os.path.basename(str(ayar.get("GORSEL_KLASOR", ""))) or "gorseller",
             "Azami görsel": f"{int(ayar.get('MAX_GORSEL_BYTES', 0)) // (1024 * 1024)} MiB",
-            "Projeler": ", ".join(ayar.get("PROJELER", [])),
+            "Projeler": ", ".join(_katalog_proje_kodlari(conn, ayar)),
             "Tekrar bekliyor": retry,
             "Ölü mektup": dead,
         }

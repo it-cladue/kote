@@ -44,8 +44,8 @@ def ekle(ayar, ad, yetki_metni, sifre, gorunen_ad=None, olusturan=None):
     ad = (ad or '').strip().lower()
     if not re.fullmatch(r'[a-z0-9_.]{1,40}', ad):
         raise ValueError('Kullanıcı adı a-z, rakam, nokta/alt çizgi olmalı.')
-    if len(sifre or '') < 12:
-        raise ValueError('Parola en az 12 karakter olmalı.')
+    if len(sifre or '') < 8:
+        raise ValueError('Parola en az 8 karakter olmalı.')
     hash_value = generate_password_hash(sifre)
     with connection(ayar) as conn, db.transaction(conn):
         role = _canonical(conn, yetki_metni)
@@ -62,8 +62,8 @@ def guncelle(ayar, ad, expected_version=None, islem_yapan=None, **alanlar):
     ad = str(ad or '').strip().lower()
     password_changed = 'sifre' in alanlar
     if password_changed:
-        if len(alanlar['sifre'] or '') < 12:
-            raise ValueError('Parola en az 12 karakter olmalı.')
+        if len(alanlar['sifre'] or '') < 8:
+            raise ValueError('Parola en az 8 karakter olmalı.')
         alanlar['sifre_hash'] = generate_password_hash(alanlar.pop('sifre'))
     allowed = {'sifre_hash', 'yetki', 'aktif', 'sifre_degistir', 'ad'}
     if any(k not in allowed for k in alanlar):

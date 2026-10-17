@@ -31,6 +31,10 @@ LEGACY_PROJECTS = (
     ("VI", "VI", "#7030A0"),
     ("GA", "GA", "#00B050"),
 )
+# 2.2: BETA projesi mevcut kurulumlara bir kez, eksikse eklenir. Admin sonradan
+# pasife alır veya yeniden adlandırırsa seed tekrar çalışmaz.
+BETA_MIGRATION_NAME = "katalog_2_2_beta"
+BETA_PROJECT = ("BETA", "BETA", "#FFA500")
 LEGACY_MODES = frozenset({"tek_uye", "ark_ana", "ana_only", "sessiz_tip"})
 ALLOWED_PRESETS = frozenset({"", "personel", "uye_id", "ana_uye_id", "lead_id", "tip"})
 
@@ -161,6 +165,7 @@ def ensure_schema(conn) -> None:
             "SELECT 1 FROM schema_migrations WHERE name=?", (MIGRATION_NAME,)
         ).fetchone() is None
         if not first:
+            _seed_beta_project(conn)
             return
 
         # Seed INSERT OR IGNORE'dur: yarım kalmış bir ilk migration tekrar
@@ -217,6 +222,43 @@ def ensure_schema(conn) -> None:
             "INSERT INTO schema_migrations(name,applied_at) VALUES(?,?)",
             (MIGRATION_NAME, _now()),
         )
+        _seed_beta_project(conn)
+
+
+def _seed_beta_project(conn) -> None:
+    """2.2 geçişi: BETA projesi yoksa aktif olarak ekler; varsa dokunmaz.
+
+    Tek seferliktir (schema_migrations kaydı). Seed anındaki aktif kategoriler
+    legacy seed ile aynı mantıkla BETA'ya bağlanır ki Telegram akışında proje
+    hemen kullanılabilsin. Mevcut proje/kategori satırları değiştirilmez.
+    """
+    if conn.execute(
+        "SELECT 1 FROM schema_migrations WHERE name=?", (BETA_MIGRATION_NAME,)
+    ).fetchone():
+        return
+    code, label, color = BETA_PROJECT
+    if conn.execute("SELECT 1 FROM projeler WHERE code=?", (code,)).fetchone() is None:
+        next_order = conn.execute(
+            "SELECT COALESCE(MAX(sort_order),0)+1 FROM projeler WHERE sort_order<1000"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT OR IGNORE INTO projeler(code,label,color,sort_order,aktif,revision) "
+            "VALUES(?,?,?,?,1,1)",
+            (code, label, color, next_order),
+        )
+        categories = conn.execute(
+            "SELECT code FROM kategoriler WHERE aktif=1 ORDER BY rowid"
+        ).fetchall()
+        for order, row in enumerate(categories, start=1):
+            conn.execute(
+                "INSERT OR IGNORE INTO proje_kategorileri"
+                "(proje_code,kategori_code,aktif,sort_order) VALUES(?,?,1,?)",
+                (code, row[0], order),
+            )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
+        (BETA_MIGRATION_NAME, _now()),
+    )
 
 
 def _normalise_project_code(code: Any) -> str:

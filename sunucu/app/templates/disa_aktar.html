@@ -1,32 +1,40 @@
 {% extends "base.html" %}
-{% block baslik %}Çıktı al (Excel) - Kanıt Paneli{% endblock %}
+{% block baslik %}Çıktı (Excel) — Kanıt Paneli{% endblock %}
 {% block icerik %}
-<div class="kart" style="max-width: 760px">
-  <h2>Çıktı al: Excel</h2>
-  <p class="kucukyazi">Seçtiğiniz tarih aralığında eklenen kanıtlar sütun sütun bir Excel dosyasına yazılır ve indirilir (Proje, Kategori, Personel, Üye ID, Ana ID, Tür, Tarih, Link, Onay, Onaylayan, Ekleyen, Açıklama…). İkinci sayfada proje özeti bulunur.</p>
-  <form method="get" action="{{ url_for('disa_aktar_xlsx') }}">
-    <div class="filtre-grup" style="margin-bottom:10px">
-      <span class="etiket">Proje</span>
-      {% for p in izinli %}
-      <label class="cip" style="--renk: {{ renk(p) }}; --cipyazi: {{ metin_rengi(renk(p)) }}"><input type="checkbox" name="proje" value="{{ p }}"><span>{{ p }}</span></label>
-      {% endfor %}
-      <small>(hiçbiri seçili değilse hepsi)</small>
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">Raporlama</p><h1>Excel çıktısı al</h1><p>Seçtiğiniz proje, tarih ve durum koşullarına uyan kayıtlar sütun sütun bir Excel dosyasına yazılır ve indirilir. İkinci sayfada proje özeti bulunur.</p></div>
+  <div class="baslik-eylemler"><a class="btn" href="{{ url_for('excel_kontrol') }}">Kanıt Kontrolü</a></div>
+</section>
+<div class="iki-kolon">
+<section class="kart" aria-labelledby="cikti-baslik">
+  <h2 id="cikti-baslik">Çıktı koşulları</h2>
+  <form method="get" action="{{ url_for('disa_aktar_xlsx') }}" id="cikti-form">
+    <fieldset class="proje-secimi" style="padding:0 0 14px;margin-bottom:14px"><legend>Proje</legend>
+      <div class="proje-secim-satiri">
+        <div class="proje-cipleri">{% for p in izinli %}<label class="cip" style="--renk: {{ renk(p) }}; --cipyazi: {{ metin_rengi(renk(p)) }}"><input type="checkbox" name="proje" value="{{ p }}"><span>{{ p }}</span></label>{% endfor %}</div>
+        <small>Hiçbiri seçili değilse tüm yetkili projeler dahil edilir.</small>
+      </div>
+    </fieldset>
+    <div class="form-iki">
+      <label for="cikti-tarih1">Başlangıç<input id="cikti-tarih1" type="date" name="tarih1" value="{{ tarih1 }}"></label>
+      <label for="cikti-tarih2">Bitiş<input id="cikti-tarih2" type="date" name="tarih2" value="{{ tarih2 }}"></label>
+      <label for="cikti-durum">Durum<select id="cikti-durum" name="durum"><option value="hepsi">Hepsi</option><option value="onayli">Sadece onaylı</option><option value="bekleyen">Sadece onay bekleyen</option><option value="silinen">Sadece silinen</option></select></label>
+      <label for="cikti-kategori">Kategori<select id="cikti-kategori" name="kategori"><option value="">Tüm kategoriler</option>{% for kat in kategoriler %}<option value="{{ kat }}">{{ kat }}</option>{% endfor %}</select></label>
+      <label for="cikti-q">Personel / üye ID<input id="cikti-q" name="q" placeholder="İsteğe bağlı" autocomplete="off"></label>
+      <label for="cikti-ekleyen">Ekleyen<input id="cikti-ekleyen" name="ekleyen" placeholder="Telegram adı veya ID (isteğe bağlı)"></label>
     </div>
-    <div class="filtre-grup" style="margin-bottom:10px">
-      <label style="margin:0">Başlangıç<input type="date" name="tarih1" value="{{ tarih1 }}"></label>
-      <label style="margin:0">Bitiş<input type="date" name="tarih2" value="{{ tarih2 }}"></label>
-      <label style="margin:0">Durum<select name="durum"><option value="hepsi">Hepsi</option><option value="onayli">Sadece onaylı</option><option value="bekleyen">Sadece onay bekleyen</option><option value="silinen">Sadece silinen</option></select></label>
-      <label style="margin:0">Kategori<select name="kategori"><option value="">Tümü</option>{% for kat in kategoriler %}<option value="{{ kat }}">{{ kat }}</option>{% endfor %}</select></label>
-    </div>
-    <div class="filtre-grup" style="margin-bottom:10px">
-      <input name="q" placeholder="Personel kodu / üye ID (isteğe bağlı)" class="arama">
-      <input name="ekleyen" placeholder="Ekleyen (isteğe bağlı)">
-      <label class="cip" style="--renk:#999;--cipyazi:#fff"><input type="checkbox" name="tarihsiz" value="1"><span>Tarihsiz kayıtlar</span></label>
-    </div>
-    <button class="btn birincil">⬇ Excel indir</button>
+    <label class="satir-label"><input type="checkbox" name="tarihsiz" value="1" id="cikti-tarihsiz"> Yalnız tarihsiz (eski) kayıtlar</label>
+    <p class="yardim-metni">Tarih, botun kaydı yazdığı andır. "Tarihsiz kayıtlar" seçeneği tarih sütunu boş eski satırları listeler ve tarih aralığıyla birlikte kullanılamaz.</p>
+    <div class="form-eylemler"><button class="btn birincil">Excel indir (.xlsx)</button><a class="btn" href="{{ url_for('kayitlar', durum='hepsi') }}">Önce kayıtlara bak</a></div>
   </form>
-  <p class="kucukyazi" style="margin-top:12px">Not: Tarih, botun kaydı yazdığı andır. "Tarihsiz kayıtlar" seçeneği eski (tarih sütunu boş) satırları listeler; tarih aralığıyla birlikte kullanılamaz.</p>
+</section>
+<section class="kart" aria-labelledby="cikti-icerik-baslik">
+  <h2 id="cikti-icerik-baslik">Dosyada neler var?</h2>
+  <p class="kucukyazi">Kayıtlar sayfası: Kayıt ID, Proje, Kategori, Personel, Üye ID, Ana üye ID, Tür, Tarih, KT (onay), Onaylayan, Ekleyen, Lead ID, Eski link, Açıklama, Ek not ve ek soru cevapları.</p>
+  <p class="kucukyazi">Proje özeti sayfası: proje başına toplam kayıt, onaylı ve onay bekleyen sayıları.</p>
+  <p class="kucukyazi">Formül gibi başlayan değerler güvenlik için metin olarak yazılır. Yalnız yetkili olduğunuz projeler dosyaya girer.</p>
+</section>
 </div>
 {% endblock %}
 
-{% block script %}<script>(function(){var cb=document.querySelector('[name=tarihsiz]');cb.addEventListener('change',function(){document.querySelector('[name=tarih1]').disabled=cb.checked;document.querySelector('[name=tarih2]').disabled=cb.checked;});})();</script>{% endblock %}
+{% block script %}<script>(function(){var cb=document.getElementById('cikti-tarihsiz');if(!cb)return;function sync(){document.getElementById('cikti-tarih1').disabled=cb.checked;document.getElementById('cikti-tarih2').disabled=cb.checked;}cb.addEventListener('change',sync);sync();})();</script>{% endblock %}

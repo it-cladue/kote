@@ -78,13 +78,15 @@ def test_migration_two_times_seeds_legacy_and_keeps_existing_records(legacy_conn
     historical = katalog.get_project(conn, "TARIHSEL")
     assert historical["aktif"] == 0 and historical["color"] == "#999999"
     assert conn.execute("SELECT proje,kategori,kategori_code,kategori_mode FROM kayitlar WHERE anahtar='legacy-1'").fetchone()[0] == "TARIHSEL"
-    assert len(katalog.list_projects(conn, active_only=True)) == 6
+    # 2.2: BETA projesi geçişte eksikse aktif olarak eklenir (6 legacy + BETA).
+    assert len(katalog.list_projects(conn, active_only=True)) == 7
+    assert katalog.get_project(conn, "BETA")["color"] == "#FFA500"
 
     # Dört legacy mode soru tanımı üretir; sessiz/telesekreter değerleri korunur.
     assert [question["key"] for question in katalog.questions(conn, "ark")] == ["personel", "uye_id", "ana_uye_id"]
     assert katalog.questions(conn, "dds")[-1]["options"] == ["sessiz", "telesekreter"]
     active_categories = conn.execute("SELECT COUNT(*) FROM kategoriler WHERE aktif=1").fetchone()[0]
-    assert conn.execute("SELECT COUNT(*) FROM proje_kategorileri WHERE aktif=1").fetchone()[0] == 6 * active_categories
+    assert conn.execute("SELECT COUNT(*) FROM proje_kategorileri WHERE aktif=1").fetchone()[0] == 7 * active_categories
     assert {row["name"] for row in conn.execute("PRAGMA table_info(kayitlar)")} >= {
         "kategori_soru_surumu", "soru_anlik_json", "cevaplar_json"
     }

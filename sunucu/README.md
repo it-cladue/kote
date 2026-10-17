@@ -1,6 +1,6 @@
-# Kanıt Paneli 2.1 — mevcut sunucuda güvenli güncelleme
+# Kanıt Paneli 2.2 — mevcut sunucuda güvenli güncelleme
 
-Bu paket Telegram botu ile web kontrol panelinin 2.1 kaynak sürümüdür. Senin mevcut Ubuntu/Plesk kurulumun için hazırlanmıştır. Kanıt ekleme yalnız Telegram’dan yapılır; site inceleme, onay, yorum/soru, bildirim, kullanıcı ve katalog yönetimi içindir. Excel canlı kayıt kaynağı değildir.
+Bu paket Telegram botu ile web kontrol panelinin 2.2 kaynak sürümüdür. 2.2, 2.1 üzerine kullanım kolaylığı ve modern görünüm güncellemesidir; değişiklik listesi `DEGISIKLIKLER_v2.2.md` dosyasındadır. Senin mevcut Ubuntu/Plesk kurulumun için hazırlanmıştır. Kanıt ekleme yalnız Telegram’dan yapılır; site inceleme, onay, yorum/soru, bildirim, kullanıcı ve katalog yönetimi içindir. Excel canlı kayıt kaynağı değildir.
 
 ## Mevcut kurulum
 
@@ -20,10 +20,10 @@ Plesk’in Nginx/Apache dosyalarını, portlarını veya servislerini yeniden ku
 
 ## 1. Güncelleme
 
-PuTTY root oturumunda ZIP’i ayrı bir klasöre indir ve aç. Aşağıdaki örnekte açılmış kaynak klasörü `/root/kanit-kurulum/guncelleme21/KanitPaneli_Sunucu_v2.1`dir.
+PuTTY root oturumunda ZIP’i ayrı bir klasöre indir ve aç. Aşağıdaki örnekte açılmış kaynak klasörü `/root/kanit-kurulum/guncelleme22/KanitPaneli_Sunucu_v2.2`dir.
 
 ```bash
-cd /root/kanit-kurulum/guncelleme21/KanitPaneli_Sunucu_v2.1
+cd /root/kanit-kurulum/guncelleme22/KanitPaneli_Sunucu_v2.2
 bash deploy/apply-update.sh --dry-run
 ```
 
@@ -46,7 +46,7 @@ curl -fsS http://127.0.0.1:18080/saglik
 systemctl status kanit-web kanit-bot --no-pager -l
 ```
 
-`OK` iç servis sağlığıdır; dış HTTPS erişimini tarayıcıdaki mevcut IP adresinden kontrol et. Daha önce kapalı olan bot yardımcı tarafından kendiliğinden başlatılmaz. Bot ayarların doluysa ve gerçekten başlatmak istiyorsan `systemctl start kanit-bot` kullan. Aynı Telegram anahtarıyla başka PowerShell, Docker veya test botu süreci çalıştırma.
+`OK` iç servis sağlığıdır (yanıt başlığı `X-Kanit-Paneli: 2.2.0`); dış HTTPS erişimini tarayıcıdaki mevcut IP adresinden kontrol et. Tarayıcı eski görünümü gösteriyorsa sayfayı Ctrl+F5 ile yenile. Daha önce kapalı olan bot yardımcı tarafından kendiliğinden başlatılmaz. Bot ayarların doluysa ve gerçekten başlatmak istiyorsan `systemctl start kanit-bot` kullan. Aynı Telegram anahtarıyla başka PowerShell, Docker veya test botu süreci çalıştırma.
 
 ## 2. Telegram akışı
 
@@ -71,21 +71,37 @@ systemctl try-restart kanit-bot
 
 Girişte karakter görünmemesi normaldir. Yardımcı yalnız `GYAZO_TOKEN` satırını değiştirir; HTTPS/port/Telegram/parola ayarlarını korur. Kaynak pakette gerçek anahtar yoktur. Gyazo’ya gönderim dış servise yüklemedir; link görünürlüğünü dikkate al. API yetki, erişim, hız limiti veya ağ hatasını panelin işlem geçmişinde kontrol et. Gerçek hesabın başarısı kullanıcı sunucusunda dönüşüm seçilerek doğrulanmalıdır; otomatik testte sahte sağlayıcı kullanılır.
 
-## 4. Admin ve proje sınırı
+## 4. Admin parolası ve sunucu komutları
+
+Panel şifre kuralı **en az 8 karakter**dir. Sunucuda admin parolasını kalıcı olarak sıfırlamak (ilk girişte değiştirme zorunluluğu olmadan):
+
+```bash
+cd /opt/kanit-paneli && KANIT_PW=telecc123 .venv/bin/python -m app.cli sifre-sifirla admin --password-env KANIT_PW --kalici
+```
+
+`KANIT_PW` yerine istediğin parolayı yaz; parola komut geçmişinde görünmesin diye ortam değişkeniyle verilir. `--kalici` olmadan kullanıcı ilk girişte şifresini değiştirmek zorunda kalır. İlk hesabı açmak için:
+
+```bash
+cd /opt/kanit-paneli && KANIT_PW=GucluParola1 .venv/bin/python -m app.cli admin-ekle admin --password-env KANIT_PW
+```
+
+`--password-env` verilmezse komut parolayı iki kez sorar. Diğer komutlar: `durum`, `yedekle <hedef> [--gorseller]`, `arsiv-tara`, `ice-aktar <kaynak>`.
+
+## 5. Admin ve proje sınırı
 
 **Yönetim → Kullanıcılar** yalnız süperadmin içindir. Yeni normal admin için projeleri açıkça seç; okuma ve kontrol/onay/yorum, düzenleme, silme gibi yetkileri ver. Normal admin yalnız atanmış ve okuma izni olan projeleri görür. Diğer proje adı, renk, kategori, filtre, sayaç, kayıt, profil, bildirim, görsel ve raporlar görünmez. Değiştirilmiş URL/ID veya form da erişim sağlamaz.
 
 Yeni proje normal adminlere otomatik açılmaz. Süperadmin seçimi ayrı ve açık yapılır. Son aktif süperadmin kapatılamaz veya düşürülemez. Yetki/parola değişimi eski oturumları geçersiz kılar; eski açık kullanıcı düzenleme formu yeni yetkiyi geri açamaz.
 
-CLI’de `admin` tam süperadmin; `OF` yalnız OF tam işlemdir; `OF:oku` salt okuma; `OF:oku,kt` okuma/onay/yorumdur. `*` yeni roller için geçerli değildir. Eski wildcard proje rolleri geçişte o anki projelerin açık listesine çevrilir; gelecekteki projeleri otomatik açmaz.
+CLI’de `admin` tam süperadmin; `OF` yalnız OF tam işlemdir; `OF:oku` salt okuma; `OF:oku,kt` okuma/onay/yorumdur. Güncelleme ile **BETA** projesi (turuncu) katalogda bir kez otomatik oluşur; normal adminlere açmak için Kullanıcılar ekranından yetki ver. `*` yeni roller için geçerli değildir. Eski wildcard proje rolleri geçişte o anki projelerin açık listesine çevrilir; gelecekteki projeleri otomatik açmaz.
 
-## 5. Proje, kategori ve sorular
+## 6. Proje, kategori ve sorular
 
 **Yönetim → Proje / Kategoriler** ekranında **Yeni proje ekle** veya **Yeni kategori ekle** bölümünü aç. Projeye kalıcı kod, görünen ad ve renk ver. Kategoriye bağlı projeleri seç; hazır soru şablonu kullan veya Personel/Üye ID/Ana üye ID/Lead ID/Tip sorularını tek tek ekle. Kendi metin veya seçim sorunu ekleyebilirsin; seçim seçenekleri satır başına bir değerdir. Yukarı/aşağı düğmeleri sırayı değiştirir.
 
 Mevcut kayıtları bozmamak için kodlar değiştirilmez; pasife alma kullanılır. Soru listesi ve cevaplar kayıt anında saklanır. Sonradan kategori sorusu değişse bile eski kanıtın sorusu/cevabı kaybolmaz. Özel cevaplar kayıt detayında ve dışa aktarımda görünür. Standart Personel/Üye/Lead ID düzenlemesi ilgili soru cevabını da eşitler. Devam eden akış kendi soru anlık görüntüsünü kullanır.
 
-## 6. Kayıtlar, bildirim ve işlem geçmişi
+## 7. Kayıtlar, bildirim ve işlem geçmişi
 
 Kayıtlar ekranında yalnız yetkili proje çipleri vardır. Kategori seçimi seçilen projelere bağlıdır. Ara, durum, tarih ve ekleyen filtreleriyle tablo/kart/galeri kullanılabilir. Otomatik tam sayfa yenilemesi yoktur. Arka plan yoklaması yalnız bildirim/sayaç ve değişiklik uyarısı getirir; **Yenile** kontrolüyle sonuçları kendin güncellersin. Filtre, açık yorum taslağı ve odak korunur. Çakışan kayıt sürümü sessizce ezilmez; güncel kayıtla yeniden deneme istenir.
 
@@ -95,7 +111,7 @@ Masaüstü bildirimi tarayıcı izni ve panel açıkken çalışır; site kapal�
 
 Ekleyenin kanıt profili güvenilir Telegram kayıtlarıyla proje dağılımını ve beklenen ana proje dışı kayıtları gösterir. Tahmini eski eşleştirme kesin sahiplik diye sunulmaz. Proje dışı olmak tek başına hatalı kanıt değildir.
 
-## 7. Kanıt Kontrolü: XLSX, CSV/TSV, ODS, TXT
+## 8. Kanıt Kontrolü: XLSX, CSV/TSV, ODS, TXT
 
 Bu ekran **kayıt eklemez**; yalnız izinli veritabanı kayıtlarını karşılaştırır. Dosya yükle, önizlemeyi kontrol et, gerekirse kodlama/ayraç/başlık satırı ve sayfayı değiştir. Başlık satırı `0` başlıksız tablo içindir. TXT’de **her satır tek ID** ve **ayraçlı tablo** modları ayrıdır; ID modunda virgül/noktalı virgül ID’nin parçası olarak korunur.
 
@@ -103,15 +119,15 @@ Sütunları Proje/Kategori/Personel/Üye ID/Ana üye ID/Tür/Lead ID’ye bağla
 
 Limitler: 12 MB yükleme, 50.000 kaynak satırı, 20.000 ilgili karşılaştırma satırı, 512 sütun. Ekran sayfa başına 100 sonuç ve satırda ilk 20 eşleşme ID’sini gösterir; indirilen rapor saklanan tam sonucu (satır başına en çok 1.000 ID; kırpma uyarısıyla) içerir. Kontrol zamanı UTC, kapsam ve seçenekler rapora yazılır. Eski rapor indirilirken de güncel proje yetkisi doğrulanır. Özel geçici kontrol dosyaları 24 saat sonra temizlenir.
 
-## 8. Eski kayıt ve 2 GB arşiv
+## 9. Eski kayıt ve 2 GB arşiv
 
 Bu güncelleme mevcut veritabanını sıfırlamaz. Henüz eski verini taşımadıysan orijinal XLSX/bot günlüklerini ayrı bir eski-veri klasörüne koyup bir defalık `app.cli ice-aktar` komutuyla taşı. CSV/ODS/TXT kontrol yüklemesi veri taşıma veya kanıt ekleme değildir.
 
 `telegram_gorseller` klasörünü alt dizin/indeks düzenini koruyarak SFTP veya sunucu dosya yöntemiyle veri dizinine taşı. Arşivi herkese açık `static`/Plesk `httpdocs` dizinine koyma. Süperadmin arşiv taraması ve belirsiz eşlemeyi elle bağlama kullanabilir. Gerçek 2 GB arşivin tamamı bu geliştirme ortamına verilmediği için gerçek eşleşme sayısı doğrulanmış değildir.
 
-## 9. Test ve güvenlik
+## 10. Test ve güvenlik
 
-`TEST_SONUCLARI.md` ve `DEGISIKLIKLER_v2.1.md` yapılan düzeltmeleri ve doğrulama sınırlarını ayırır. Testler geçici SQLite, sahte Telegram/Gyazo ve izole arayüz verisiyle çalışır. Gerçek sunucuya bu paket kendiliğinden yüklenmez.
+`TEST_SONUCLARI.md`, `DEGISIKLIKLER_v2.2.md` ve `DEGISIKLIKLER_v2.1.md` yapılan düzeltmeleri ve doğrulama sınırlarını ayırır. Testler geçici SQLite, sahte Telegram/Gyazo ve izole arayüz verisiyle çalışır. Gerçek sunucuya bu paket kendiliğinden yüklenmez.
 
 ```bash
 python -m pip install -r requirements.txt pytest
@@ -133,4 +149,4 @@ chmod 600 /root/kanit-kurulum/ozel.env
 
 Yardımcı yalnız yedi özel alanı birleştirir; port/HTTPS/veri yolu/oturum anahtarı ve diğer mevcut ayarlar değişmez. Ayar yedeği özel klasörde tutulur; terminale sır yazdırılmaz. Başarıdan sonra uygulama güncellemesi veya mevcut aktif uygulama servislerinin yeniden başlaması yeni ortamı yükler. Ayrı HTTPS/Plesk servisine dokunulmaz.
 
-Gönderdiğin JSON eski yapılandırma biçimidir; Python servisi bu JSON’u değil `.env` dosyasını okur. `GYAZO_BAKIM=1` son verdiğin haliyle özel dosyada tutulmuştur, ancak incelediğimiz eski PowerShell kaynağı ve yeni 2.1 kaynak bu alanı kullanmaz. Bu yüzden tek başına bu değer dönüşüm hatasının kanıtı değildir; Gyazo access token’ın gerçek `.env` içine taşınması ve erişimin doğrulanması gerekir.
+Gönderdiğin JSON eski yapılandırma biçimidir; Python servisi bu JSON’u değil `.env` dosyasını okur. `GYAZO_BAKIM=1` son verdiğin haliyle özel dosyada tutulmuştur, ancak incelediğimiz eski PowerShell kaynağı ve yeni 2.1/2.2 kaynak bu alanı kullanmaz. Bu yüzden tek başına bu değer dönüşüm hatasının kanıtı değildir; Gyazo access token’ın gerçek `.env` içine taşınması ve erişimin doğrulanması gerekir.

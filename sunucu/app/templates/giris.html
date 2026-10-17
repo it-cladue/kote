@@ -3,20 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script src="{{ url_for('static', filename='tema.js') }}"></script>
-<title>Giriş - Kanıt Paneli</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='stil.css') }}">
+<meta name="color-scheme" content="dark light">
+<script src="{{ url_for('static', filename='tema.js',v='2.2.0') }}"></script>
+<title>Giriş — Kanıt Paneli</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="{{ url_for('static', filename='stil.css',v='2.2.0') }}">
 </head>
 <body class="giris-sayfa">
-<button type="button" class="btn giris-tema" data-tema-toggle>Koyu tema</button>
-<form class="giris-kutu" method="post" autocomplete="off">
-  <h1>Kanıt Paneli</h1>
-  {% with mesajlar = get_flashed_messages() %}{% if mesajlar %}<div class="bilgi">{% for m in mesajlar %}{{ m }}<br>{% endfor %}</div>{% endif %}{% endwith %}
-  {% if hata %}<div class="hata">{{ hata }}</div>{% endif %}
-  <label>Kullanıcı adı<input name="kullanici" required autofocus autocapitalize="off"></label>
-  <label>Şifre<input name="sifre" type="password" required></label>
+<button type="button" class="btn kucuk giris-tema" data-tema-toggle>Koyu tema</button>
+<form class="giris-kutu" method="post" autocomplete="off" aria-labelledby="giris-baslik">
+  <div class="giris-logo"><span class="marka-isaret" aria-hidden="true">K</span><h1 id="giris-baslik">Kanıt Paneli</h1><p>Kanıt kayıtlarını inceleme, onay ve yönetim ekranı</p></div>
+  {% with mesajlar = get_flashed_messages() %}{% if mesajlar %}<div class="bilgi" role="status">{% for m in mesajlar %}{{ m }}<br>{% endfor %}</div>{% endif %}{% endwith %}
+  {% if hata %}<div class="hata" role="alert">{{ hata }}</div>{% endif %}
+  <label for="giris-kullanici">Kullanıcı adı<input id="giris-kullanici" name="kullanici" required autofocus autocapitalize="off" autocomplete="username" spellcheck="false"></label>
+  <label for="giris-sifre">Şifre<input id="giris-sifre" name="sifre" type="password" required autocomplete="current-password"></label>
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <button type="submit" class="btn birincil genis">Giriş yap</button>
+  <p class="giris-alt">Kanıt ekleme yalnız Telegram botundan yapılır. Hesap için süperadmine başvurun.</p>
 </form>
 </body>
 </html>

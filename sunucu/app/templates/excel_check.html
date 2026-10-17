@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block baslik %}Kanıt Kontrolü - Kanıt Paneli{% endblock %}
+{% block baslik %}Kanıt Kontrolü — Kanıt Paneli{% endblock %}
 {% block icerik %}
 {% set secenekler = options|default({}, true) %}
 {% set secili_sayfa = secenekler.get('sheet', '') %}
@@ -16,16 +16,17 @@
   'parse_error': 'Ayrıştırma hatası'
 } %}
 
-<section class="kart" aria-labelledby="kanit-kontrol-baslik">
-  <h2 id="kanit-kontrol-baslik">Kanıt Kontrolü</h2>
-  <p class="kucukyazi">Bu araç <strong>kanıt eklemez</strong>, kayıt oluşturmaz veya değiştirmez. Dosyanız yalnızca izinli mevcut kayıtlarla salt-okunur karşılaştırılır.</p>
-  {% if hata %}<p class="uyari-serit" role="alert">{{ hata }}</p>{% endif %}
-
-  <form method="post" action="{{ url_for('excel_kontrol') }}" enctype="multipart/form-data" class="filtre-grup">
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">Karşılaştırma aracı</p><h1 id="kanit-kontrol-baslik">Kanıt Kontrolü</h1><p>Elinizdeki listeyi (XLSX, ODS, CSV, TSV, TXT) yetkili olduğunuz mevcut kayıtlarla karşılaştırır. Bu araç <strong>kanıt eklemez</strong>, kayıt oluşturmaz veya değiştirmez.</p></div>
+  <div class="baslik-eylemler"><a class="btn" href="{{ url_for('disa_aktar_sayfasi') }}">Excel çıktısı al</a></div>
+</section>
+<section class="kart" aria-labelledby="yukleme-baslik">
+  <h2 id="yukleme-baslik" class="adim-baslik"><span class="adim-no">1</span> Kontrol dosyasını yükleyin</h2>
+  {% if hata %}<div class="hata" role="alert">{{ hata }}</div>{% endif %}
+  <form method="post" action="{{ url_for('excel_kontrol') }}" enctype="multipart/form-data" class="yukleme-kutusu">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="islem" value="yukle">
-    <label for="excel-kaynak">Kontrol dosyası</label>
-    <input id="excel-kaynak" type="file" name="excel" accept=".xlsx,.ods,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet,text/csv,text/tab-separated-values,text/plain" required>
+    <label for="excel-kaynak">Kontrol dosyası<input id="excel-kaynak" type="file" name="excel" accept=".xlsx,.ods,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet,text/csv,text/tab-separated-values,text/plain" required></label>
     <button type="submit" class="btn birincil">Yükle ve incele</button>
   </form>
   <p class="kucukyazi"><strong>Desteklenenler:</strong> XLSX, ODS, CSV, TSV ve TXT. En çok 12 MB; XLSX/ODS açılmış içerik en çok 128 MB ve en çok 20.000 kontrol satırı. XLS/XLSM/XLSB desteklenmez. ID başında sıfır varsa sütunu <strong>Metin</strong> yapın; sayı/tarih biçimli ID kesin yok sayılmaz.</p>
@@ -33,10 +34,10 @@
 
 {% if workbook and workbook.get('sheets') %}
 <section class="kart" aria-labelledby="onizleme-baslik">
-  <h2 id="onizleme-baslik">1. Önizleme ve ayrıştırma seçenekleri</h2>
+  <h2 id="onizleme-baslik" class="adim-baslik"><span class="adim-no">2</span> Önizleme ve ayrıştırma seçenekleri</h2>
   <p class="kucukyazi">Başlığı tahmin etmiyoruz: başlık satırını açıkça seçin. <strong>0</strong>, başlık yok anlamına gelir.</p>
   {% if workbook.get('warnings') %}
-  <ul class="uyari-serit">{% for uyari in workbook.get('warnings', []) %}<li>{{ uyari }}</li>{% endfor %}</ul>
+  <ul class="bilgi uyari">{% for uyari in workbook.get('warnings', []) %}<li>{{ uyari }}</li>{% endfor %}</ul>
   {% endif %}
   <form method="post" action="{{ url_for('excel_kontrol') }}" id="kanit-inceleme-form" class="filtre-grup">
     <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -81,7 +82,7 @@
 </section>
 
 <section class="kart" aria-labelledby="eslestirme-baslik">
-  <h2 id="eslestirme-baslik">2. Kapsam ve eşleştirme</h2>
+  <h2 id="eslestirme-baslik" class="adim-baslik"><span class="adim-no">3</span> Kapsam ve eşleştirme</h2>
   <p class="kucukyazi">En az bir anahtar alan (Personel, Üye ID, Ana üye ID veya Lead ID) zorunludur. Seçilen alanların tamamı eşleşmelidir. Serbest dosya başlığı hiçbir zaman veritabanı alanı değildir.</p>
   <form method="post" action="{{ url_for('excel_kontrol') }}" id="excel-kontrol-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -148,14 +149,14 @@
   </form>
 </section>
 {% elif upload_ready %}
-<section class="kart"><p role="alert">Yüklenen kaynak önizlenemedi. Desteklenen biçimde yeni bir dosya seçin.</p></section>
+<section class="kart"><div class="hata" role="alert">Yüklenen kaynak önizlenemedi. Desteklenen biçimde yeni bir dosya seçin.</div></section>
 {% endif %}
 
 {% if report %}
 {% set meta = report.get('metadata', {}) %}
 <section class="kart" aria-labelledby="sonuc-baslik">
   <div class="sekme-satir">
-    <div><h2 id="sonuc-baslik">3. Kontrol sonucu</h2><p class="kucukyazi">Toplam {{ report.total|default(0) }} ilgili satır; {{ meta.get('skipped_blank_rows', 0) }} boş/boolean satır atlandı.</p></div>
+    <div><h2 id="sonuc-baslik" class="adim-baslik"><span class="adim-no">4</span> Kontrol sonucu</h2><p class="kucukyazi">Toplam {{ report.total|default(0) }} ilgili satır; {{ meta.get('skipped_blank_rows', 0) }} boş/boolean satır atlandı.</p></div>
     <div class="gorunumler"><a class="btn" href="{{ url_for('excel_kontrol_indir') }}">Tüm raporu indir</a><a class="btn" href="{{ url_for('excel_kontrol_indir', eksik=1) }}">Yalnız kesin bulunamayanlar</a></div>
   </div>
   {% if meta %}
@@ -166,7 +167,7 @@
   </dl>
   {% endif %}
   <div class="filtre-grup" aria-label="Sonuç sayaçları">
-    <span class="rozet">Bulundu: {{ report.found|default(0) }}</span><span class="rozet">Kesin yok: {{ report.missing|default(0) }}</span><span class="rozet">Birden çok: {{ report.multiple|default(report.ambiguous|default(0)) }}</span><span class="rozet">İncelenmeli/geçersiz: {{ report.invalid|default(0) }}</span>
+    <div class="sayac-rozetleri"><span class="rozet bulundu">Bulundu: {{ report.found|default(0) }}</span><span class="rozet yok">Kesin yok: {{ report.missing|default(0) }}</span><span class="rozet coklu">Birden çok: {{ report.multiple|default(report.ambiguous|default(0)) }}</span><span class="rozet">İncelenmeli / geçersiz: {{ report.invalid|default(0) }}</span></div>
     <form method="get"><label for="rapor-durum-filtre">Duruma göre göster</label><select id="rapor-durum-filtre" name="rapor_durum"><option value="">Tüm durumlar</option>{% for kod, ad in durumlar.items() %}<option value="{{ kod }}" {{ 'selected' if report_status == kod }}>{{ ad }}</option>{% endfor %}</select><button class="btn">Göster</button></form>
   </div>
   <p class="kucukyazi">“Kesin yok” yalnız güvenilir ayrıştırılmış satırlar içindir. Biçim, formül, anahtar veya proje kapsamı belirsizlikleri indirme filtresine girmez.</p>

@@ -1,12 +1,63 @@
 {% extends "base.html" %}
 {% block baslik %}Kullanıcılar — Kanıt Paneli{% endblock %}
 {% block icerik %}
+{% set eylem_adlari = {'kt':'Onay / yorum','duzenle':'Düzenleme','sil':'Silme'} %}
 {% macro yetki_alanlari(values, prefix='') -%}
   {% set parsed = values.parsed_yetkiler|default({}) %}{% set secili_projeler = parsed.get('projeler',[]) %}{% set eylemler = parsed.get('eylemler',{}) %}
-  <fieldset class="yetki-alanlari"><legend>Rol ve proje kapsamı</legend><label class="satir-label"><input type="radio" name="rol" value="admin" {{ 'checked' if parsed.get('rol','admin') != 'superadmin' }}> Admin <small>Seçili projelerde işlem yapar</small></label><label class="satir-label"><input type="radio" name="rol" value="superadmin" {{ 'checked' if parsed.get('rol','') == 'superadmin' }}> Süperadmin <small>Tüm yönetim alanlarına erişir</small></label><div class="yetki-projeleri">{% for p in tum_projeler %}<div class="yetki-proje" style="--renk:{{ renk(p) }}"><label><input type="checkbox" name="projeler" value="{{ p }}" {{ 'checked' if p in secili_projeler }}> <span class="rozet" style="background:{{ renk(p) }};color:{{ metin_rengi(renk(p)) }}">{{ p }}</span></label><div class="eylem-secimleri">{% for code,label in [('kt','KT onayı'),('duzenle','Düzenleme'),('sil','Silme') ] %}<label><input type="checkbox" name="eylemler_{{ p }}" value="{{ code }}" {{ 'checked' if code in eylemler.get(p,[]) }}> {{ label }}</label>{% endfor %}</div></div>{% endfor %}</div><p class="kucukyazi">Her seçili proje için okuma ve görsel görüntüleme temel olarak verilir. Admin için en az bir proje seçin.</p></fieldset>
+  <fieldset class="yetki-alanlari"><legend>Rol ve proje kapsamı</legend>
+    <div class="rol-secimi">
+      <label class="satir-label"><input type="radio" name="rol" value="admin" {{ 'checked' if parsed.get('rol','admin') != 'superadmin' }}> <span><b>Admin</b><small>Yalnız seçili projelerde, seçili işlemleri yapar</small></span></label>
+      <label class="satir-label"><input type="radio" name="rol" value="superadmin" {{ 'checked' if parsed.get('rol','') == 'superadmin' }}> <span><b>Süperadmin</b><small>Tüm projeler ve yönetim ekranları</small></span></label>
+    </div>
+    <div class="yetki-projeleri">{% for p in tum_projeler %}<div class="yetki-proje" style="--renk:{{ renk(p) }}"><label><input type="checkbox" name="projeler" value="{{ p }}" {{ 'checked' if p in secili_projeler }}> <span class="rozet" style="background:{{ renk(p) }};color:{{ metin_rengi(renk(p)) }}">{{ p }}</span></label><div class="eylem-secimleri">{% for code,label in [('kt','Onay / yorum'),('duzenle','Düzenleme'),('sil','Silme') ] %}<label><input type="checkbox" name="eylemler_{{ p }}" value="{{ code }}" {{ 'checked' if code in eylemler.get(p,[]) }}> {{ label }}</label>{% endfor %}</div></div>{% endfor %}</div>
+    <p class="yardim-metni">Seçili her projede okuma ve görsel görüntüleme temel olarak verilir. Admin için en az bir proje seçin; süperadmin için proje seçimi gerekmez.</p>
+  </fieldset>
 {%- endmacro %}
-<section class="sayfa-baslik"><div><p class="ust-etiket">Erişim yönetimi</p><h1>Panel kullanıcıları</h1><p>Normal kullanıcı varsayılan olarak admin rolündedir; proje kapsamı ve ek eylemler açıkça seçilir.</p></div></section>
-{% if mesaj %}<div class="bilgi" role="status">{{ mesaj }}</div>{% endif %}
-<section class="kart kullanici-formu"><h2>Yeni kullanıcı</h2><form method="post" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="ekle"><div class="form-iki"><label>Kullanıcı adı<input name="ad" required autocapitalize="off" pattern="[a-z0-9_.]{1,40}"></label><label>Görünen ad<input name="gorunen_ad"></label><label>Şifre <small>(boş bırakılırsa geçici şifre üretilir)</small><input name="sifre" type="password" minlength="12"></label></div>{{ yetki_alanlari({}) }}<button class="btn birincil">Kullanıcı ekle</button></form></section>
-<section class="kullanici-listesi"><h2>Mevcut kullanıcılar</h2><div class="tablo-sarici" tabindex="0" role="region" aria-label="Panel kullanıcıları"><table class="tablo"><thead><tr><th>Kullanıcı</th><th>Rol / kapsam</th><th>Durum</th><th>Yönet</th></tr></thead><tbody>{% for u in kullanicilar %}<tr class="{{ 'soluk' if not u.aktif }}"><td><b>{{ u.kullanici_adi }}</b><br><small>{{ u.ad or '' }}</small></td><td>{{ u.ozet or 'Yükleniyor' }}</td><td>{% if u.aktif %}<span class="yesil">Aktif</span>{% else %}<span class="kirmizi">Pasif</span>{% endif %}{% if u.sifre_degistir %}<br><small>Şifre değişimi bekliyor</small>{% endif %}</td><td><details class="satir-duzenle"><summary>Düzenle</summary><form method="post" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="guncelle"><input type="hidden" name="ad" value="{{ u.kullanici_adi }}"><input type="hidden" name="expected_version" value="{{ u.expected_version|default(u.session_version) }}"><div class="form-iki"><label>Görünen ad<input name="gorunen_ad" value="{{ u.ad or '' }}"></label><label>Yeni şifre <small>(değiştirmek için doldurun)</small><input type="password" name="sifre" minlength="12"></label><label class="satir-label"><input type="checkbox" name="aktif" value="1" {{ 'checked' if u.aktif }}> Aktif hesap</label><label class="satir-label"><input type="checkbox" name="sifredegistir" value="1" {{ 'checked' if u.sifre_degistir }}> Sonraki girişte şifre değiştir</label></div>{{ yetki_alanlari(u) }}<button class="btn birincil">Değişiklikleri kaydet</button></form></details></td></tr>{% else %}<tr><td colspan="4"><div class="bos-tablo">Kullanıcı yok.</div></td></tr>{% endfor %}</tbody></table></div></section>
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">Erişim yönetimi</p><h1>Panel kullanıcıları</h1><p>Hesapları, rollerini ve proje kapsamlarını buradan yönetin. Yeni hesaplar varsayılan olarak admin rolündedir; proje kapsamı açıkça seçilir.</p></div>
+  <div class="baslik-eylemler"><a class="btn birincil" href="#yeni-kullanici">Yeni kullanıcı ekle</a></div>
+</section>
+{% if mesaj %}<div class="{{ 'hata' if mesaj.startswith('Hata') else 'bilgi' }}" role="status">{{ mesaj }}</div>{% endif %}
+<div class="kullanici-izgara">
+<section class="kart kullanici-listesi" aria-labelledby="kullanici-listesi-baslik">
+  <div class="kart-baslik"><div><h2 id="kullanici-listesi-baslik">Mevcut kullanıcılar</h2><p class="kucukyazi" style="margin:0">{{ kullanicilar|length }} hesap · Düzenlemek için satırdaki düğmeyi kullanın.</p></div></div>
+  <div class="tablo-sarici" tabindex="0" role="region" aria-label="Panel kullanıcıları"><table class="tablo"><thead><tr><th>Kullanıcı</th><th>Rol ve kapsam</th><th>Durum</th><th><span class="ekran-okuyucu">İşlem</span></th></tr></thead><tbody>
+  {% for u in kullanicilar %}
+  {% set p = u.parsed_yetkiler %}
+  <tr class="{{ 'soluk' if not u.aktif }}" id="kullanici-{{ u.kullanici_adi }}">
+    <td><div class="kullanici-satir-ad"><b>{{ u.ad or u.kullanici_adi }}</b><small>{{ u.kullanici_adi }}</small></div></td>
+    <td>{% if p.rol == 'superadmin' %}<span class="durum-etiket notr">Süperadmin · tüm projeler</span>{% else %}<div class="kapsam-listesi">{% for proje in p.projeler %}<span class="rozet" style="background:{{ renk(proje) }};color:{{ metin_rengi(renk(proje)) }}" title="{{ proje }}: {{ (p.eylemler.get(proje,[])|map('replace','kt','onay')|join(', ')) or 'okuma' }}">{{ proje }}</span>{% else %}<small>Proje yetkisi yok</small>{% endfor %}{% if p.projeler %}<small>{% for proje in p.projeler %}{{ proje }}: {% set ekstra = p.eylemler.get(proje,[])|reject('in',['oku','gorsel'])|list %}{{ ekstra|map('replace','kt','onay')|join(', ') if ekstra else 'yalnız okuma' }}{{ ' · ' if not loop.last }}{% endfor %}</small>{% endif %}</div>{% endif %}</td>
+    <td>{% if u.aktif %}<span class="durum-etiket aktif">Aktif</span>{% else %}<span class="durum-etiket pasif">Pasif</span>{% endif %}{% if u.sifre_degistir %}<br><small>İlk girişte şifre değiştirecek</small>{% endif %}{% if u.son_giris %}<br><small>Son giriş: {{ u.son_giris }}</small>{% endif %}</td>
+    <td><button type="button" class="btn kucuk" data-ac="duzenle-{{ u.kullanici_adi }}" aria-expanded="false" aria-controls="duzenle-{{ u.kullanici_adi }}">Düzenle</button></td>
+  </tr>
+  <tr id="duzenle-{{ u.kullanici_adi }}" hidden><td colspan="4">
+    <form method="post" autocomplete="off" class="kullanici-duzenle-govde" aria-label="{{ u.kullanici_adi }} hesabını düzenle">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="guncelle"><input type="hidden" name="ad" value="{{ u.kullanici_adi }}"><input type="hidden" name="expected_version" value="{{ u.expected_version|default(u.session_version) }}">
+      <h3>{{ u.kullanici_adi }} hesabını düzenle</h3>
+      <div class="form-iki">
+        <label>Görünen ad<input name="gorunen_ad" value="{{ u.ad or '' }}" maxlength="120"></label>
+        <label>Yeni şifre <small>(değiştirmek için doldurun, en az 8 karakter)</small><input type="password" name="sifre" minlength="8" autocomplete="new-password"></label>
+        <div><label class="satir-label"><input type="checkbox" name="aktif" value="1" {{ 'checked' if u.aktif }}> Aktif hesap</label><label class="satir-label" style="margin-top:8px!important"><input type="checkbox" name="sifredegistir" value="1" {{ 'checked' if u.sifre_degistir }}> Sonraki girişte şifre değiştirsin</label></div>
+      </div>
+      {{ yetki_alanlari(u) }}
+      <div class="form-eylemler"><button class="btn birincil">Değişiklikleri kaydet</button><button type="button" class="btn" data-ac="duzenle-{{ u.kullanici_adi }}">Kapat</button></div>
+    </form>
+    <form method="post" class="form-eylemler" data-onay="{{ u.kullanici_adi }} için geçici şifre üretilsin mi? Eski şifre geçersiz olur."><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="sifre"><input type="hidden" name="ad" value="{{ u.kullanici_adi }}"><input type="hidden" name="expected_version" value="{{ u.expected_version|default(u.session_version) }}"><button class="btn kucuk">Geçici şifre üret</button><small>Üretilen şifre bir kez ekranda gösterilir; kullanıcı ilk girişte değiştirir.</small></form>
+  </td></tr>
+  {% else %}<tr><td colspan="4"><div class="bos-tablo">Henüz kullanıcı yok.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+<section class="kart kullanici-formu" id="yeni-kullanici" aria-labelledby="yeni-kullanici-baslik">
+  <p class="ust-etiket">Yeni hesap</p>
+  <h2 id="yeni-kullanici-baslik">Yeni kullanıcı</h2>
+  <form method="post" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="ekle">
+    <label>Kullanıcı adı<input name="ad" required autocapitalize="off" pattern="[a-z0-9_.]{1,40}" placeholder="ornek.kullanici" autocomplete="off" title="Küçük harf, rakam, nokta ve alt çizgi"></label>
+    <label>Görünen ad<input name="gorunen_ad" maxlength="120" placeholder="Ad Soyad"></label>
+    <label>Şifre <small>(boş bırakılırsa geçici şifre üretilir; en az 8 karakter)</small><input name="sifre" type="password" minlength="8" autocomplete="new-password"></label>
+    {{ yetki_alanlari({}) }}
+    <button class="btn birincil genis">Kullanıcı ekle</button>
+  </form>
+</section>
+</div>
 {% endblock %}

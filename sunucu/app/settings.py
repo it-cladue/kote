@@ -19,8 +19,8 @@ def settings():
         'LOG_DOSYA': str(DATA / 'bot_log.txt'), 'HTTPS': os.getenv('HTTPS', '0'),
         'PORT': int(os.getenv('PORT', '8080')), 'DINLE': os.getenv('DINLE', '127.0.0.1'),
         'TRUST_PROXY': os.getenv('TRUST_PROXY', '0'),
-        'PROJELER': ['PP', 'PA', 'OF', 'HI', 'VI', 'GA'], 'SAYFA_BOYU': 48,
-        'PROJE_RENK': {'PP': '#A6A6A6', 'PA': '#4472C4', 'OF': '#FFFF00', 'HI': '#FF0000', 'VI': '#7030A0', 'GA': '#00B050'},
+        'PROJELER': ['PP', 'PA', 'OF', 'HI', 'VI', 'GA', 'BETA'], 'SAYFA_BOYU': 48,
+        'PROJE_RENK': {'PP': '#A6A6A6', 'PA': '#4472C4', 'OF': '#FFFF00', 'HI': '#FF0000', 'VI': '#7030A0', 'GA': '#00B050', 'BETA': '#FFA500'},
         'GYAZO_PROXY': '0', 'MAX_GORSEL_BYTES': 10 * 1024 * 1024,
     }
 

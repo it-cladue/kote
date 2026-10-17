@@ -1,15 +1,18 @@
 {% extends "base.html" %}
-{% block baslik %}Şifre değiştir{% endblock %}
+{% block baslik %}Şifre değiştir — Kanıt Paneli{% endblock %}
 {% block icerik %}
 <div class="kart dar">
-  <h2>Şifre değiştir</h2>
-  {% if hata %}<div class="hata">{{ hata }}</div>{% endif %}
+  <p class="ust-etiket">Hesabım</p>
+  <h1>Şifre değiştir</h1>
+  <p class="kucukyazi">Yeni şifre en az 8 karakter olmalı. Şifre değiştiğinde diğer cihazlardaki oturumlarınız kapanır.</p>
+  {% if hata %}<div class="hata" role="alert">{{ hata }}</div>{% endif %}
   <form method="post" autocomplete="off">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>Eski şifre<input name="eski" type="password" required></label>
-    <label>Yeni şifre (en az 12 karakter)<input name="yeni" type="password" minlength="12" required></label>
-    <label>Yeni şifre (tekrar)<input name="yeni2" type="password" minlength="12" required></label>
-    <button class="btn birincil">Kaydet</button>
+    <label for="sifre-eski">Mevcut şifre<input id="sifre-eski" name="eski" type="password" required autocomplete="current-password"></label>
+    <label for="sifre-yeni">Yeni şifre<input id="sifre-yeni" name="yeni" type="password" minlength="8" required autocomplete="new-password" aria-describedby="sifre-kural"></label>
+    <label for="sifre-yeni2">Yeni şifre (tekrar)<input id="sifre-yeni2" name="yeni2" type="password" minlength="8" required autocomplete="new-password"></label>
+    <p id="sifre-kural" class="kucukyazi">En az 8 karakter; harf, rakam ve işaret karışımı önerilir.</p>
+    <div class="form-eylemler"><button class="btn birincil" type="submit">Şifreyi kaydet</button><a class="btn" href="{{ url_for('ana') }}">Vazgeç</a></div>
   </form>
 </div>
 {% endblock %}

@@ -1,22 +1,30 @@
 {% extends "base.html" %}
 {% block baslik %}Görsel arşivi — Kanıt Paneli{% endblock %}
 {% block icerik %}
-<h1>Telegram görsel arşivi</h1>
-<p>Sunucuya taşıdığınız <code>telegram_gorseller</code> klasörü burada listelenir. İndeks veya dosya kimliğiyle kesin eşleşmeyen görseller tahmin edilmez; bir kayıt ID’si girerek kendiniz ilişkilendirebilirsiniz.</p>
-<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="tara"><button class="btn birincil">Klasörü tara / indeksi yenile</button></form>
-<form method="get" class="filtre"><input name="q" value="{{ q }}" placeholder="Dosya adında ara"><select name="durum"><option value="eslesmeyen" {{ 'selected' if durum=='eslesmeyen' }}>Eşleşmeyenler</option><option value="hepsi" {{ 'selected' if durum=='hepsi' }}>Hepsi</option></select><button class="btn">Filtrele</button></form>
-<p>{{ toplam }} görsel · sayfa {{ sayfa }} / {{ sayfa_sayisi }}</p>
-<div class="kart-izgara">
-{% for d in dosyalar %}<div class="kart">
-<a href="{{ url_for('arsiv_gorsel',aid=d.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('arsiv_gorsel',aid=d.id,kucuk=1) }}" loading="lazy" style="width:100%;height:160px;object-fit:contain" alt="Arşiv görseli"></a>
-<p style="overflow-wrap:anywhere"><strong>{{ d.ad }}</strong><br>{{ d.proje or 'Proje bilinmiyor' }} · {% if d.kayit_id %}Kayıt #{{ d.kayit_id }}{% else %}Eşleşme yok{% endif %}</p>
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">Süperadmin</p><h1>Telegram görsel arşivi</h1><p>Sunucuya taşıdığınız <code>telegram_gorseller</code> klasörü burada listelenir. İndeks veya dosya kimliğiyle kesin eşleşmeyen görseller tahmin edilmez; bir kayıt numarası girerek kendiniz ilişkilendirebilirsiniz.</p></div>
+  <div class="baslik-eylemler"><form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="tara"><button class="btn birincil">Klasörü tara / indeksi yenile</button></form></div>
+</section>
+<form method="get" class="filtre filtre-kapsamli" aria-label="Arşiv filtreleri">
+  <div class="filtre-temel">
+    <div class="ara-alani"><label for="arsiv-ara">Dosya adı</label><input id="arsiv-ara" name="q" value="{{ q }}" placeholder="Dosya adında ara"></div>
+    <div><label for="arsiv-durum">Durum</label><select id="arsiv-durum" name="durum"><option value="eslesmeyen" {{ 'selected' if durum=='eslesmeyen' }}>Yalnız eşleşmeyenler</option><option value="hepsi" {{ 'selected' if durum=='hepsi' }}>Hepsi</option></select></div>
+    <button class="btn birincil">Filtrele</button>{% if q or durum != 'eslesmeyen' %}<a class="btn" href="{{ url_for('arsiv') }}">Temizle</a>{% endif %}
+  </div>
+</form>
+<p class="sonuc-ozeti"><b>{{ toplam }}</b> görsel{% if sayfa_sayisi > 1 %} · sayfa {{ sayfa }} / {{ sayfa_sayisi }}{% endif %}</p>
+<div class="arsiv-izgara">
+{% for d in dosyalar %}<article class="kart arsiv-kart">
+<a href="{{ url_for('arsiv_gorsel',aid=d.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('arsiv_gorsel',aid=d.id,kucuk=1) }}" loading="lazy" alt="Arşiv görseli {{ d.ad }}"></a>
+<p class="arsiv-ad"><strong>{{ d.ad }}</strong></p>
+<p class="kucukyazi">{% if d.proje %}<span class="rozet" style="background:{{ renk(d.proje) }};color:{{ metin_rengi(renk(d.proje)) }}">{{ d.proje }}</span>{% else %}Proje bilinmiyor{% endif %} · {% if d.kayit_id %}<a href="{{ url_for('kayitlar', durum='hepsi', ac=d.kayit_id) }}">Kayıt #{{ d.kayit_id }}</a>{% else %}<span class="durum-etiket bekliyor">Eşleşme yok</span>{% endif %}</p>
 <form method="post" data-onay="Bu görseli girdiğiniz kayıtla ilişkilendirmek istediğinize emin misiniz?">
 <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="esle"><input type="hidden" name="arsiv_id" value="{{ d.id }}">
-<label>Kayıt ID<input type="number" name="kayit_id" min="1" required placeholder="Kayıtlar tablosundaki ID"></label>
-<label><input type="checkbox" name="ikinci" value="1"> İkinci görsel olarak bağla</label>
-<label><input type="checkbox" name="degistir" value="1"> Varsa mevcut görsel bağını değiştir</label>
-<button class="btn">Kayıtla ilişkilendir</button></form></div>
-{% else %}<div class="kart">Bu filtrede görsel yok. Klasörü sunucuya taşıdıktan sonra taramayı çalıştırın.</div>{% endfor %}
+<label for="arsiv-kayit-{{ d.id }}">Kayıt numarası<input id="arsiv-kayit-{{ d.id }}" type="number" name="kayit_id" min="1" required placeholder="Kayıtlar tablosundaki ID"></label>
+<label class="satir-label"><input type="checkbox" name="ikinci" value="1"> İkinci görsel olarak bağla</label>
+<label class="satir-label" style="margin-top:6px!important"><input type="checkbox" name="degistir" value="1"> Varsa mevcut görsel bağını değiştir</label>
+<button class="btn" style="margin-top:10px">Kayıtla ilişkilendir</button></form></article>
+{% else %}<div class="bos-durum"><h2>Görsel yok</h2><p>Bu filtrede görsel bulunmuyor. Klasörü sunucuya taşıdıktan sonra taramayı çalıştırın.</p></div>{% endfor %}
 </div>
-<div class="sayfalama">{% if sayfa>1 %}<a class="btn" href="{{ url_degistir(s=sayfa-1) }}">Önceki</a>{% endif %}{% if sayfa<sayfa_sayisi %}<a class="btn" href="{{ url_degistir(s=sayfa+1) }}">Sonraki</a>{% endif %}</div>
+{% if sayfa_sayisi > 1 %}<nav class="sayfalama" aria-label="Arşiv sayfaları">{% if sayfa>1 %}<a class="btn" href="{{ url_degistir(s=sayfa-1) }}">‹ Önceki</a>{% endif %}<span>{{ sayfa }} / {{ sayfa_sayisi }}</span>{% if sayfa<sayfa_sayisi %}<a class="btn" href="{{ url_degistir(s=sayfa+1) }}">Sonraki ›</a>{% endif %}</nav>{% endif %}
 {% endblock %}

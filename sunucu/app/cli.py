@@ -15,8 +15,10 @@ def main():
     sub=parser.add_subparsers(dest='command',required=True)
     admin=sub.add_parser('admin-ekle',help='İlk veya ek panel hesabını oluştur')
     admin.add_argument('ad',nargs='?',default='admin'); admin.add_argument('--yetki',default='admin')
-    admin.add_argument('--password-env',help='Parolanın mevcut ortam değişkeni adı; değeri komut satırına yazmayın')
-    reset=sub.add_parser('sifre-sifirla');reset.add_argument('ad')
+    reset=sub.add_parser('sifre-sifirla',help='Mevcut hesabın parolasını sıfırla ve hesabı aktif et');reset.add_argument('ad')
+    for command in (admin,reset):
+        command.add_argument('--password-env',help='Parolanın mevcut ortam değişkeni adı; değeri komut satırına yazmayın')
+        command.add_argument('--kalici',action='store_true',help='Parola kalıcıdır; ilk girişte değiştirme zorunluluğu konmaz')
     old=sub.add_parser('ice-aktar',help='Eski klasörü/Exceli bir kez aktar; canlı Excel bağlantısı kurmaz')
     old.add_argument('kaynak')
     sub.add_parser('arsiv-tara',help='Sunucuya taşınmış telegram_gorseller klasörünü indeksle')
@@ -26,14 +28,18 @@ def main():
     args=parser.parse_args()
     if args.command in ('admin-ekle','sifre-sifirla'):
         env=getattr(args,'password_env',None)
-        password=os.getenv(env,'') if env else getpass.getpass('En az 12 karakter parola: ')
+        if env and not os.getenv(env,''): raise SystemExit('Ortam değişkeni boş: '+env)
+        password=os.getenv(env,'') if env else getpass.getpass('En az 8 karakter parola: ')
         if not env and password!=getpass.getpass('Parola tekrar: '): raise SystemExit('Parolalar aynı değil.')
-        if args.command=='admin-ekle':
-            kullanicilar.ekle(AYAR,args.ad,args.yetki,password,olusturan='sunucu-cli')
-            kullanicilar.guncelle(AYAR,args.ad,sifre_degistir=0)
-        else:
-            kullanicilar.guncelle(AYAR,args.ad,sifre=password,sifre_degistir=1,aktif=1)
-        print('Panel hesabı hazır:',args.ad);return
+        try:
+            if args.command=='admin-ekle':
+                # admin-ekle ile verilen parola sunucu operatörüne aittir; kalıcıdır.
+                kullanicilar.ekle(AYAR,args.ad,args.yetki,password,olusturan='sunucu-cli')
+                kullanicilar.guncelle(AYAR,args.ad,sifre_degistir=0)
+            else:
+                kullanicilar.guncelle(AYAR,args.ad,sifre=password,sifre_degistir=0 if args.kalici else 1,aktif=1,islem_yapan='sunucu-cli')
+        except ValueError as e: raise SystemExit('Hata: '+str(e))
+        print('Panel hesabı hazır:',args.ad,'(parola kalıcı)' if args.kalici or args.command=='admin-ekle' else '(ilk girişte parola değiştirilecek)');return
     c=db.baglan(AYAR['DB'])
     try:
         if args.command=='ice-aktar':
