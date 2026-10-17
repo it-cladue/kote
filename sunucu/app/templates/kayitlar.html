@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block baslik %}Kayıtlar — Kanıt Paneli{% endblock %}
 {% block icerik %}
-<link rel="stylesheet" href="{{ url_for('static', filename='kayit.css', v='2.2.1') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='kayit.css', v='2.2.2') }}">
 {% set export_url = url_filtre('disa_aktar_xlsx') if url_filtre is defined else url_for('disa_aktar_xlsx') %}
 {% set proje_etiketleri = {} %}{% for p in proje_bilgileri %}{% set _ = proje_etiketleri.update({p.code: p.label}) %}{% endfor %}
 <div class="kayit-sayfa" id="kayit-sayfa" data-durum="{{ f.durum }}" data-toplu-kt="{{ '1' if toplu_kt else '0' }}" data-gorunum="{{ gorunum }}"{% if acik_kayit %} data-acik="{{ acik_kayit }}"{% endif %}>

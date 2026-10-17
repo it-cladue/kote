@@ -1,7 +1,8 @@
 (function () {
   'use strict';
   var key = 'kanit-panel-tema';
-  var mode = 'dark';
+  var mode = 'light';
+  try { if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) mode = 'dark'; } catch (_) {}
   try { var stored = localStorage.getItem(key); if (stored === 'light' || stored === 'dark') mode = stored; } catch (_) {}
   function apply() {
     document.documentElement.setAttribute('data-theme', mode);
