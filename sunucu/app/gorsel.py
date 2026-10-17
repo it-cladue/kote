@@ -449,11 +449,31 @@ class GorselCozucu:
             return yol, "gyazo"
         return None, "yok"
 
+    def gecerli(self, yol):
+        """Dosya gerçekten açılabilir bir görsel mi? (bozuk/kesik/aşırı büyük → False)
+
+        Yalnız başlık ve yapı doğrulanır; piksel verisi yüklenmez, bu yüzden
+        liste yüklemelerinde her çağrı ucuzdur.
+        """
+        if not yol or not os.path.isfile(yol):
+            return False
+        try:
+            from PIL import Image
+            Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with Image.open(yol) as im:
+                    im.verify()
+            return True
+        except Exception:
+            return False
+
     def kucuk(self, kayit, yol):
         """Doğrulanmış kaynaktan atomik 400px JPEG küçük resim üretir.
 
         Bozuk, decompression-bomb veya izinli kök dışındaki dosyada ``None``
-        döner; asla rastgele/orijinal dosya yolunu geri vermez.
+        döner; asla rastgele/orijinal dosya yolunu geri vermez. Önbellek
+        klasörü çalışma anında silinmişse her üretimde yeniden oluşturulur.
         """
         if not _guvenli_altinda(yol, list(self.kokler) + [self.gyazo_klasor]):
             return None
@@ -464,6 +484,10 @@ class GorselCozucu:
             return None
         ad = hashlib.sha256((str(kayit.get("anahtar") or "") + "\0" + str(yol)).encode("utf-8")).hexdigest()[:32] + ".jpg"
         hedef = os.path.join(self.thumbs, ad)
+        try:
+            os.makedirs(self.thumbs, exist_ok=True)
+        except OSError:
+            return None
         try:
             if os.path.exists(hedef) and os.path.getmtime(hedef) >= os.path.getmtime(yol):
                 with warnings.catch_warnings():
@@ -479,6 +503,7 @@ class GorselCozucu:
                     im.load()
                     im = im.convert("RGB")
                     im.thumbnail((400, 400))
+                    os.makedirs(self.thumbs, exist_ok=True)
                     fd, gecici = tempfile.mkstemp(prefix="thumb-", suffix=".tmp", dir=self.thumbs)
                     os.close(fd)
                     try:
@@ -492,6 +517,32 @@ class GorselCozucu:
             return hedef
         except Exception:
             return None
+
+
+def yer_tutucu_svg(baslik="Görsel açılamadı", aciklama="", genislik=400, yukseklik=300):
+    """Bozuk/okunamayan görsel yerine gösterilecek sade SVG (bayt olarak).
+
+    Metinler XML için kaçışlanır; dış kaynak içermez, bu yüzden nosniff ile
+    güvenle ``image/svg+xml`` olarak sunulabilir.
+    """
+    from xml.sax.saxutils import escape
+    w, h = int(genislik), int(yukseklik)
+    boy = max(14, min(26, w // 16))
+    kucuk = max(11, boy - 5)
+    satirlar = [escape(str(baslik or ""))]
+    if aciklama:
+        satirlar.append(escape(str(aciklama)))
+    y0 = h // 2 - (len(satirlar) - 1) * (kucuk + 6) // 2
+    metin = "".join(
+        '<text x="%d" y="%d" fill="%s" font-size="%d" font-weight="%s" text-anchor="middle" font-family="system-ui,Segoe UI,Arial,sans-serif">%s</text>'
+        % (w // 2, y0 + i * (kucuk + 10), "#e2e8f0" if i == 0 else "#94a3b8", boy if i == 0 else kucuk, "700" if i == 0 else "400", t)
+        for i, t in enumerate(satirlar)
+    )
+    cizgi = '<path d="M%d %dl%d %dM%d %dl%d -%d" stroke="#64748b" stroke-width="3" stroke-linecap="round"/>' % (
+        w // 2 - 14, y0 - boy - 28, 28, 28, w // 2 - 14, y0 - boy, 28, 28)
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" role="img" aria-label="%s">'
+           '<rect width="100%%" height="100%%" fill="#1f2937"/>%s%s</svg>') % (w, h, w, h, escape(str(baslik or "")), cizgi, metin)
+    return svg.encode("utf-8")
 
 
 def arsiv_tara(ayar, conn, cozucu):
