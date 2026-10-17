@@ -51,6 +51,23 @@ cd /opt/kanit-paneli && KANIT_PW=telecc123 .venv/bin/python -m app.cli sifre-sif
 - İşlem Geçmişi'nde işlem adları Türkçe açıklamalı, sonuç durum etiketli, kayıt hedefleri tıklanabilir.
 - Durum etiketleri (Onaylı / Bekliyor / Silinen / Aktif / Pasif) tüm sayfalarda aynı.
 
+## Kayıtlar sayfası ve kanıt görseli
+
+- **Detay penceresi artık hata vermiyor.** Eski Excel kaydı, görseli olmayan lead kaydı, silinmiş kayıt, dosyası sunucuda bulunmayan görsel, bozuk görsel, ikinci görseli olmayan kayıt: hepsi sorunsuz açılır; sorun olursa anlaşılır Türkçe uyarı çıkar, "Kayıt okunamadı (500)" gibi ham kodlar yok.
+- **Proje seçimi:** "Tüm yetkili projeler" kutusu kaldırıldı. Projeler katalogdaki renkleriyle çip olarak görünür; **Tümü** çipi var. Hiç çip seçilmemişse tüm yetkili projeler listelenir; çipe tıklayınca filtre anında uygulanır, kategori listesi seçilen projelere göre gelir. Filtre çubuğu sayfa kaydırılınca üstte sabit kalır. Kategori filtresi küçük/karışık harfli kategori adlarında da seçimi korur.
+- **Satıra veya karta tıklamak detayı açar.** Klavyede ← → ile kayıtlar arasında gezilir, Esc kapatır; bildirimlerden gelen `?ac=<id>` bağlantıları adres çubuğunda kalır (paylaşılabilir), kapatınca temizlenir.
+- **Görsel deneyimi:** detay penceresinde büyük görsel alanı; **Büyüt** veya görsele tıklayınca tam ekran görüntüleyici (+ / − düğmeleri, fare tekerleği ile yakınlaştırma, sürükleyerek kaydırma, telefonda iki parmakla yakınlaştırma, "Yeni sekmede aç", "İndir", ← → ile kayıtlar arasında geçiş). İkinci görsel küçük resim olarak gösterilir. Tablo küçük resimleri büyütüldü; galeri kareleri eşit boyda.
+- **Eski Gyazo bağlantıları:** sunucuda yerel dosyası olmayan ama Gyazo linki bulunan kayıtlarda görsel sunucu üzerinden getirilip önbelleğe alınır (yalnız gyazo.com, 15 sn, 20 MB sınırı). Açılamayan linklerde "Görsel yok (eski Gyazo linki açılamadı)" yazısı ve linkin kendisi gösterilir. `.env` içine `GYAZO_PROXY=0` yazılırsa bu özellik kapanır.
+- **Bozuk veya eksik görsel:** listelerde boş hücre yerine "Görsel açılamadı" / "Dosya sunucuda bulunamadı" yer tutucusu; ham bozuk dosya tarayıcıya gönderilmez.
+- **Detay içeriği:** üstte proje/kategori/durum rozetleri, iki sütunlu bilgi alanı, onay satırı (onaylayan/zaman), eylem düğmeleri (Onayla / Onayı kaldır / Düzenle / Sil — silme nedeni sorulur / Geri al / Gyazo'ya dönüştür), "Konuşma" ve "İşlem geçmişi" açılır bölümler. "İşlem hatası" bayraklı kayıtta hata metni pencerede görünür; silinmiş kayıtta veya yetki yoksa düğmelerin neden olmadığı yazar; kaydedilmemiş düzenleme varsa kapatmadan önce sorulur.
+- **Düzenleme:** kategori serbest metin değil, projeye tanımlı kategorilerden seçilir; alan doğrulama mesajları satır içinde. Aynı kayıt bu arada başkası tarafından değiştirilmişse gerçek mesaj ve **Yenile** düğmesi çıkar; girilen değerler kaybolmaz.
+- **Gyazo'ya dönüştür:** işin durumu (bekliyor / tekrar denenecek / hata), deneme sayısı ve hata metni pencerede görünür; **Gyazo'yu tekrar dene** düğmesi var. Gyazo anahtarı tanımlı değilse düğmenin altında açıklama yazar.
+- **Toplu onay:** tabloda ve kart görünümünde seçim kutuları, "Sayfadakileri seç", **Seçilenleri onayla (n)** / **Onayı kaldır (n)** (yalnız onay yetkisi olanlara); sonuç özeti bildirim olarak görünür. Onayla/Sil sonrası satır durumu ve sekme sayaçları anında güncellenir.
+- **Araç çubuğu:** "Excel (bu görünüm)" düğmesi her zaman görünür (boş görünümde pasif); sonuç sayısı; sayfa başına 24 / 48 / 96 seçimi; arama kutusu açıklama, ekleyen ve kategori içinde de arar; ana sayfadan gelen aramada "Arama: …" rozeti ve "Aramayı temizle" bağlantısı. Ters tarih aralığı sayfa içinde uyarı olarak gösterilir.
+- **Telefon (390 px):** tablo görünümü yatay kaydırmasız kart listesine dönüşür, Detay düğmesi ve tüm dokunma hedefleri ekran içinde (≥ 40 px), detay penceresi tam ekran ve eylem çubuğu altta sabit. Uzun personel/üye değerleri diğer sütunlara taşmaz.
+- **Arşiv:** "Kayıtla ilişkilendir" yanlış kayıt numarasında veya kayıtta zaten görsel varken hata sayfası yerine arşiv sayfasında açıklayıcı mesaj gösterir ("Değiştirmek için 'Varsa mevcut görsel bağını değiştir' kutusunu işaretleyin").
+- Olmayan kayıt için 403 "yetkiniz yok" yerine 404 "kayıt bulunamadı"; küçük resim önbellek klasörü silinse bile küçük resimler yeniden üretilir.
+
 ## Düzeltmeler (2.2 düzeltme turu — genel)
 
 - **Bot sayfası:** `?sure=` için tanınmayan değer 500 hatası vermez; "Tüm zamanlar" kabul edilip bir not gösterilir. Onayla / Engelle / Tam sıfırla artık üç ayrı küçük kart; her kartın kendi Telegram ID alanı var. Onaylarken ad boş bırakılırsa kişinin Telegram'daki adı korunur, sayısal ID artık ada yazılmaz; girilen ad yalnız görünen ada gider. Bot durumu "Çalışıyor · son sinyal 20 sn önce", "Bot son 12 dakikadır sinyal vermedi" veya "Bot henüz sinyal göndermedi" biçiminde; kırmızı yalnız gerçekten sinyal kesilince.
@@ -68,4 +85,4 @@ cd /opt/kanit-paneli && KANIT_PW=telecc123 .venv/bin/python -m app.cli sifre-sif
 
 ## Güncelleme notu
 
-Sürüm `2.2.0`. `bash deploy/apply-update.sh --dry-run` sonra `bash deploy/apply-update.sh`. Betik başlığı 2.1 → 2.2 olarak güncellendi; mantığı değişmedi. Tarayıcıda eski CSS/JS önbelleğini atlatmak için varlık bağlantıları `v=2.2.0` ile sürümlenir.
+Sürüm `2.2.0`. `bash deploy/apply-update.sh --dry-run` sonra `bash deploy/apply-update.sh`. Betik başlığı 2.1 → 2.2 olarak güncellendi; mantığı değişmedi. Tarayıcıda eski CSS/JS önbelleğini atlatmak için varlık bağlantıları `v=2.2.2` ile sürümlenir. Tema varsayılanı artık cihazın açık/koyu tercihine uyar (tercih yoksa açık tema); daha önce seçilmiş tema tarayıcıda korunur.
