@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block baslik %}Proje ve kategori yönetimi{% endblock %}
+{% block icerik %}
+<div class="katalog-sayfa">
+<section class="sayfa-baslik"><div><p class="ust-etiket">Süperadmin yönetimi</p><h1>Projeler ve kategoriler</h1><p>Yeni seçimler için hemen geçerli. Kodlar kalıcıdır; eski kayıtlar ve devam eden soru akışları korunur.</p></div></section>
+{% if mesaj %}<div class="hata" role="status">{{ mesaj }}</div>{% endif %}
+
+{% macro kategori_form(kategori,yeni=False) -%}
+<form method="post" data-category-form data-initial-questions='{{ (kategori.questions if kategori else [])|tojson }}'>
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="kategori_kaydet"><input type="hidden" name="revision" value="{{ '' if yeni else kategori.revision }}"><input type="hidden" name="questions_json" value="[]" data-questions-json>
+<fieldset class="katalog-bilgi"><legend>Kategori bilgisi</legend>
+<label>Kod <input name="code" required maxlength="48" pattern="[a-z0-9_]{1,48}" autocapitalize="off" value="{{ '' if yeni else kategori.code }}" {{ 'readonly' if not yeni }} placeholder="ornek_kategori"></label>
+<label>Görünen ad <input name="label" required maxlength="120" value="{{ '' if yeni else kategori.label }}" placeholder="Kategori adı"></label>
+<label>Soru şablonu <select name="mode" data-mode-select>
+<option value="custom" {{ 'selected' if (yeni or kategori.mode=='custom') }}>Özel soru akışı</option>
+<option value="tek_uye" {{ 'selected' if not yeni and kategori.mode=='tek_uye' }}>Personel + üye ID</option>
+<option value="ark_ana" {{ 'selected' if not yeni and kategori.mode=='ark_ana' }}>Arkadaş + ana üye</option>
+<option value="ana_only" {{ 'selected' if not yeni and kategori.mode=='ana_only' }}>Personel + ana üye</option>
+<option value="sessiz_tip" {{ 'selected' if not yeni and kategori.mode=='sessiz_tip' }}>Sessiz / telesekreter</option></select></label>
+<label class="katalog-checkbox"><input type="checkbox" name="active" value="1" {{ 'checked' if yeni or kategori.aktif }}> Aktif</label>
+</fieldset>
+<fieldset><legend>Hangi projelerde görünsün?</legend><div class="katalog-proje-secimi">
+{% for proje in proje_bilgileri %}<label class="katalog-checkbox"><input type="checkbox" name="projects" value="{{ proje.code }}" {{ 'checked' if (not yeni and proje.code in kategori.projects) }}><span class="rozet" style="background:{{ proje.color }};color:{{ metin_rengi(proje.color) }}">{{ proje.code }}</span>{{ 'Pasif' if not proje.aktif }}</label>{% else %}<p>Önce bir proje ekleyin.</p>{% endfor %}
+</div></fieldset>
+<fieldset data-question-editor><legend>Telegram’da sorulacak sorular</legend><p class="kucukyazi">Hazır soruyu seçip ekleyin veya kendi sorunuzu oluşturun. Yukarı / aşağı düğmeleri sıra değiştirir.</p>
+<div data-question-list aria-live="polite"></div>
+<div class="katalog-soru-ekle"><label>Hazır soru <select data-preset-picker><option value="personel">Personel</option><option value="uye_id">Üye ID</option><option value="ana_uye_id">Ana üye ID</option><option value="lead_id">Lead ID</option><option value="tip">Sessiz / telesekreter</option></select></label><button class="btn" type="button" data-add-preset>Hazır soru ekle</button><button class="btn" type="button" data-add-custom>Özel soru ekle</button></div>
+</fieldset><button class="btn birincil">{{ 'Kategori ekle' if yeni else 'Değişiklikleri kaydet' }}</button>
+</form>
+{%- endmacro %}
+
+<div class="katalog-ekleme-grid">
+<details class="kart katalog-ekleme" id="yeni-proje"><summary>Yeni proje ekle</summary><p class="kucukyazi">Yeni proje normal adminlere otomatik açılmaz; hesabına ayrıca yetki verin.</p>
+<form method="post" data-project-form><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="proje_kaydet"><input type="hidden" name="revision" value="">
+<fieldset class="katalog-bilgi"><legend>Proje bilgisi</legend><label>Kod <input name="code" required pattern="[A-Z0-9_]{1,24}" maxlength="24" autocapitalize="characters" placeholder="YENI_PROJE"></label><label>Görünen ad <input name="label" required maxlength="120"></label><label>Renk <input type="color" name="color" required value="#4472C4"></label><label class="katalog-checkbox"><input type="checkbox" name="active" value="1" checked> Aktif</label></fieldset><button class="btn birincil">Proje ekle</button></form>
+</details>
+<details class="kart katalog-ekleme" id="yeni-kategori"><summary>Yeni kategori ekle</summary>{{ kategori_form(none,True) }}</details>
+</div>
+<div class="katalog-liste-grid">
+<section class="kart"><h2>Projeler <span class="kucukyazi">{{ proje_bilgileri|length }}</span></h2><p class="kucukyazi">Düzenlemek için satırı açın.</p>
+{% for proje in proje_bilgileri %}<details class="katalog-kayit {{ 'soluk' if not proje.aktif }}"><summary><span class="rozet" style="background:{{ proje.color }};color:{{ metin_rengi(proje.color) }}">{{ proje.code }}</span><span>{{ proje.label }}</span><small>{{ 'Aktif' if proje.aktif else 'Pasif' }}</small></summary>
+<form method="post" data-project-form><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="proje_kaydet"><input type="hidden" name="revision" value="{{ proje.revision }}"><input type="hidden" name="code" value="{{ proje.code }}"><fieldset class="katalog-bilgi"><legend>{{ proje.code }}</legend><label>Görünen ad <input name="label" value="{{ proje.label }}" required maxlength="120"></label><label>Renk <input type="color" name="color" value="{{ proje.color }}" required></label><label class="katalog-checkbox"><input type="checkbox" name="active" value="1" {{ 'checked' if proje.aktif }}> Aktif</label></fieldset><button class="btn">Kaydet</button></form>
+</details>{% else %}<p>Henüz proje yok.</p>{% endfor %}</section>
+<section class="kart"><h2>Kategoriler <span class="kucukyazi">{{ kategoriler|length }}</span></h2><p class="kucukyazi">Proje bağlarını ve soruları görmek için satırı açın.</p>
+{% for kategori in kategoriler %}<details class="katalog-kayit {{ 'soluk' if not kategori.aktif }}"><summary><b>{{ kategori.label }}</b><code>{{ kategori.code }}</code><small>{{ 'Aktif' if kategori.aktif else 'Pasif' }}</small></summary>{{ kategori_form(kategori) }}</details>{% else %}<p>Henüz kategori yok.</p>{% endfor %}</section>
+</div></div>
+{% endblock %}
+{% block script %}<script src="{{ url_for('static',filename='katalog.js') }}"></script>{% endblock %}

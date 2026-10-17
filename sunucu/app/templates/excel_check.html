@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block baslik %}Kanıt Kontrolü - Kanıt Paneli{% endblock %}
+{% block icerik %}
+{% set secenekler = options|default({}, true) %}
+{% set secili_sayfa = secenekler.get('sheet', '') %}
+{% set kolonlar = secenekler.get('columns', {}) %}
+{% set secili_alanlar = secenekler.get('match_fields', []) %}
+{% set kaynak_bicimi = workbook.get('format', 'xlsx') if workbook else 'xlsx' %}
+{% set text_mode = secenekler.get('text_mode', workbook.get('text_mode', 'table') if workbook else 'table') %}
+{% set alanlar = [('proje', 'Proje'), ('kategori', 'Kategori'), ('personel', 'Personel'), ('uye_id', 'Üye ID'), ('ana_uye_id', 'Ana üye ID'), ('tip', 'Tür'), ('lead_id', 'Lead ID')] %}
+{% set durumlar = {
+  'bulundu': 'Bulundu', 'yok': 'Kesin yok', 'birden_cok': 'Birden çok',
+  'anahtar_bos': 'Anahtar boş', 'eksik_alan': 'Eksik alan',
+  'bicim_belirsiz': 'Biçim belirsiz', 'formul_sonucsuz': 'Formül sonucu yok',
+  'proje_filtre_uyusmazligi': 'Proje filtresi uyuşmuyor', 'erisim_kapsami_disi': 'Erişim kapsamı dışı',
+  'parse_error': 'Ayrıştırma hatası'
+} %}
+
+<section class="kart" aria-labelledby="kanit-kontrol-baslik">
+  <h2 id="kanit-kontrol-baslik">Kanıt Kontrolü</h2>
+  <p class="kucukyazi">Bu araç <strong>kanıt eklemez</strong>, kayıt oluşturmaz veya değiştirmez. Dosyanız yalnızca izinli mevcut kayıtlarla salt-okunur karşılaştırılır.</p>
+  {% if hata %}<p class="uyari-serit" role="alert">{{ hata }}</p>{% endif %}
+
+  <form method="post" action="{{ url_for('excel_kontrol') }}" enctype="multipart/form-data" class="filtre-grup">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="islem" value="yukle">
+    <label for="excel-kaynak">Kontrol dosyası</label>
+    <input id="excel-kaynak" type="file" name="excel" accept=".xlsx,.ods,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet,text/csv,text/tab-separated-values,text/plain" required>
+    <button type="submit" class="btn birincil">Yükle ve incele</button>
+  </form>
+  <p class="kucukyazi"><strong>Desteklenenler:</strong> XLSX, ODS, CSV, TSV ve TXT. En çok 12 MB; XLSX/ODS açılmış içerik en çok 128 MB ve en çok 20.000 kontrol satırı. XLS/XLSM/XLSB desteklenmez. ID başında sıfır varsa sütunu <strong>Metin</strong> yapın; sayı/tarih biçimli ID kesin yok sayılmaz.</p>
+</section>
+
+{% if workbook and workbook.get('sheets') %}
+<section class="kart" aria-labelledby="onizleme-baslik">
+  <h2 id="onizleme-baslik">1. Önizleme ve ayrıştırma seçenekleri</h2>
+  <p class="kucukyazi">Başlığı tahmin etmiyoruz: başlık satırını açıkça seçin. <strong>0</strong>, başlık yok anlamına gelir.</p>
+  {% if workbook.get('warnings') %}
+  <ul class="uyari-serit">{% for uyari in workbook.get('warnings', []) %}<li>{{ uyari }}</li>{% endfor %}</ul>
+  {% endif %}
+  <form method="post" action="{{ url_for('excel_kontrol') }}" id="kanit-inceleme-form" class="filtre-grup">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <fieldset>
+      <legend>Kaynak ayrıştırma</legend>
+      {% if kaynak_bicimi in ('xlsx', 'ods') %}
+      <label for="excel-sheet">Çalışma sayfası</label>
+      <select name="sheet" id="excel-sheet">
+        {% for sayfa in workbook.get('sheets', []) %}
+        <option value="{{ sayfa.name }}" {{ 'selected' if sayfa.name == secili_sayfa or (not secili_sayfa and loop.first) }}>{{ sayfa.name }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      {% if workbook.get('extension') == '.txt' %}
+      <label for="text-mode">TXT biçimi</label>
+      <select name="text_mode" id="text-mode"><option value="ids" {{ 'selected' if kaynak_bicimi == 'id_list' }}>Her satır tek ID</option><option value="table" {{ 'selected' if kaynak_bicimi == 'delimited' }}>Ayraçlı tablo</option></select>
+      <p class="kucukyazi">ID modunda virgül ve noktalı virgül ID’nin içinde kalır. Sütunlu TXT için tablo moduna geçip önizlemeyi güncelleyin.</p>
+      {% endif %}
+      {% if kaynak_bicimi in ('delimited','id_list') %}
+      <label for="encoding">Kodlama</label><select name="encoding" id="encoding"><option value="auto">Otomatik</option><option value="utf8bom" {{ 'selected' if secenekler.get('encoding') == 'utf8bom' }}>UTF-8 BOM</option><option value="utf8" {{ 'selected' if secenekler.get('encoding') == 'utf8' }}>UTF-8</option><option value="cp1254" {{ 'selected' if secenekler.get('encoding') == 'cp1254' }}>CP1254 (Türkçe)</option></select>
+      <label for="delimiter">Ayraç (tablo modu)</label><select name="delimiter" id="delimiter"><option value="auto">Otomatik</option><option value="comma" {{ 'selected' if secenekler.get('delimiter') == 'comma' }}>Virgül</option><option value="semicolon" {{ 'selected' if secenekler.get('delimiter') == 'semicolon' }}>Noktalı virgül</option><option value="tab" {{ 'selected' if secenekler.get('delimiter') == 'tab' }}>Tab</option></select>
+      {% endif %}
+      <label for="header-row">Başlık satırı (0: başlıksız)</label><input id="header-row" name="header_row" type="number" min="0" max="100" value="{{ secenekler.get('header_row', workbook.get('header_row', 1)) }}" required>
+      <button name="islem" value="incele" type="submit" class="btn">Önizlemeyi güncelle</button>
+    </fieldset>
+  </form>
+
+  <h3>Seçili yapının önizlemesi</h3>
+  {% for sayfa in workbook.get('sheets', []) %}
+  {% if sayfa.name == secili_sayfa or (not secili_sayfa and loop.first) or kaynak_bicimi not in ('xlsx', 'ods') %}
+  <div class="tablo-kaydir">
+    <table class="tablo">
+      <caption>{{ sayfa.name }} — başlık ve ilk beş veri satırı</caption>
+      <thead><tr>{% for baslik in sayfa.headers %}<th scope="col">{{ baslik.column }} — {{ baslik.label }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for ornek in sayfa.sample %}<tr>{% for deger in ornek %}<td>{{ deger }}</td>{% endfor %}</tr>{% else %}<tr><td>Örnek veri yok.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endfor %}
+</section>
+
+<section class="kart" aria-labelledby="eslestirme-baslik">
+  <h2 id="eslestirme-baslik">2. Kapsam ve eşleştirme</h2>
+  <p class="kucukyazi">En az bir anahtar alan (Personel, Üye ID, Ana üye ID veya Lead ID) zorunludur. Seçilen alanların tamamı eşleşmelidir. Serbest dosya başlığı hiçbir zaman veritabanı alanı değildir.</p>
+  <form method="post" action="{{ url_for('excel_kontrol') }}" id="excel-kontrol-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="islem" value="kontrol">
+    <input type="hidden" name="sheet" value="{{ secili_sayfa or workbook.get('sheets', [])[0].name }}">
+    <input type="hidden" name="header_row" value="{{ secenekler.get('header_row', workbook.get('header_row', 1)) }}">
+    {% if kaynak_bicimi in ('delimited', 'id_list') %}
+      <input type="hidden" name="encoding" value="{{ secenekler.get('encoding', workbook.get('encoding', 'auto')) }}">
+      <input type="hidden" name="delimiter" value="{{ secenekler.get('delimiter', workbook.get('delimiter', 'auto')) }}">
+      <input type="hidden" name="text_mode" value="{{ 'ids' if kaynak_bicimi == 'id_list' else 'table' }}">
+    {% endif %}
+    <fieldset>
+      <legend>Kontrol kapsamı</legend>
+      <label for="project">Projeyi sabitle (isteğe bağlı)</label>
+      <select name="project" id="project">
+        <option value="">İzinli tüm projeler</option>
+        {% for proje in izinli|default([], true) %}<option value="{{ proje }}" {{ 'selected' if secenekler.get('project', '')|lower == proje|lower }}>{{ proje }}</option>{% endfor %}
+      </select>
+      <label for="kt">KT durumu</label>
+      <select name="kt" id="kt">
+        <option value="hepsi" {{ 'selected' if secenekler.get('kt', 'hepsi') == 'hepsi' }}>Hepsi</option>
+        <option value="onayli" {{ 'selected' if secenekler.get('kt') == 'onayli' }}>Yalnız onaylı</option>
+        <option value="bekleyen" {{ 'selected' if secenekler.get('kt') == 'bekleyen' }}>Yalnız bekleyen</option>
+      </select>
+    </fieldset>
+
+    {% if kaynak_bicimi == 'id_list' %}
+    <fieldset>
+      <legend>TXT ID eşleştirmesi</legend>
+      <label for="id-field">Her satırdaki ID alanı</label>
+      <select name="id_field" id="id-field" required>
+        {% for alan, ad in alanlar if alan in ('personel', 'uye_id', 'ana_uye_id', 'lead_id') %}
+        <option value="{{ alan }}" {{ 'selected' if alan in secili_alanlar or secenekler.get('id_field') == alan }}>{{ ad }}</option>
+        {% endfor %}
+      </select>
+      <input type="hidden" name="alan" value="{{ secenekler.get('id_field', secili_alanlar[0] if secili_alanlar else 'personel') }}">
+    </fieldset>
+    {% else %}
+    <fieldset>
+      <legend>Alan eşleştirmesi</legend>
+      <div class="tablo-kaydir">
+        <table class="tablo">
+          <thead><tr><th scope="col">Kanıt alanı</th><th scope="col">Kaynak sütunu</th><th scope="col">Karşılaştır</th></tr></thead>
+          <tbody>
+          {% for alan, ad in alanlar %}
+          <tr>
+            <td><label for="kolon-{{ alan }}">{{ ad }}</label></td>
+            <td><select name="kolon_{{ alan }}" id="kolon-{{ alan }}">
+              <option value="">— eşleme yok —</option>
+              {% for sayfa in workbook.get('sheets', []) if sayfa.name == (secili_sayfa or workbook.get('sheets', [])[0].name) %}
+              {% for baslik in sayfa.headers %}<option value="{{ baslik.column }}" {{ 'selected' if kolonlar.get(alan, '')|upper == baslik.column|upper }}>{{ baslik.column }} — {{ baslik.label }}</option>{% endfor %}
+              {% endfor %}
+            </select></td>
+            <td><label><input type="checkbox" name="alan" value="{{ alan }}" {{ 'checked' if alan in secili_alanlar or (not secili_alanlar and alan == 'personel') }}> {{ ad }} ile karşılaştır</label></td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </fieldset>
+    {% endif %}
+    <p class="kucukyazi">Tarih ve özel alan eşleştirmesi bu sürümün kapsamı dışındadır. Tarih için kontrollü gün/interval kuralı, özel alan için sunucu tarafında tanımlı katalog gerekir.</p>
+    <button type="submit" class="btn birincil">Mevcut kayıtları kontrol et</button>
+  </form>
+</section>
+{% elif upload_ready %}
+<section class="kart"><p role="alert">Yüklenen kaynak önizlenemedi. Desteklenen biçimde yeni bir dosya seçin.</p></section>
+{% endif %}
+
+{% if report %}
+{% set meta = report.get('metadata', {}) %}
+<section class="kart" aria-labelledby="sonuc-baslik">
+  <div class="sekme-satir">
+    <div><h2 id="sonuc-baslik">3. Kontrol sonucu</h2><p class="kucukyazi">Toplam {{ report.total|default(0) }} ilgili satır; {{ meta.get('skipped_blank_rows', 0) }} boş/boolean satır atlandı.</p></div>
+    <div class="gorunumler"><a class="btn" href="{{ url_for('excel_kontrol_indir') }}">Tüm raporu indir</a><a class="btn" href="{{ url_for('excel_kontrol_indir', eksik=1) }}">Yalnız kesin bulunamayanlar</a></div>
+  </div>
+  {% if meta %}
+  <dl class="kucukyazi">
+    <dt>Kontrol zamanı</dt><dd>{{ meta.get('checked_at', '—') }} (kontrol anındaki salt-okunur snapshot)</dd>
+    <dt>Kapsam</dt><dd>{{ meta.get('scope', {}).get('fixed_project') or 'İzinli tüm projeler' }}; KT: {{ meta.get('scope', {}).get('kt', 'hepsi') }}</dd>
+    <dt>Kaynak</dt><dd>{{ meta.get('options', {}).get('format', '—') }}{% if meta.get('options', {}).get('sheet') %}; {{ meta.get('options', {}).get('sheet') }}{% endif %}{% if meta.get('options', {}).get('header_row') is not none %}; başlık satırı {{ meta.get('options', {}).get('header_row') }}{% endif %}</dd>
+  </dl>
+  {% endif %}
+  <div class="filtre-grup" aria-label="Sonuç sayaçları">
+    <span class="rozet">Bulundu: {{ report.found|default(0) }}</span><span class="rozet">Kesin yok: {{ report.missing|default(0) }}</span><span class="rozet">Birden çok: {{ report.multiple|default(report.ambiguous|default(0)) }}</span><span class="rozet">İncelenmeli/geçersiz: {{ report.invalid|default(0) }}</span>
+    <form method="get"><label for="rapor-durum-filtre">Duruma göre göster</label><select id="rapor-durum-filtre" name="rapor_durum"><option value="">Tüm durumlar</option>{% for kod, ad in durumlar.items() %}<option value="{{ kod }}" {{ 'selected' if report_status == kod }}>{{ ad }}</option>{% endfor %}</select><button class="btn">Göster</button></form>
+  </div>
+  <p class="kucukyazi">“Kesin yok” yalnız güvenilir ayrıştırılmış satırlar içindir. Biçim, formül, anahtar veya proje kapsamı belirsizlikleri indirme filtresine girmez.</p>
+  <div class="tablo-kaydir"><table class="tablo" id="excel-rapor-tablosu"><thead><tr><th scope="col">Kaynak satırı</th><th scope="col">Seçilen değerler</th><th scope="col">Durum</th><th scope="col">Mevcut kayıtlar</th></tr></thead><tbody>
+    {% for satir in report.rows|default([], true) %}
+    <tr data-status="{{ satir.status }}"><td>{{ satir.source|default(satir.row) }}</td><td>{% for alan, deger in satir['values'].items() %}<div><small>{{ alan|replace('_', ' ') }}:</small> {{ deger }}</div>{% endfor %}</td><td><strong>{{ durumlar.get(satir.status, satir.status) }}</strong>{% if satir.reason %}<br><small>{{ satir.reason }}</small>{% endif %}</td><td>{% for kid in satir.ids %}<a href="{{ url_for('kayitlar', durum='hepsi', ac=kid) }}">#{{ kid }}</a>{{ ', ' if not loop.last }}{% else %}—{% endfor %}{% if satir.display_remaining %}<br><small>+{{ satir.display_remaining }} eşleşme: tamamı indirme raporunda.</small>{% endif %}{% if satir.truncated %}<br><small>İlk 1000 eşleşme gösteriliyor.</small>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="4">Kontrol edilecek ilgili satır bulunamadı.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block script %}<script>
+(() => { const mode=document.getElementById('text-mode'), header=document.getElementById('header-row'), delimiter=document.getElementById('delimiter');if(!mode)return;function sync(){const ids=mode.value==='ids';if(header){header.disabled=ids;if(ids)header.value='0';}if(delimiter)delimiter.disabled=ids;}mode.addEventListener('change',sync);sync();})();
+</script>{% endblock %}

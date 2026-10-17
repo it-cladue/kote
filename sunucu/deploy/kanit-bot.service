@@ -1,0 +1,22 @@
+[Unit]
+Description=Kanit Paneli Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kanit
+Group=kanit
+WorkingDirectory=/opt/kanit-paneli
+EnvironmentFile=/opt/kanit-paneli/.env
+ExecStart=/opt/kanit-paneli/.venv/bin/python -m app.bot
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=40
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/kanit-paneli/data
+
+[Install]
+WantedBy=multi-user.target

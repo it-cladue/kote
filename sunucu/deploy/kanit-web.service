@@ -1,0 +1,20 @@
+[Unit]
+Description=Kanit Paneli Web
+After=network.target
+
+[Service]
+Type=simple
+User=kanit
+Group=kanit
+WorkingDirectory=/opt/kanit-paneli
+EnvironmentFile=/opt/kanit-paneli/.env
+ExecStart=/opt/kanit-paneli/.venv/bin/python -m app.panel
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/kanit-paneli/data
+
+[Install]
+WantedBy=multi-user.target

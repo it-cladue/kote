@@ -1,0 +1,34 @@
+services:
+  web:
+    build: .
+    image: kanit-paneli:2.0
+    env_file: .env
+    environment:
+      PANEL_VERI: /data
+      DINLE: 0.0.0.0
+      PORT: 8080
+      TRUST_PROXY: "1"
+      TZ: Europe/Istanbul
+    volumes:
+      - ./data:/data
+      - ./eski_veri:/legacy:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/saglik', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  bot:
+    image: kanit-paneli:2.0
+    build: .
+    command: ["python", "-m", "app.bot"]
+    env_file: .env
+    environment:
+      PANEL_VERI: /data
+      TZ: Europe/Istanbul
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    stop_grace_period: 40s

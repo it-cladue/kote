@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block baslik %}Hata {{ kod }}{% endblock %}
+{% block icerik %}
+<div class="kart dar">
+  <h2>{{ kod }}</h2>
+  <p>{{ mesaj }}</p>
+  <a class="btn" href="{{ url_for('ana') }}">Ana sayfaya dön</a>
+</div>
+{% endblock %}

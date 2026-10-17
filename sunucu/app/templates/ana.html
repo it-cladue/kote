@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block baslik %}Kanıt Paneli{% endblock %}
+{% block icerik %}
+<section class="sayfa-baslik ana-baslik">
+  <div><p class="ust-etiket">Kanıt operasyonu</p><h1>İş akışınız</h1><p>Yeni kanıtlar yalnız Telegram üzerinden gelir. Burada kayıtları kontrol edin, onaylayın ve takip edin.</p></div>
+  <div class="baslik-eylemler"><a class="btn birincil" href="{{ url_for('kayitlar', durum='bekleyen') }}">Onay bekleyenleri aç</a><a class="btn" href="{{ url_for('kayitlar', durum='hepsi') }}">Tüm kayıtlar</a></div>
+</section>
+<form class="arama-buyuk" method="get" action="{{ url_for('kayitlar') }}" role="search">
+  <input type="hidden" name="durum" value="hepsi">
+  <label class="ekran-okuyucu" for="ana-arama">Kayıtlarda ara</label>
+  <input id="ana-arama" name="q" placeholder="Personel kodu, üye ID veya Lead ID ile ara" autocomplete="off">
+  <button class="btn birincil">Ara</button>
+</form>
+<section class="ozet-baslik" aria-labelledby="proje-ozet-baslik"><div><p class="ust-etiket">Yetkili projeler</p><h2 id="proje-ozet-baslik">İş yükü özeti</h2></div><p class="kucukyazi">Sayılar arka planda güncellenir; ekran kendiliğinden yenilenmez.</p></section>
+<div class="proje-izgara">
+{% for kart in kartlar %}
+  <article class="proje-kart" style="--proje-renk:{{ renk(kart.proje) }}">
+    <div class="proje-baslik"><span class="rozet" style="background:{{ renk(kart.proje) }};color:{{ metin_rengi(renk(kart.proje)) }}">{{ kart.proje }}</span><small><span data-sayac="{{ kart.proje }}:toplam">{{ kart.toplam }}</span> kayıt</small></div>
+    <div class="proje-butonlar">
+      <a class="sayi-btn bekleyen" href="{{ url_for('kayitlar',proje=kart.proje,durum='bekleyen') }}"><b data-sayac="{{ kart.proje }}:bekleyen">{{ kart.bekleyen }}</b><span>Bekleyen</span></a>
+      <a class="sayi-btn onayli" href="{{ url_for('kayitlar',proje=kart.proje,durum='onayli') }}"><b data-sayac="{{ kart.proje }}:onayli">{{ kart.onayli }}</b><span>Onaylı</span></a>
+      <a class="sayi-btn silinen" href="{{ url_for('kayitlar',proje=kart.proje,durum='silinen') }}"><b data-sayac="{{ kart.proje }}:silinen">{{ kart.silinen }}</b><span>Silinen</span></a>
+    </div>
+    <a class="metin-baglanti" href="{{ url_for('kayitlar',proje=kart.proje,durum='hepsi') }}">Proje kayıtlarını incele <span aria-hidden="true">→</span></a>
+  </article>
+{% else %}
+  <div class="bos-durum"><h2>Yetkili proje yok</h2><p>Bu hesap için henüz proje yetkisi tanımlanmamış.</p></div>
+{% endfor %}
+</div>
+{% endblock %}

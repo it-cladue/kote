@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block baslik %}İşlem Geçmişi — Kanıt Paneli{% endblock %}
+{% block icerik %}
+{% set flt = filters|default({}) %}
+{% set logs = logs|default(kayitlar|default([])) %}
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">İzlenebilirlik</p><h1>İşlem Geçmişi</h1><p>Görüntüleme kapsamınız içindeki kayıt hareketleri gösterilir. Gizli değerler bu ekranda yer almaz.</p></div>
+</section>
+<form class="filtre filtre-kapsamli" method="get" aria-label="İşlem geçmişi filtreleri">
+  <div class="filtre-temel">
+    <div><label for="denetim-ara">Ara</label><input id="denetim-ara" name="q" value="{{ flt.get('q', q|default('')) }}" placeholder="Aktör, işlem veya hedef"></div>
+    <div><label for="denetim-aktor">Aktör</label><input id="denetim-aktor" name="kullanici" value="{{ flt.get('kullanici','') }}" placeholder="Kullanıcı adı"></div>
+    <div><label for="denetim-islem">İşlem</label><input id="denetim-islem" name="islem" value="{{ flt.get('islem','') }}" placeholder="Örn. onay"></div>
+    <div><label for="denetim-proje">Proje</label><select id="denetim-proje" name="proje"><option value="">Tüm yetkili projeler</option>{% for p in projeler() %}<option value="{{ p }}" {{ 'selected' if flt.get('proje','') == p }}>{{ p }}</option>{% endfor %}</select></div>
+    <button class="btn birincil" type="submit">Uygula</button>
+  </div>
+  <details class="gelismis-filtre"><summary>Tarih aralığı</summary><div class="filtre-ileri"><label for="denetim-tarih1">Başlangıç<input id="denetim-tarih1" type="date" name="tarih1" value="{{ flt.get('tarih1','') }}"></label><label for="denetim-tarih2">Bitiş<input id="denetim-tarih2" type="date" name="tarih2" value="{{ flt.get('tarih2','') }}"></label></div></details>
+</form>
+<p class="sonuc-ozeti">{{ toplam|default(logs|length) }} işlem{% if sayfa_sayisi|default(1) > 1 %} · sayfa {{ sayfa|default(1) }} / {{ sayfa_sayisi }}{% endif %}</p>
+<div class="tablo-sarici" tabindex="0" role="region" aria-label="İşlem geçmişi tablosu">
+<table class="tablo denetim-tablo">
+  <thead><tr><th>Zaman</th><th>Aktör</th><th>İşlem</th><th>Hedef</th><th>Proje</th><th>Sonuç</th><th>Ayrıntı</th></tr></thead>
+  <tbody>
+  {% for r in logs %}
+  <tr>
+    <td class="nowrap">{{ r.zaman }}</td><td>{{ r.kullanici or r.aktor or 'Sistem' }}</td><td><code>{{ r.islem }}</code></td>
+    <td>{% if r.hedef_turu or r.hedef_id %}{{ r.hedef_turu or 'Kayıt' }}{% if r.hedef_id %} #{{ r.hedef_id }}{% endif %}{% else %}{{ r.anahtar or '—' }}{% endif %}</td>
+    <td>{% if r.proje %}<span class="rozet" style="background:{{ renk(r.proje) }};color:{{ metin_rengi(renk(r.proje)) }}">{{ r.proje }}</span>{% endif %}</td>
+    <td>{{ r.sonuc or r.aciklama or '—' }}</td>
+    <td>{% if r.eski or r.yeni %}<details class="deger-detay"><summary>Önceki / yeni</summary>{% if r.eski %}<p><b>Önceki:</b> {{ r.eski }}</p>{% endif %}{% if r.yeni %}<p><b>Yeni:</b> {{ r.yeni }}</p>{% endif %}</details>{% else %}<span class="kucukyazi">—</span>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="7"><div class="bos-tablo">Bu filtrede işlem yok.</div></td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% if sayfa_sayisi|default(1) > 1 %}<nav class="sayfalama" aria-label="İşlem geçmişi sayfaları">{% if sayfa > 1 %}<a class="btn" href="{{ url_degistir(s=sayfa-1) }}">‹ Önceki</a>{% endif %}<span>{{ sayfa }} / {{ sayfa_sayisi }}</span>{% if sayfa < sayfa_sayisi %}<a class="btn" href="{{ url_degistir(s=sayfa+1) }}">Sonraki ›</a>{% endif %}</nav>{% endif %}
+{% endblock %}

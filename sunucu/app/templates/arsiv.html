@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block baslik %}Görsel arşivi — Kanıt Paneli{% endblock %}
+{% block icerik %}
+<h1>Telegram görsel arşivi</h1>
+<p>Sunucuya taşıdığınız <code>telegram_gorseller</code> klasörü burada listelenir. İndeks veya dosya kimliğiyle kesin eşleşmeyen görseller tahmin edilmez; bir kayıt ID’si girerek kendiniz ilişkilendirebilirsiniz.</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="tara"><button class="btn birincil">Klasörü tara / indeksi yenile</button></form>
+<form method="get" class="filtre"><input name="q" value="{{ q }}" placeholder="Dosya adında ara"><select name="durum"><option value="eslesmeyen" {{ 'selected' if durum=='eslesmeyen' }}>Eşleşmeyenler</option><option value="hepsi" {{ 'selected' if durum=='hepsi' }}>Hepsi</option></select><button class="btn">Filtrele</button></form>
+<p>{{ toplam }} görsel · sayfa {{ sayfa }} / {{ sayfa_sayisi }}</p>
+<div class="kart-izgara">
+{% for d in dosyalar %}<div class="kart">
+<a href="{{ url_for('arsiv_gorsel',aid=d.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('arsiv_gorsel',aid=d.id,kucuk=1) }}" loading="lazy" style="width:100%;height:160px;object-fit:contain" alt="Arşiv görseli"></a>
+<p style="overflow-wrap:anywhere"><strong>{{ d.ad }}</strong><br>{{ d.proje or 'Proje bilinmiyor' }} · {% if d.kayit_id %}Kayıt #{{ d.kayit_id }}{% else %}Eşleşme yok{% endif %}</p>
+<form method="post" data-onay="Bu görseli girdiğiniz kayıtla ilişkilendirmek istediğinize emin misiniz?">
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="esle"><input type="hidden" name="arsiv_id" value="{{ d.id }}">
+<label>Kayıt ID<input type="number" name="kayit_id" min="1" required placeholder="Kayıtlar tablosundaki ID"></label>
+<label><input type="checkbox" name="ikinci" value="1"> İkinci görsel olarak bağla</label>
+<label><input type="checkbox" name="degistir" value="1"> Varsa mevcut görsel bağını değiştir</label>
+<button class="btn">Kayıtla ilişkilendir</button></form></div>
+{% else %}<div class="kart">Bu filtrede görsel yok. Klasörü sunucuya taşıdıktan sonra taramayı çalıştırın.</div>{% endfor %}
+</div>
+<div class="sayfalama">{% if sayfa>1 %}<a class="btn" href="{{ url_degistir(s=sayfa-1) }}">Önceki</a>{% endif %}{% if sayfa<sayfa_sayisi %}<a class="btn" href="{{ url_degistir(s=sayfa+1) }}">Sonraki</a>{% endif %}</div>
+{% endblock %}

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block baslik %}Kanıt Paneli{% endblock %}</title>
+<meta name="csrf" content="{{ csrf }}">
+<script src="{{ url_for('static', filename='tema.js',v='2.1.0') }}"></script>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="{{ url_for('static', filename='stil.css',v='2.1.0') }}">
+</head>
+<body>
+{% if k %}
+<header class="ust" data-ana-menu>
+  <a class="marka" href="{{ url_for('ana') }}" aria-label="Kanıt Paneli ana sayfa">Kanıt <span>Paneli</span></a>
+  <nav class="menu" aria-label="Ana menü">
+    <a href="{{ url_for('kayitlar') }}" class="{{ 'aktif' if request.endpoint == 'kayitlar' }}">Kayıtlar</a>
+    <a href="{{ url_for('excel_kontrol') }}" class="{{ 'aktif' if request.endpoint == 'excel_kontrol' }}">Kanıt Kontrolü</a>
+    <a href="/bildirimler" class="{{ 'aktif' if request.endpoint == 'bildirim_sayfasi' }}">Bildirimler</a>
+    <a href="{{ url_for('denetim') }}" class="{{ 'aktif' if request.endpoint == 'denetim' }}">İşlem Geçmişi</a>
+    {% if yk.admin %}
+    <details class="yonetim-menu">
+      <summary>Yönetim</summary>
+      <div class="yonetim-acilir">
+        <a href="/yonetim/katalog">Proje / Kategoriler</a>
+        <a href="{{ url_for('yonetim_kullanicilar') }}">Kullanıcılar</a>
+        <a href="{{ url_for('bot_sayfasi') }}">Bot</a>
+        <a href="{{ url_for('arsiv') }}">Arşiv</a>
+      </div>
+    </details>
+    {% endif %}
+  </nav>
+  <div class="kullanici">
+    <button type="button" class="btn kucuk tema-dugmesi" data-tema-toggle>Koyu tema</button>
+    <button type="button" id="zil" class="zil" aria-label="Bildirimleri aç" aria-expanded="false" aria-controls="bildirim-kutu"><span aria-hidden="true">Bildirimler</span><span id="zil-sayi" class="zil-sayi gizli">0</span></button>
+    <span class="kullanici-adi">{{ k.ad or k.kullanici_adi }}</span>
+    <a href="{{ url_for('sifre_degistir') }}">Şifre</a>
+    <form method="post" action="{{ url_for('cikis') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn kucuk">Çıkış</button></form>
+  </div>
+</header>
+{% if k.sifre_degistir %}
+<div class="uyari-serit" role="status">Geçici şifre ile girdiniz. <a href="{{ url_for('sifre_degistir') }}">Şifrenizi değiştirin</a>.</div>
+{% endif %}
+{% endif %}
+{% with mesajlar = get_flashed_messages() %}
+  {% if mesajlar %}<div class="bilgi-serit" role="status">{% for m in mesajlar %}<div>{{ m }}</div>{% endfor %}</div>{% endif %}
+{% endwith %}
+<main class="icerik">
+{% block icerik %}{% endblock %}
+</main>
+<div id="toast" class="toast gizli" role="status" aria-live="polite"></div>
+<div id="bildirim-kutu" class="bildirim-kutu gizli" aria-label="Son bildirimler" aria-live="polite">
+  <div class="bildirim-baslik"><b>Bildirimler</b><span id="bildirim-izin" class="gizli"><button type="button" class="btn kucuk" id="bildirim-izin-btn">Masaüstü bildirimlerini aç</button></span></div>
+  <ul id="bildirim-liste"></ul>
+  <div class="bildirim-alt"><a href="/bildirimler">Tüm bildirimler</a><button type="button" class="btn kucuk" id="bildirim-temizle">Tümünü okundu işaretle</button></div>
+</div>
+<div id="degisiklik-serit" class="degisiklik-serit gizli" role="status">Yeni kayıt veya değişiklik var. <button type="button" class="serit-dugme" id="degisiklik-yenile">Sonuçları yenile</button></div>
+<script>
+window.PANEL_KULLANICI = {{ (k.kullanici_adi if k else "")|tojson }};
+window.PROJE_RENKLERI = {{ proje_renkleri|default({})|tojson }};
+</script>
+<script src="{{ url_for('static', filename='panel.js',v='2.1.0') }}"></script>
+{% if k %}<script>Panel.bildirimler();</script>{% endif %}
+{% block script %}{% endblock %}
+</body>
+</html>

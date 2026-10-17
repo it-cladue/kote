@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block baslik %}Bildirimler — Kanıt Paneli{% endblock %}
+{% block icerik %}
+{% set flt = filters|default({}) %}
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">Kişisel kutu</p><h1>Bildirimler</h1><p>Yalnız size ait ve halen erişebildiğiniz kayıtların bildirimleri gösterilir.</p></div>
+  <div class="baslik-eylemler"><button class="btn" type="button" id="bildirimler-tum-okundu">Tümünü okundu işaretle</button></div>
+</section>
+<form method="get" class="filtre filtre-kapsamli" aria-label="Bildirim filtreleri">
+  <div class="filtre-temel">
+    <div><label for="bildirim-durum">Durum</label><select id="bildirim-durum" name="okundu"><option value="" {{ 'selected' if not flt.get('okundu','') }}>Tümü</option><option value="0" {{ 'selected' if flt.get('okundu','') in ['0','okunmamis'] }}>Okunmamış</option><option value="1" {{ 'selected' if flt.get('okundu','') in ['1','okundu'] }}>Okunmuş</option></select></div>
+    <div><label for="bildirim-tur">Tür</label><select id="bildirim-tur" name="tur"><option value="">Tüm türler</option>{% for code, label in [('onay','Onay'),('yorum','Yorum'),('soru','Soru'),('yanit','Yanıt'),('kanit','Yeni kanıt'),('onay_kaldir','Onay kaldırıldı')] %}<option value="{{ code }}" {{ 'selected' if flt.get('tur','') == code }}>{{ label }}</option>{% endfor %}</select></div>
+    <div><label for="bildirim-tarih1">Başlangıç</label><input id="bildirim-tarih1" type="date" name="tarih1" value="{{ flt.get('tarih1','') }}"></div>
+    <div><label for="bildirim-tarih2">Bitiş</label><input id="bildirim-tarih2" type="date" name="tarih2" value="{{ flt.get('tarih2','') }}"></div>
+    <button class="btn birincil">Uygula</button><a class="btn" href="/bildirimler">Temizle</a>
+  </div>
+</form>
+<p class="sonuc-ozeti">{{ toplam|default(bildirimler|length) }} bildirim{% if sayfa_sayisi|default(1)>1 %} · sayfa {{ sayfa|default(1) }} / {{ sayfa_sayisi }}{% endif %}</p>
+<div class="bildirim-sayfa-listesi" id="bildirim-sayfa-listesi">
+{% for n in bildirimler %}
+  <article class="bildirim-satir {{ 'okunmamis' if not n.okundu }}">
+    <div class="bildirim-satir-baslik"><div>{% if n.proje %}<span class="rozet" style="background:{{ renk(n.proje) }};color:{{ metin_rengi(renk(n.proje)) }}">{{ n.proje }}</span>{% endif %}<b>{{ {'soru':'Soru','yanit':'Yanıt','yorum':'Yorum','onay':'Onay','kanit':'Yeni kanıt','kayit':'Yeni kayıt','onay_kaldir':'Onay kaldırıldı'}.get(n.tur, n.tur or 'Bildirim') }}</b></div><time datetime="{{ n.zaman }}">{{ n.zaman }}</time></div>
+    <p>{{ n.metin or 'Kayıt hareketi' }}</p>
+    <div class="bildirim-satir-alt"><span>{% if n.kim %}{{ n.kim }}{% endif %}{% if n.kayit_id %} · Kayıt #{{ n.kayit_id }}{% endif %}</span>{% if n.kayit_id %}<a href="{{ url_for('kayitlar', proje=n.proje, durum='hepsi', ac=n.kayit_id) }}" data-bildirim-link data-bildirim-key="{{ n.key }}">Kaydı aç</a>{% endif %}{% if not n.okundu %}<button class="btn kucuk" type="button" data-bildirim-okundu="{{ n.key }}">Okundu işaretle</button>{% endif %}</div>
+  </article>
+{% else %}<div class="bos-durum"><h2>Bildirim yok</h2><p>Seçtiğiniz koşullara uyan kişisel bildirim bulunmuyor.</p></div>{% endfor %}
+</div>
+{% if sayfa_sayisi|default(1)>1 %}<nav class="sayfalama" aria-label="Bildirim sayfaları">{% if sayfa > 1 %}<a class="btn" href="{{ url_degistir(s=sayfa-1) }}">‹ Önceki</a>{% endif %}<span>{{ sayfa }} / {{ sayfa_sayisi }}</span>{% if sayfa < sayfa_sayisi %}<a class="btn" href="{{ url_degistir(s=sayfa+1) }}">Sonraki ›</a>{% endif %}</nav>{% endif %}
+{% endblock %}
+{% block script %}<script>Panel.bildirimSayfasi();</script>{% endblock %}

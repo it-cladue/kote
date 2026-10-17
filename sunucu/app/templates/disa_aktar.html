@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block baslik %}Çıktı al (Excel) - Kanıt Paneli{% endblock %}
+{% block icerik %}
+<div class="kart" style="max-width: 760px">
+  <h2>Çıktı al: Excel</h2>
+  <p class="kucukyazi">Seçtiğiniz tarih aralığında eklenen kanıtlar sütun sütun bir Excel dosyasına yazılır ve indirilir (Proje, Kategori, Personel, Üye ID, Ana ID, Tür, Tarih, Link, Onay, Onaylayan, Ekleyen, Açıklama…). İkinci sayfada proje özeti bulunur.</p>
+  <form method="get" action="{{ url_for('disa_aktar_xlsx') }}">
+    <div class="filtre-grup" style="margin-bottom:10px">
+      <span class="etiket">Proje</span>
+      {% for p in izinli %}
+      <label class="cip" style="--renk: {{ renk(p) }}; --cipyazi: {{ metin_rengi(renk(p)) }}"><input type="checkbox" name="proje" value="{{ p }}"><span>{{ p }}</span></label>
+      {% endfor %}
+      <small>(hiçbiri seçili değilse hepsi)</small>
+    </div>
+    <div class="filtre-grup" style="margin-bottom:10px">
+      <label style="margin:0">Başlangıç<input type="date" name="tarih1" value="{{ tarih1 }}"></label>
+      <label style="margin:0">Bitiş<input type="date" name="tarih2" value="{{ tarih2 }}"></label>
+      <label style="margin:0">Durum<select name="durum"><option value="hepsi">Hepsi</option><option value="onayli">Sadece onaylı</option><option value="bekleyen">Sadece onay bekleyen</option><option value="silinen">Sadece silinen</option></select></label>
+      <label style="margin:0">Kategori<select name="kategori"><option value="">Tümü</option>{% for kat in kategoriler %}<option value="{{ kat }}">{{ kat }}</option>{% endfor %}</select></label>
+    </div>
+    <div class="filtre-grup" style="margin-bottom:10px">
+      <input name="q" placeholder="Personel kodu / üye ID (isteğe bağlı)" class="arama">
+      <input name="ekleyen" placeholder="Ekleyen (isteğe bağlı)">
+      <label class="cip" style="--renk:#999;--cipyazi:#fff"><input type="checkbox" name="tarihsiz" value="1"><span>Tarihsiz kayıtlar</span></label>
+    </div>
+    <button class="btn birincil">⬇ Excel indir</button>
+  </form>
+  <p class="kucukyazi" style="margin-top:12px">Not: Tarih, botun kaydı yazdığı andır. "Tarihsiz kayıtlar" seçeneği eski (tarih sütunu boş) satırları listeler; tarih aralığıyla birlikte kullanılamaz.</p>
+</div>
+{% endblock %}
+
+{% block script %}<script>(function(){var cb=document.querySelector('[name=tarihsiz]');cb.addEventListener('change',function(){document.querySelector('[name=tarih1]').disabled=cb.checked;document.querySelector('[name=tarih2]').disabled=cb.checked;});})();</script>{% endblock %}
