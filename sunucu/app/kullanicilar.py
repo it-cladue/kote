@@ -60,6 +60,9 @@ def ekle(ayar, ad, yetki_metni, sifre, gorunen_ad=None, olusturan=None):
 
 def guncelle(ayar, ad, expected_version=None, islem_yapan=None, **alanlar):
     ad = str(ad or '').strip().lower()
+    if 'gorunen_ad' in alanlar:
+        # 'ad' konumsal parametre kullanıcı adıdır; görünen ad alanı 'gorunen_ad' anahtarıyla gelir.
+        alanlar['ad'] = str(alanlar.pop('gorunen_ad') or ad)[:120]
     password_changed = 'sifre' in alanlar
     if password_changed:
         if len(alanlar['sifre'] or '') < 8:

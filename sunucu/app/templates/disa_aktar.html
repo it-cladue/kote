@@ -8,33 +8,47 @@
 <div class="iki-kolon">
 <section class="kart" aria-labelledby="cikti-baslik">
   <h2 id="cikti-baslik">Çıktı koşulları</h2>
+  {% set f = f|default({}) %}
+  {% if hata %}<div class="hata" role="alert" id="cikti-hata">{{ hata }}</div>{% endif %}
+  <div class="bilgi uyari gizli" role="status" id="cikti-uyari"><span id="cikti-uyari-metin"></span> <a id="cikti-bos-indir" href="#">Yine de boş dosyayı indir</a></div>
   <form method="get" action="{{ url_for('disa_aktar_xlsx') }}" id="cikti-form">
     <fieldset class="proje-secimi" style="padding:0 0 14px;margin-bottom:14px"><legend>Proje</legend>
       <div class="proje-secim-satiri">
-        <div class="proje-cipleri">{% for p in izinli %}<label class="cip" style="--renk: {{ renk(p) }}; --cipyazi: {{ metin_rengi(renk(p)) }}"><input type="checkbox" name="proje" value="{{ p }}"><span>{{ p }}</span></label>{% endfor %}</div>
-        <small>Hiçbiri seçili değilse tüm yetkili projeler dahil edilir.</small>
+        <div class="proje-cipleri">{% for p in izinli %}<label class="cip" style="--renk: {{ renk(p) }}; --cipyazi: {{ metin_rengi(renk(p)) }}"><input type="checkbox" name="proje" value="{{ p }}" {{ 'checked' if p in f.get('proje',[]) }}><span>{{ p }}</span></label>{% endfor %}</div>
+        <small>Hiçbiri seçili değilse yetkili olduğunuz tüm projeler dahil edilir.</small>
       </div>
     </fieldset>
     <div class="form-iki">
-      <label for="cikti-tarih1">Başlangıç<input id="cikti-tarih1" type="date" name="tarih1" value="{{ tarih1 }}"></label>
-      <label for="cikti-tarih2">Bitiş<input id="cikti-tarih2" type="date" name="tarih2" value="{{ tarih2 }}"></label>
-      <label for="cikti-durum">Durum<select id="cikti-durum" name="durum"><option value="hepsi">Hepsi</option><option value="onayli">Sadece onaylı</option><option value="bekleyen">Sadece onay bekleyen</option><option value="silinen">Sadece silinen</option></select></label>
-      <label for="cikti-kategori">Kategori<select id="cikti-kategori" name="kategori"><option value="">Tüm kategoriler</option>{% for kat in kategoriler %}<option value="{{ kat }}">{{ kat }}</option>{% endfor %}</select></label>
-      <label for="cikti-q">Personel / üye ID<input id="cikti-q" name="q" placeholder="İsteğe bağlı" autocomplete="off"></label>
-      <label for="cikti-ekleyen">Ekleyen<input id="cikti-ekleyen" name="ekleyen" placeholder="Telegram adı veya ID (isteğe bağlı)"></label>
+      <label for="cikti-tarih1">Başlangıç tarihi<input id="cikti-tarih1" type="date" name="tarih1" value="{{ f.get('tarih1','') }}"></label>
+      <label for="cikti-tarih2">Bitiş tarihi<input id="cikti-tarih2" type="date" name="tarih2" value="{{ f.get('tarih2','') }}" aria-describedby="cikti-tarih-hata"></label>
+      <label for="cikti-durum">Onay durumu<select id="cikti-durum" name="durum">{% for v,t in [('hepsi','Hepsi'),('onayli','Yalnız onaylı'),('bekleyen','Yalnız onay bekleyen'),('silinen','Yalnız silinen')] %}<option value="{{ v }}" {{ 'selected' if f.get('durum','hepsi')==v }}>{{ t }}</option>{% endfor %}</select></label>
+      <label for="cikti-kategori">Kategori<select id="cikti-kategori" name="kategori"><option value="">Tüm kategoriler</option>{% for kat in kategoriler %}<option value="{{ kat }}" {{ 'selected' if f.get('kategori','')|lower==kat|lower }}>{{ kat }}</option>{% endfor %}</select></label>
+      <label for="cikti-q">Arama <small>(personel, üye ID, lead, açıklama, ekleyen, kategori)</small><input id="cikti-q" name="q" value="{{ f.get('q','') }}" placeholder="İsteğe bağlı" autocomplete="off"></label>
+      <label for="cikti-ekleyen">Ekleyen kişi<input id="cikti-ekleyen" name="ekleyen" value="{{ f.get('ekleyen','') }}" placeholder="Telegram adı veya ID (isteğe bağlı)"></label>
     </div>
-    <label class="satir-label"><input type="checkbox" name="tarihsiz" value="1" id="cikti-tarihsiz"> Yalnız tarihsiz (eski) kayıtlar</label>
+    <p id="cikti-tarih-hata" class="form-hata gizli" role="alert"></p>
+    <label class="satir-label"><input type="checkbox" name="tarihsiz" value="1" id="cikti-tarihsiz" {{ 'checked' if f.get('tarihsiz') }}> Yalnız tarihsiz (eski) kayıtlar</label>
     <p class="yardim-metni">Tarih, botun kaydı yazdığı andır. "Tarihsiz kayıtlar" seçeneği tarih sütunu boş eski satırları listeler ve tarih aralığıyla birlikte kullanılamaz.</p>
-    <div class="form-eylemler"><button class="btn birincil">Excel indir (.xlsx)</button><a class="btn" href="{{ url_for('kayitlar', durum='hepsi') }}">Önce kayıtlara bak</a></div>
+    <div class="form-eylemler"><button class="btn birincil" id="cikti-indir">Excel dosyasını indir</button><a class="btn" href="{{ url_for('kayitlar', durum='hepsi') }}">Önce kayıtlara bak</a></div>
   </form>
 </section>
 <section class="kart" aria-labelledby="cikti-icerik-baslik">
   <h2 id="cikti-icerik-baslik">Dosyada neler var?</h2>
-  <p class="kucukyazi">Kayıtlar sayfası: Kayıt ID, Proje, Kategori, Personel, Üye ID, Ana üye ID, Tür, Tarih, KT (onay), Onaylayan, Ekleyen, Lead ID, Eski link, Açıklama, Ek not ve ek soru cevapları.</p>
-  <p class="kucukyazi">Proje özeti sayfası: proje başına toplam kayıt, onaylı ve onay bekleyen sayıları.</p>
-  <p class="kucukyazi">Formül gibi başlayan değerler güvenlik için metin olarak yazılır. Yalnız yetkili olduğunuz projeler dosyaya girer.</p>
+  <p class="kucukyazi">"Kayıtlar" sayfası: Kayıt ID, Proje, Kategori, Personel, Üye ID, Ana üye ID, Tür, Tarih, Onay (KT), Onaylayan, Ekleyen, Lead ID, Eski bağlantı, Açıklama, Ek not ve ek soru cevapları.</p>
+  <p class="kucukyazi">"Proje özeti" sayfası: proje başına toplam kayıt, onaylı ve onay bekleyen sayıları.</p>
+  <p class="kucukyazi">Formül gibi başlayan değerler güvenlik için düz metin olarak yazılır. Dosyaya yalnız yetkili olduğunuz projeler girer. Seçime uyan kayıt yoksa dosya indirilmez, bu sayfada uyarı gösterilir.</p>
 </section>
 </div>
 {% endblock %}
 
-{% block script %}<script>(function(){var cb=document.getElementById('cikti-tarihsiz');if(!cb)return;function sync(){document.getElementById('cikti-tarih1').disabled=cb.checked;document.getElementById('cikti-tarih2').disabled=cb.checked;}cb.addEventListener('change',sync);sync();})();</script>{% endblock %}
+{% block script %}<script>(function(){var cb=document.getElementById('cikti-tarihsiz'),t1=document.getElementById('cikti-tarih1'),t2=document.getElementById('cikti-tarih2'),hata=document.getElementById('cikti-tarih-hata'),form=document.getElementById('cikti-form');if(!cb||!t1||!t2||!form)return;
+function sync(){t1.disabled=cb.checked;t2.disabled=cb.checked;if(cb.checked)kontrol();}
+function kontrol(){var ters=!cb.checked&&t1.value&&t2.value&&t1.value>t2.value;t2.setCustomValidity(ters?'Başlangıç tarihi bitiş tarihinden sonra olamaz.':'');if(hata){hata.textContent=ters?'Başlangıç tarihi bitiş tarihinden sonra olamaz; tarihleri düzeltin.':'';hata.classList.toggle('gizli',!ters);}return !ters;}
+cb.addEventListener('change',sync);t1.addEventListener('input',kontrol);t2.addEventListener('input',kontrol);t1.addEventListener('change',kontrol);t2.addEventListener('change',kontrol);
+var uyari=document.getElementById('cikti-uyari'),uyariMetin=document.getElementById('cikti-uyari-metin'),bosIndir=document.getElementById('cikti-bos-indir'),indir=document.getElementById('cikti-indir');
+function uyariGoster(metin,url){if(!uyari)return;uyariMetin.textContent=metin;bosIndir.href=url;bosIndir.classList.toggle('gizli',!url);uyari.classList.remove('gizli');uyari.scrollIntoView({block:'nearest'});}
+form.addEventListener('submit',function(e){if(!kontrol()){e.preventDefault();t2.focus();return;}if(!window.fetch||!window.URLSearchParams)return;e.preventDefault();
+var url=form.action+'?'+new URLSearchParams(new FormData(form)).toString();if(uyari)uyari.classList.add('gizli');if(hata)hata.classList.add('gizli');
+if(indir){indir.disabled=true;indir.textContent='Hazırlanıyor…';}
+function serbest(){if(indir){indir.disabled=false;indir.textContent='Excel dosyasını indir';}}
+fetch(url+'&sayim=1',{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}}).then(function(r){return r.json().catch(function(){return {};}).then(function(d){if(r.status===401){window.location.href='/giris?neden=oturum&sonraki='+encodeURIComponent(window.location.pathname);return;}if(!r.ok){if(hata){hata.textContent=d.hata||'Çıktı hazırlanamadı; koşulları kontrol edin.';hata.classList.remove('gizli');}serbest();return;}if(d.adet===0){uyariGoster(d.mesaj||'Seçime uyan kayıt yok; dosya indirilmedi.',url);serbest();return;}window.location.href=url;setTimeout(serbest,2500);});}).catch(function(){window.location.href=url;setTimeout(serbest,2500);});});sync();})();</script>{% endblock %}

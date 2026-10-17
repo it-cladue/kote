@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from flask import Flask, g, request, session, redirect, url_for, render_template, jsonify, abort, send_file, flash
+from flask.sessions import SecureCookieSessionInterface
 from werkzeug.datastructures import MultiDict
 from functools import wraps
 from PIL import Image, UnidentifiedImageError
@@ -30,6 +31,16 @@ if len(secret) < 32:
     raise RuntimeError('SESSION_SECRET en az 32 karakter olmalı.')
 app = Flask(__name__)
 app.secret_key = secret
+CEREZSIZ_UCLAR=('static','saglik')
+
+class _CerezsizOturum(SecureCookieSessionInterface):
+    """Sağlık denetimi ve statik dosyalar oturum çerezi yazmaz (kalıcı oturum tazelemesi dahil)."""
+    def save_session(self,app,session,response):
+        if request.endpoint in CEREZSIZ_UCLAR and not session.modified:
+            return None
+        return super().save_session(app,session,response)
+
+app.session_interface=_CerezsizOturum()
 secure = str(AYAR['HTTPS']).lower() in ('1','true')
 app.config.update(SESSION_COOKIE_NAME='kanit_session', SESSION_COOKIE_HTTPONLY=True,
                   SESSION_COOKIE_SECURE=secure, SESSION_COOKIE_SAMESITE='Lax',
@@ -113,18 +124,41 @@ def url_degistir(**kw):
 def ip():
     return request.remote_addr
 
+OTURUM_MESAJI='Oturumunuz sona erdi; yetkileriniz güncellendi veya şifreniz değişti. Lütfen yeniden giriş yapın.'
+
+def _sonraki_hedef():
+    """Giriş sonrası dönülecek adres: sorgu dizesi korunur, yalnız site içi yol kabul edilir."""
+    if request.method not in ('GET','HEAD'):return '/'
+    target=(request.full_path if request.query_string else request.path).rstrip('?')
+    if not target.startswith('/') or target.startswith('//') or '\\' in target or len(target)>2000:return '/'
+    return target
+
+def _oturum_dustu_yaniti():
+    """Yetki/şifre değişince düşen oturum: XHR'a JSON 401, sayfaya açıklamalı giriş yönlendirmesi."""
+    if _json_bekleniyor():
+        return jsonify(ok=False,hata='Oturumunuz sona erdi, sayfayı yenileyin.',kod=401,oturum=False,giris=url_for('giris',neden='oturum')),401
+    return redirect(url_for('giris',neden='oturum',sonraki=_sonraki_hedef()))
+
 @app.before_request
 def before():
-    g.k=None
+    g.k=None;g.oturum_dustu=False
+    if request.endpoint in CEREZSIZ_UCLAR:
+        # Sağlık denetimi ve statik dosyalar oturum çerezi üretmez.
+        g.yk=yetki.coz('');return None
     if session.get('kad'):
         row=baglanti().execute('SELECT * FROM panel_kullanicilari WHERE kullanici_adi=?',(session['kad'],)).fetchone();u=dict(row) if row else None
         if u and u['aktif'] and session.get('sv')==u['session_version']:
             g.k=u
         else:
-            session.clear()
+            # Yetki/şifre değişti veya hesap kapandı: işaret, zil yoklaması gibi XHR'lar tarafından tüketilmesin diye
+            # giriş sayfası görülene kadar oturumda kalır.
+            session.clear();session['dustu']=1;g.oturum_dustu=True
+    elif session.get('dustu'):
+        g.oturum_dustu=True
     g.yk=yetki.coz(g.k['yetki'] if g.k else '')
     session.setdefault('csrf',secrets.token_hex(24))
     if request.method in ('POST','PUT','PATCH','DELETE'):
+        if g.oturum_dustu:return _oturum_dustu_yaniti()
         token=request.form.get('csrf') or request.headers.get('X-CSRF','')
         if not secrets.compare_digest(token,session.get('csrf','')):
             abort(400,'Geçersiz CSRF. Sayfayı yenileyin.')
@@ -155,7 +189,9 @@ def giris_gerekli(f):
     @wraps(f)
     def wrapper(*a,**kw):
         if not g.k:
-            return redirect(url_for('giris',sonraki=request.path))
+            if g.get('oturum_dustu'):return _oturum_dustu_yaniti()
+            if _json_bekleniyor():return jsonify(ok=False,hata='Giriş gerekli; sayfayı yenileyip yeniden giriş yapın.',kod=401,giris=url_for('giris')),401
+            return redirect(url_for('giris',sonraki=_sonraki_hedef()))
         if g.k['sifre_degistir'] and request.endpoint not in ('sifre_degistir','cikis'):
             return redirect(url_for('sifre_degistir'))
         return f(*a,**kw)
@@ -194,7 +230,9 @@ def giris():
         time.sleep(.3)
     if not kullanicilar.var_mi(AYAR):
         hata='Henüz panel hesabı oluşturulmadı. Sunucuda python -m app.cli admin-ekle komutunu çalıştırın.'
-    return render_template('giris.html',hata=hata)
+    dustu=bool(session.pop('dustu',None))
+    bilgi=OTURUM_MESAJI if request.method=='GET' and (request.args.get('neden')=='oturum' or dustu) and not g.k else None
+    return render_template('giris.html',hata=hata,bilgi=bilgi)
 
 @app.route('/cikis',methods=['POST'])
 def cikis():
@@ -285,7 +323,7 @@ def _filtre_sql(args,izinli):
     if cat: where.append('kategori COLLATE UNICODE_NOCASE=?'); par.append(cat)
     q=args.get('q','').strip()[:200]
     if q:
-        where.append('(personel LIKE ? OR uye_id LIKE ? OR ana_uye_id LIKE ? OR lead_id LIKE ? OR link LIKE ?)'); par += ['%'+q+'%']*5
+        where.append('(personel LIKE ? OR uye_id LIKE ? OR ana_uye_id LIKE ? OR lead_id LIKE ? OR link LIKE ? OR aciklama LIKE ? OR ekleyen_ad LIKE ? OR kategori LIKE ?)'); par += ['%'+q+'%']*8
     by=args.get('ekleyen','').strip()[:100]
     if by: where.append('(ekleyen_ad LIKE ? OR ekleyen_id=?)'); par += ['%'+by+'%',by]
     dates={}
@@ -586,13 +624,15 @@ def yonetim_kullanicilar():
             expected=request.form.get('expected_version',request.form.get('sv','-1'))
             actor=g.k['kullanici_adi']
             if op=='ekle':
+                uretildi=not request.form.get('sifre')
                 password=request.form.get('sifre') or secrets.token_urlsafe(15)
                 kullanicilar.ekle(AYAR,ad,_role_from_form(),password,request.form.get('gorunen_ad') or ad,actor)
-                mesaj='Hesap açıldı: '+ad+' — ilk girişte değiştirilecek parola: '+password
+                session['gecici_sifre']={'ad':ad,'sifre':password,'uretildi':uretildi}
+                mesaj='Hesap açıldı: '+ad+'. İlk girişte değiştirilecek şifre aşağıdaki kutuda.'
             elif op=='guncelle':
                 fields=dict(yetki=_role_from_form(),aktif=1 if request.form.get('aktif')=='1' else 0,
                             sifre_degistir=1 if request.form.get('sifredegistir')=='1' else 0,
-                            ad=request.form.get('gorunen_ad') or ad)
+                            gorunen_ad=(request.form.get('gorunen_ad') or ad).strip())
                 if ad==actor and not fields['aktif']:raise ValueError('Kendi hesabınızı kapatamazsınız.')
                 if request.form.get('sifre'):fields['sifre']=request.form['sifre']
                 kullanicilar.guncelle(AYAR,ad,expected_version=expected,islem_yapan=actor,**fields)
@@ -601,7 +641,9 @@ def yonetim_kullanicilar():
                 kullanicilar.guncelle(AYAR,ad,expected_version=expected,islem_yapan=actor,yetki=_role_from_form());mesaj='Yetki güncellendi.'
             elif op=='sifre':
                 password=secrets.token_urlsafe(15)
-                kullanicilar.guncelle(AYAR,ad,expected_version=expected,islem_yapan=actor,sifre=password,sifre_degistir=1);mesaj=ad+' geçici parola: '+password
+                kullanicilar.guncelle(AYAR,ad,expected_version=expected,islem_yapan=actor,sifre=password,sifre_degistir=1)
+                session['gecici_sifre']={'ad':ad,'sifre':password,'uretildi':True}
+                mesaj=ad+' için geçici şifre üretildi; aşağıdaki kutudan kopyalayın.'
             elif op=='pasif':
                 if ad==actor:raise ValueError('Kendi hesabınızı kapatamazsınız.')
                 user=kullanicilar.bul(AYAR,ad)
@@ -617,7 +659,8 @@ def yonetim_kullanicilar():
         safe.update(ozet=yetki.ozet(user['yetki']),parsed_yetkiler=dict(rol='superadmin' if parsed['admin'] else 'admin',
                     projeler=list(parsed['projeler']),eylemler={p:list(a) for p,a in parsed['projeler'].items()}))
         users.append(safe)
-    return render_template('kullanicilar.html',kullanicilar=users,mesaj=mesaj,tum_projeler=projeler())
+    gecici=session.pop('gecici_sifre',None) if request.method=='GET' else None
+    return render_template('kullanicilar.html',kullanicilar=users,mesaj=mesaj,tum_projeler=projeler(),gecici_sifre=gecici)
 
 
 @app.route('/bot',methods=['GET','POST'])
@@ -625,9 +668,10 @@ def yonetim_kullanicilar():
 def bot_sayfasi():
     c=baglanti(); mesaj=None
     if request.method=='POST':
-        op=request.form.get('islem'); tg=request.form.get('tg_id','').strip(); ad=request.form.get('ad',''); kim=g.k['kullanici_adi']
+        op=request.form.get('islem'); tg=request.form.get('tg_id','').strip(); ad=request.form.get('ad','').strip(); kim=g.k['kullanici_adi']
         try:
-            if op=='onayla': bot_yonetim.onayla(AYAR,c,tg,ad or tg,kim)
+            # Ad boşsa kullanıcının Telegram'dan gelen adı korunur; sayısal ID ada yazılmaz.
+            if op=='onayla': bot_yonetim.onayla(AYAR,c,tg,ad,kim)
             elif op=='onay_kaldir': bot_yonetim.onay_kaldir(AYAR,c,tg,kim)
             elif op=='engelle': bot_yonetim.engelle(AYAR,c,tg,ad,request.form.get('sebep') or 'panel',kim)
             elif op=='engel_kaldir': bot_yonetim.engel_kaldir(AYAR,c,tg,kim)
@@ -646,7 +690,10 @@ def bot_sayfasi():
             else: raise ValueError('Bilinmeyen işlem.')
             mesaj='İşlem sunucuya uygulandı.'
         except (ValueError,OSError) as e: mesaj='Hata: '+str(e)
-    return render_template('bot.html',mesaj=mesaj,durum=durum_bilgisi(),istatistik=bot_yonetim.istatistik(c),kullanici_q=request.args.get('q',''),kullanici_durum=request.args.get('tg_durum','hepsi'),kullanici_sure=request.args.get('sure',''),tg_kullanicilar=bot_yonetim.kullanicilari_ara(c,request.args.get('q',''),request.args.get('tg_durum','hepsi'),request.args.get('sure',''),limit=500),olu_mektuplar=[dict(r) for r in c.execute("SELECT bot_id,update_id,deneme,hata,guncelleme FROM tg_gelen WHERE durum='olu' ORDER BY guncelleme DESC LIMIT 50")],kategoriler=bot_yonetim.kategoriler(AYAR),bakim=bot_yonetim.bakim_modu(AYAR),oturumlar=bot_yonetim.oturumlar(AYAR),log=bot_yonetim.son_log(AYAR,150),hatalar=bot_yonetim.son_log(AYAR,40,True),cfg=bot_yonetim.config(AYAR),islemler=bot_yonetim.son_islemler(c))
+    sure=bot_yonetim.sure_normalle(request.args.get('sure',''))
+    if request.args.get('sure','') and not sure and not mesaj: mesaj='Son görülme filtresi tanınmadı; tüm zamanlar gösteriliyor.'
+    tg_durum=request.args.get('tg_durum','hepsi') if request.args.get('tg_durum','hepsi') in ('hepsi','onayli','engelli','onaysiz') else 'hepsi'
+    return render_template('bot.html',mesaj=mesaj,durum=durum_bilgisi(),istatistik=bot_yonetim.istatistik(c),kullanici_q=request.args.get('q','')[:100],kullanici_durum=tg_durum,kullanici_sure=sure,tg_kullanicilar=bot_yonetim.kullanicilari_ara(c,request.args.get('q',''),tg_durum,sure,limit=500),olu_mektuplar=[dict(r) for r in c.execute("SELECT bot_id,update_id,deneme,hata,guncelleme FROM tg_gelen WHERE durum='olu' ORDER BY guncelleme DESC LIMIT 50")],kategoriler=bot_yonetim.kategoriler(AYAR),bakim=bot_yonetim.bakim_modu(AYAR),oturumlar=bot_yonetim.oturumlar(AYAR),log=bot_yonetim.son_log(AYAR,150),hatalar=bot_yonetim.son_log(AYAR,40,True),cfg=bot_yonetim.config(AYAR),islemler=bot_yonetim.son_islemler(c))
 
 @app.route('/bot/islemler.json')
 @admin_gerekli
@@ -682,6 +729,9 @@ def denetim():
     for row in baglanti().execute('SELECT d.*,k.id record_id'+source+' ORDER BY d.id DESC LIMIT 50 OFFSET ?',[*params,(page-1)*50]):
         item=log_row(row)
         if item['record_id']:item.update(hedef_turu='kayit',hedef_id=str(item['record_id']))
+        elif item.get('hedef_turu')=='kayit':
+            # Kayıt tablosunda karşılığı olmayan hedef: proje kaydı ya da artık bulunmayan kayıt anahtarı.
+            item['hedef_turu']='proje' if str(item.get('islem') or '').startswith('katalog_proje') else 'anahtar'
         if 'hata' in item['islem']:item['sonuc']='hata'
         item['sonuc']={'ok':'Başarılı','hata':'Hata','uyari':'Uyarı'}.get(item.get('sonuc'),item.get('sonuc') or 'Tamamlandı')
         rows.append(item)
@@ -711,11 +761,12 @@ def _scoped_counts():
 @giris_gerekli
 def bildirim_json():
     from . import bildirim_gecmisi
-    data=bildirim_gecmisi.liste(baglanti(),g.k['kullanici_adi'],_allowed(),{'durum':'okunmamis'},75)
+    data=bildirim_gecmisi.liste(baglanti(),g.k['kullanici_adi'],_allowed(),{'durum':'okunmamis'},20)
     counts,stamp=_scoped_counts()
     alerts=[]
     for row in data['bildirimler']:
         item=dict(row);item['bildirim_id']='m:'+str(row['id']) if row['key'].startswith('mesaj:') else str(row['id']);item['id']=row['kayit_id']
+        item['kayit_id']=row['kayit_id'];item['personel']=row.get('personel') or '';item['kategori']=row.get('kategori') or ''
         alerts.append(item)
     return jsonify(bildirimler=alerts,okunmamis=data['counts']['okunmamis'],sayac=counts,degisiklik=stamp,kuyruk_bekleyen=0)
 
@@ -767,7 +818,7 @@ def arsiv():
     c=baglanti()
     if request.method=='POST':
         if request.form.get('islem')=='tara':
-            report=gorsel.arsiv_tara(AYAR,c,COZUCU); flash('Arşiv tarandı: '+json.dumps(report,ensure_ascii=False))
+            report=gorsel.arsiv_tara(AYAR,c,COZUCU); flash(_arsiv_rapor_metni(report),'hata' if report.get('hata') else 'message')
         elif request.form.get('islem')=='esle':
             try: aid=int(request.form.get('arsiv_id',0)); kid=int(request.form.get('kayit_id',0))
             except ValueError: abort(400)
@@ -791,6 +842,15 @@ def arsiv():
     rows=c.execute(f'SELECT * FROM arsiv_dosyalar WHERE {where} ORDER BY id LIMIT 48 OFFSET ?',('%'+q+'%',(page-1)*48))
     return render_template('arsiv.html',dosyalar=[dict(r) for r in rows],toplam=total,sayfa=page,sayfa_sayisi=max(1,(total+47)//48),q=q,durum=state)
 
+def _arsiv_rapor_metni(report):
+    """Tarama sonucunu ham JSON yerine okunur Türkçe cümleye çevirir."""
+    r=report or {}
+    if r.get('hata'):return 'Arşiv taranamadı: '+str(r['hata'])+'.'
+    parts=['%d dosya tarandı' % (r.get('tarandi') or 0),'%d dosya indekslendi' % (r.get('indekslendi') or 0),'%d görsel kayıtla eşleşti' % (r.get('eslesti') or 0)]
+    if r.get('eslesmeyen'):parts.append('%d görsel eşleşmedi' % r['eslesmeyen'])
+    if r.get('belirsiz'):parts.append('%d görsel belirsiz kaldı' % r['belirsiz'])
+    return 'Arşiv tarandı: '+', '.join(parts)+'.'
+
 @app.route('/arsiv/gorsel/<int:aid>')
 @admin_gerekli
 def arsiv_gorsel(aid):
@@ -804,20 +864,50 @@ def arsiv_gorsel(aid):
         path=thumb
     return send_file(path,conditional=True)
 
+def _cikti_secimi(args):
+    """Çıktı formunun gönderilen değerleri; hata/uyarı halinde form aynı değerlerle yeniden gösterilir."""
+    today=datetime.now().date()
+    if args is None:
+        return dict(proje=[],tarih1=(today-timedelta(days=30)).isoformat(),tarih2=today.isoformat(),durum='hepsi',kategori='',q='',ekleyen='',tarihsiz=False)
+    return dict(proje=[str(x).strip().upper() for x in args.getlist('proje') if str(x).strip()],tarih1=args.get('tarih1','').strip()[:10],tarih2=args.get('tarih2','').strip()[:10],
+                durum=args.get('durum','hepsi'),kategori=args.get('kategori','').strip()[:120],q=args.get('q','').strip()[:200],ekleyen=args.get('ekleyen','').strip()[:100],tarihsiz=args.get('tarihsiz')=='1')
+
+def _cikti_tarih_hatasi(args):
+    if args.get('tarihsiz')=='1':
+        return 'Tarihsiz kayıt seçeneği tarih aralığıyla birlikte kullanılamaz.' if (args.get('tarih1') or args.get('tarih2')) else None
+    t1,t2=args.get('tarih1','').strip(),args.get('tarih2','').strip()
+    for v in (t1,t2):
+        if v:
+            try:datetime.strptime(v,'%Y-%m-%d')
+            except ValueError:return 'Tarih biçimi geçersiz; takvimden seçin.'
+    if t1 and t2 and t1>t2:return 'Başlangıç tarihi bitiş tarihinden sonra olamaz.'
+    return None
+
+def _cikti_sayfasi(secim=None,hata=None,status=200):
+    cats=_scoped_categories(_allowed())
+    return render_template('disa_aktar.html',izinli=yetki.izinli_projeler(g.yk,projeler()),kategoriler=cats,f=_cikti_secimi(secim),hata=hata),status
+
 @app.route('/disa-aktar')
 @giris_gerekli
 def disa_aktar_sayfasi():
-    cats=_scoped_categories(_allowed())
-    today=datetime.now().date()
-    return render_template('disa_aktar.html',izinli=yetki.izinli_projeler(g.yk,projeler()),kategoriler=cats,tarih1=(today-timedelta(days=30)).isoformat(),tarih2=today.isoformat())
+    return _cikti_sayfasi()
 
 @app.route('/disa-aktar.xlsx')
 @giris_gerekli
 def disa_aktar_xlsx():
     import openpyxl
     from openpyxl.styles import Font, PatternFill
+    sayim=request.args.get('sayim')=='1'
+    hata=_cikti_tarih_hatasi(request.args)
+    if hata:
+        # Ters tarih aralığı: tam sayfa 400 yerine form aynı değerlerle ve satır içi uyarıyla döner (XHR'a JSON).
+        if sayim or _json_bekleniyor():return jsonify(ok=False,hata=hata,kod=400),400
+        return _cikti_sayfasi(request.args,hata=hata,status=400)
     a=request.args.to_dict(flat=False); a.setdefault('durum',['hepsi']); w,p,_=_filtre_sql(MultiDict(a),yetki.izinli_projeler(g.yk,projeler()))
     rows=baglanti().execute(f'SELECT * FROM kayitlar WHERE {w} ORDER BY proje,tarih,id',p).fetchall()
+    if sayim:
+        # Çıktı formu indirmeden önce sayımı sorar; 0 kayıtta boş dosya yerine sayfada uyarı gösterir.
+        return jsonify(ok=True,adet=len(rows),mesaj=('Seçime uyan kayıt yok; dosya indirilmedi. Tarih aralığını veya diğer koşulları genişletin.' if not rows else '%d kayıt dosyaya yazılıyor.' % len(rows)))
     wb=openpyxl.Workbook(); ws=wb.active; ws.title='Kayıtlar'
     columns=[('Kayıt ID','id'),('Proje','proje'),('Kategori','kategori'),('Personel','personel'),('Üye ID','uye_id'),('Ana üye ID','ana_uye_id'),('Tür','tip'),('Tarih','tarih'),('KT','kt'),('Onaylayan','kt_kim'),('Ekleyen','ekleyen_ad'),('Lead ID','lead_id'),('Eski link','link'),('Açıklama','aciklama'),('Ek not','ek_not'),('Ek sorular','soru_ozet')]
     ws.append([a for a,b in columns])

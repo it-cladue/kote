@@ -173,6 +173,30 @@ legend { font-size: 12px; font-weight: 700; color: var(--soluk); padding: 0 6px;
 .hata { background: var(--kirmizi-yumusak); color: var(--kirmizi); padding: 10px 12px; border-radius: var(--yuvarlak-kucuk); margin-bottom: 12px; border: 1px solid color-mix(in srgb, var(--kirmizi) 25%, transparent); font-size: 14px; }
 .bilgi { background: var(--yesil-yumusak); color: var(--yesil); padding: 10px 12px; border-radius: var(--yuvarlak-kucuk); margin-bottom: 12px; border: 1px solid color-mix(in srgb, var(--yesil) 25%, transparent); font-size: 14px; overflow-wrap: anywhere; }
 .bilgi.uyari { background: var(--sari-yumusak); color: var(--sari); border-color: color-mix(in srgb, var(--sari) 25%, transparent); }
+.bilgi.notr { background: var(--mavi-yumusak); color: var(--birincil); border-color: color-mix(in srgb, var(--birincil) 25%, transparent); }
+.bilgi.notr ul { margin: 4px 0 0 18px; padding: 0; }
+.bilgi a, .bilgi.uyari a { color: inherit; font-weight: 600; text-decoration: underline; }
+.form-hata { margin: 0 0 10px; padding: 7px 10px; border-radius: var(--yuvarlak-kucuk); background: var(--kirmizi-yumusak); color: var(--kirmizi); font-size: 13px; }
+/* Bot: her işlem kendi küçük kartında (Onayla / Engelle / Tam sıfırla) */
+.bot-islem-izgara { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--b2); margin-bottom: var(--b2); }
+.bot-islem-karti { border: 1px solid var(--cizgi); border-radius: var(--yuvarlak); padding: 14px; background: var(--yuzey-2); min-width: 0; }
+.bot-islem-karti h3 { margin: 0 0 2px; font-size: 1rem; }
+.bot-islem-karti > .kucukyazi { margin: 0 0 10px; }
+.bot-islem-karti label { margin-bottom: 10px; }
+.bot-islem-karti .satir-label { margin-bottom: 0 !important; }
+.bot-islem-karti .btn { width: 100%; min-height: 40px; }
+.yalniz-telefon { display: none; }
+/* Kullanıcılar: üretilen geçici şifre kutusu */
+.sifre-kutusu { border-color: color-mix(in srgb, var(--birincil) 45%, var(--cizgi)); background: var(--mavi-yumusak); }
+.sifre-deger { margin: 0 0 8px; }
+.sifre-deger code { display: inline-block; font-family: var(--mono); font-size: 18px; letter-spacing: .04em; padding: 8px 14px; border-radius: var(--yuvarlak-kucuk); background: var(--kart); border: 1px dashed var(--cizgi-koyu); user-select: all; word-break: break-all; }
+/* Ana sayfa arama ipucu */
+.arama-blok { min-width: 0; }
+.arama-ipucu { margin: 8px 0 0; }
+/* Bildirim zili: kayıt numarası ve personel satırı */
+.bildirim-kutu li .bildirim-kayit { display: block; margin-top: 3px; font-size: 13px; color: var(--yazi); }
+.bildirim-kutu li .bildirim-kayit b { font-family: var(--mono); font-weight: 600; }
+.bildirim-kutu li.tumu { text-align: center; padding: 10px 12px; }
 .filtre-satir { display: flex; gap: var(--b1); flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
 .filtre-satir label { margin: 0; }
 .filtre-satir input, .filtre-satir select { width: auto; }
@@ -207,6 +231,10 @@ legend { font-size: 12px; font-weight: 700; color: var(--soluk); padding: 0 6px;
 .giris-alt { text-align: center; margin: var(--b2) 0 0; color: var(--soluk); font-size: 12.5px; }
 
 /* ---------- tablolar ---------- */
+/* position:relative — başlıktaki ekran-okuyucu span'ı sayfayı (telefonda) genişletmesin; kaydırma sarıcının içinde kalsın. */
+.tablo-sarici, .kaydir, .tablo-kaydir { position: relative; max-width: 100%; }
+/* Izgara hücreleri (kart içindeki geniş tablo) telefonda sayfayı genişletmesin; tablo kendi sarıcısında kaydırılır. */
+.iki-kolon > *, .kullanici-izgara > *, .ana-alt-izgara > *, .izgara-3 > *, .proje-izgara > *, .kpi-izgara > * { min-width: 0; }
 .tablo-sarici { width: 100%; overflow: auto; border-radius: var(--yuvarlak); border: 1px solid var(--cizgi); background: var(--kart); box-shadow: var(--golge); }
 .tablo-sarici .tablo { border: 0; box-shadow: none; border-radius: 0; }
 .kaydir { max-height: 480px; overflow: auto; border-radius: var(--yuvarlak); border: 1px solid var(--cizgi); }
@@ -542,6 +570,7 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
   .modal-govde { grid-template-columns: 1fr; }
   .modal-gorsel { min-height: 230px; }
   .form-iki { grid-template-columns: 1fr 1fr; }
+  .bot-islem-izgara { grid-template-columns: 1fr; }
   .son-islemler li { grid-template-columns: 1fr; gap: 2px; }
   .deger-liste { grid-template-columns: 1fr; }
 }
@@ -556,6 +585,20 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
   .proje-secim-satiri { align-items: flex-start; flex-direction: column; gap: 8px; }
   .proje-cipleri { gap: 5px; }
   .tablo { min-width: 620px; }
+  .durum-serit { font-size: 13px; }
+  .durum-serit .durum-etiket { white-space: normal; text-align: left; }
+  .filtre-satir input, .filtre-satir select { flex: 1 1 100%; width: 100%; }
+  .filtre-satir .btn, .buton-satir .btn { min-height: 40px; }
+  .satir-form .btn.kucuk, .tablo .btn.kucuk { min-height: 36px; padding: 6px 10px; }
+  .sifre-deger code { font-size: 16px; }
+  .kart-baslik .btn { flex: 1 1 auto; }
+  /* Kullanıcı listesi: telefonda yatay kaydırma yerine sarmalanır; Düzenle düğmesi ad hücresine taşınır, işlem sütunu gizlenir. */
+  .kullanici-listesi .tablo { min-width: 0; }
+  .kullanici-listesi .tablo td { max-width: none; }
+  .kullanici-listesi .tablo .islem-hucre { display: none; }
+  .kullanici-listesi .tablo td[colspan] { display: table-cell; }
+  .kullanici-listesi .kapsam-listesi { max-width: 150px; }
+  .yalniz-telefon { display: inline-flex; margin-top: 6px; min-height: 36px; }
   .modal-kontrol { position: sticky; top: 0; justify-content: flex-end; padding: 8px; background: var(--kart); margin-left: auto; width: max-content; }
   .modal-bilgi, .yorum-genis { padding: 16px; }
   .alanlar { grid-template-columns: 100px 1fr; }

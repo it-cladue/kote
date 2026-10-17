@@ -107,7 +107,9 @@ Kayıtlar ekranında yalnız yetkili proje çipleri vardır. Kategori seçimi se
 
 Detayda onaylayan/zaman ve görünür işlem geçmişi; geniş yorum/soru/yanıt alanı vardır. Alıcı seçerek ilgili proje sorumlusuna soru yönelt; yanıt aynı kayıt konuşmasında kalır. **Bildirimler** ayrı sayfada eski/okunmuş/okunmamış, tür/tarih/proje filtreli geçmişi sunar. Okundu durumu kişiye özeldir. Yetkisi kaldırılan hesap eski bildirimle de kayıt içeriğine erişemez.
 
-Masaüstü bildirimi tarayıcı izni ve panel açıkken çalışır; site kapalıyken yeni push/Telegram bildirim kanalı kurulmaz. **İşlem Geçmişi** aktör, zaman, işlem ve hedefi gösterir. Normal admin kendi izinli kayıt geçmişini; süperadmin global yönetim işlemlerini görür. Parola/hash/token/ham giriş mesajları logda gösterilmez.
+Zil listesinde her bildirim kayıt numarası ve personel koduyla görünür (örn. "#12 · 1001 ARK · Yeni kanıt eklendi"); listede en çok 15 öğe gösterilir, fazlası için **Tümünü gör** bağlantısı vardır. Ana sayfadaki hızlı arama personel, üye ID, ana üye ID, lead, bağlantı, açıklama, ekleyen ve kategori alanlarında arar; sonuç bekleyen, onaylı ve silinen tüm kayıtları kapsar.
+
+Masaüstü bildirimi tarayıcı izni ve panel açıkken çalışır; site kapalıyken yeni push/Telegram bildirim kanalı kurulmaz. **İşlem Geçmişi** aktör, zaman, işlem ve hedefi gösterir; proje ve kategori kayıtları "Proje: BETA" / "Kategori: ark" biçiminde, artık bulunmayan kayıtlar "Kayıt anahtarı" olarak etiketlenir. Normal admin kendi izinli kayıt geçmişini; süperadmin global yönetim işlemlerini görür. Parola/hash/token/ham giriş mesajları logda gösterilmez.
 
 Ekleyenin kanıt profili güvenilir Telegram kayıtlarıyla proje dağılımını ve beklenen ana proje dışı kayıtları gösterir. Tahmini eski eşleştirme kesin sahiplik diye sunulmaz. Proje dışı olmak tek başına hatalı kanıt değildir.
 
@@ -116,6 +118,8 @@ Ekleyenin kanıt profili güvenilir Telegram kayıtlarıyla proje dağılımın�
 Bu ekran **kayıt eklemez**; yalnız izinli veritabanı kayıtlarını karşılaştırır. Dosya yükle, önizlemeyi kontrol et, gerekirse kodlama/ayraç/başlık satırı ve sayfayı değiştir. Başlık satırı `0` başlıksız tablo içindir. TXT’de **her satır tek ID** ve **ayraçlı tablo** modları ayrıdır; ID modunda virgül/noktalı virgül ID’nin parçası olarak korunur.
 
 Sütunları Proje/Kategori/Personel/Üye ID/Ana üye ID/Tür/Lead ID’ye bağla; karşılaştırılacak kimlik alanlarını seç. Seçili kriterlerin tamamı tutmalıdır. Bulundu, yok, çoklu, boş/belirsiz veya kapsam dışı durumlar ayrı değerlendirilir. Eksik kanıt raporu yalnız kesin “yok” sonuçlarını içerir. Baştaki sıfırları kaynakta metin olarak koru; kaybolmuş Excel basamakları veya hesaplanmamış formüller kesin yok diye gösterilmez.
+
+TXT için gösterilen okuma notu mavi bilgi kutusudur; kırmızı/sarı uyarı değildir. Ekrandaki düğme ve alan adları sade Türkçedir ("Dosyayı yükle", "Önizlemeyi yenile", "Kayıtlarla karşılaştır", "Onay durumu").
 
 Limitler: 12 MB yükleme, 50.000 kaynak satırı, 20.000 ilgili karşılaştırma satırı, 512 sütun. Ekran sayfa başına 100 sonuç ve satırda ilk 20 eşleşme ID’sini gösterir; indirilen rapor saklanan tam sonucu (satır başına en çok 1.000 ID; kırpma uyarısıyla) içerir. Kontrol zamanı UTC, kapsam ve seçenekler rapora yazılır. Eski rapor indirilirken de güncel proje yetkisi doğrulanır. Özel geçici kontrol dosyaları 24 saat sonra temizlenir.
 
@@ -126,6 +130,8 @@ Bu güncelleme mevcut veritabanını sıfırlamaz. Henüz eski verini taşımad�
 `telegram_gorseller` klasörünü alt dizin/indeks düzenini koruyarak SFTP veya sunucu dosya yöntemiyle veri dizinine taşı. Arşivi herkese açık `static`/Plesk `httpdocs` dizinine koyma. Süperadmin arşiv taraması ve belirsiz eşlemeyi elle bağlama kullanabilir. Gerçek 2 GB arşivin tamamı bu geliştirme ortamına verilmediği için gerçek eşleşme sayısı doğrulanmış değildir.
 
 ## 10. Test ve güvenlik
+
+2.2 düzeltme turunda (genel) yapılanlar: `GET /bot?sure=...` geçersiz değerde 500 vermez; Bot sayfasında Onayla / Engelle / Tam sıfırla ayrı kartlardır ve boş ad Telegram'daki adı korur; bot durumu "son X dakikadır sinyal vermedi" gibi okunur cümledir; arşiv tarama sonucu düz cümle olarak gösterilir; giriş sonrası yönlendirme sorgu dizesini korur (`?sonraki=/kayitlar?durum=onayli`); yetki/şifre değişince kullanıcı "Oturumunuz sona erdi…" mesajıyla giriş sayfasına gönderilir, açık pencerede fetch çağrıları JSON 401 alır ve sayfa kendiliğinden giriş ekranına döner; Çıktı sayfasında ters tarih aralığı formda satır içi uyarıdır ve 0 kayıtlı seçimde boş dosya yerine uyarı gösterilir (istenirse "Yine de boş dosyayı indir"); `/saglik` ve statik dosyalar oturum çerezi yazmaz; Kullanıcılar sayfasında üretilen geçici şifre kopyala düğmeli kutuda sayfa yenilenene kadar kalır ve kullanıcı düzenleme formu çalışır (2.1'deki 500 hatası giderildi); form desen hataları Türkçe gösterilir.
 
 `TEST_SONUCLARI.md`, `DEGISIKLIKLER_v2.2.md` ve `DEGISIKLIKLER_v2.1.md` yapılan düzeltmeleri ve doğrulama sınırlarını ayırır. Testler geçici SQLite, sahte Telegram/Gyazo ve izole arayüz verisiyle çalışır. Gerçek sunucuya bu paket kendiliğinden yüklenmez.
 

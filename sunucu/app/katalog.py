@@ -387,6 +387,7 @@ def save_project(
             conn, actor or "panel", "katalog_proje_kaydet", proje=code, anahtar=code,
             eski=json.dumps(old, ensure_ascii=False) if old is not None else None,
             yeni=json.dumps(saved, ensure_ascii=False),
+            hedef_turu="proje", hedef_id=code,
         )
         db.degisti(conn)
     return saved  # type: ignore[return-value]
@@ -653,6 +654,7 @@ def save_category(
             conn, actor or "panel", "katalog_kategori_kaydet", anahtar=code,
             eski=json.dumps(old, ensure_ascii=False) if old is not None else None,
             yeni=json.dumps(saved, ensure_ascii=False),
+            hedef_turu="kategori", hedef_id=code,
         )
         db.degisti(conn)
     return saved  # type: ignore[return-value]

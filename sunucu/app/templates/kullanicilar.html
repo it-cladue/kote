@@ -18,17 +18,24 @@
   <div class="baslik-eylemler"><a class="btn birincil" href="#yeni-kullanici">Yeni kullanıcı ekle</a></div>
 </section>
 {% if mesaj %}<div class="{{ 'hata' if mesaj.startswith('Hata') else 'bilgi' }}" role="status">{{ mesaj }}</div>{% endif %}
+{% if gecici_sifre %}
+<section class="kart sifre-kutusu" id="gecici-sifre" aria-labelledby="gecici-sifre-baslik">
+  <div class="kart-baslik"><div><p class="ust-etiket">{{ 'Üretilen geçici şifre' if gecici_sifre.uretildi else 'İlk giriş şifresi' }}</p><h2 id="gecici-sifre-baslik"><b>{{ gecici_sifre.ad }}</b> için şifre</h2></div><button type="button" class="btn birincil" data-kopyala="{{ gecici_sifre.sifre }}">Şifreyi kopyala</button></div>
+  <p class="sifre-deger"><code id="gecici-sifre-deger">{{ gecici_sifre.sifre }}</code></p>
+  <p class="kucukyazi">Bu şifre yalnız bu sayfada görünür; sayfa yenilenince kaybolur. Kullanıcıya güvenli bir yoldan iletin; ilk girişte kendi şifresini belirleyecek.</p>
+</section>
+{% endif %}
 <div class="kullanici-izgara">
 <section class="kart kullanici-listesi" aria-labelledby="kullanici-listesi-baslik">
   <div class="kart-baslik"><div><h2 id="kullanici-listesi-baslik">Mevcut kullanıcılar</h2><p class="kucukyazi" style="margin:0">{{ kullanicilar|length }} hesap · Düzenlemek için satırdaki düğmeyi kullanın.</p></div></div>
-  <div class="tablo-sarici" tabindex="0" role="region" aria-label="Panel kullanıcıları"><table class="tablo"><thead><tr><th>Kullanıcı</th><th>Rol ve kapsam</th><th>Durum</th><th><span class="ekran-okuyucu">İşlem</span></th></tr></thead><tbody>
+  <div class="tablo-sarici" tabindex="0" role="region" aria-label="Panel kullanıcıları"><table class="tablo"><thead><tr><th>Kullanıcı</th><th>Rol ve kapsam</th><th>Durum</th><th class="islem-hucre"><span class="ekran-okuyucu">İşlem</span></th></tr></thead><tbody>
   {% for u in kullanicilar %}
   {% set p = u.parsed_yetkiler %}
   <tr class="{{ 'soluk' if not u.aktif }}" id="kullanici-{{ u.kullanici_adi }}">
-    <td><div class="kullanici-satir-ad"><b>{{ u.ad or u.kullanici_adi }}</b><small>{{ u.kullanici_adi }}</small></div></td>
+    <td><div class="kullanici-satir-ad"><b>{{ u.ad or u.kullanici_adi }}</b><small>{{ u.kullanici_adi }}</small><button type="button" class="btn kucuk yalniz-telefon" data-ac="duzenle-{{ u.kullanici_adi }}" aria-expanded="false" aria-controls="duzenle-{{ u.kullanici_adi }}">Düzenle</button></div></td>
     <td>{% if p.rol == 'superadmin' %}<span class="durum-etiket notr">Süperadmin · tüm projeler</span>{% else %}<div class="kapsam-listesi">{% for proje in p.projeler %}<span class="rozet" style="background:{{ renk(proje) }};color:{{ metin_rengi(renk(proje)) }}" title="{{ proje }}: {{ (p.eylemler.get(proje,[])|map('replace','kt','onay')|join(', ')) or 'okuma' }}">{{ proje }}</span>{% else %}<small>Proje yetkisi yok</small>{% endfor %}{% if p.projeler %}<small>{% for proje in p.projeler %}{{ proje }}: {% set ekstra = p.eylemler.get(proje,[])|reject('in',['oku','gorsel'])|list %}{{ ekstra|map('replace','kt','onay')|join(', ') if ekstra else 'yalnız okuma' }}{{ ' · ' if not loop.last }}{% endfor %}</small>{% endif %}</div>{% endif %}</td>
     <td>{% if u.aktif %}<span class="durum-etiket aktif">Aktif</span>{% else %}<span class="durum-etiket pasif">Pasif</span>{% endif %}{% if u.sifre_degistir %}<br><small>İlk girişte şifre değiştirecek</small>{% endif %}{% if u.son_giris %}<br><small>Son giriş: {{ u.son_giris }}</small>{% endif %}</td>
-    <td><button type="button" class="btn kucuk" data-ac="duzenle-{{ u.kullanici_adi }}" aria-expanded="false" aria-controls="duzenle-{{ u.kullanici_adi }}">Düzenle</button></td>
+    <td class="islem-hucre"><button type="button" class="btn kucuk" data-ac="duzenle-{{ u.kullanici_adi }}" aria-expanded="false" aria-controls="duzenle-{{ u.kullanici_adi }}">Düzenle</button></td>
   </tr>
   <tr id="duzenle-{{ u.kullanici_adi }}" hidden><td colspan="4">
     <form method="post" autocomplete="off" class="kullanici-duzenle-govde" aria-label="{{ u.kullanici_adi }} hesabını düzenle">
@@ -36,7 +43,7 @@
       <h3>{{ u.kullanici_adi }} hesabını düzenle</h3>
       <div class="form-iki">
         <label>Görünen ad<input name="gorunen_ad" value="{{ u.ad or '' }}" maxlength="120"></label>
-        <label>Yeni şifre <small>(değiştirmek için doldurun, en az 8 karakter)</small><input type="password" name="sifre" minlength="8" autocomplete="new-password"></label>
+        <label>Yeni şifre <small>(değiştirmek için doldurun, en az 8 karakter)</small><input type="password" name="sifre" minlength="8" autocomplete="new-password" data-gecersiz="Şifre en az 8 karakter olmalı."></label>
         <div><label class="satir-label"><input type="checkbox" name="aktif" value="1" {{ 'checked' if u.aktif }}> Aktif hesap</label><label class="satir-label" style="margin-top:8px!important"><input type="checkbox" name="sifredegistir" value="1" {{ 'checked' if u.sifre_degistir }}> Sonraki girişte şifre değiştirsin</label></div>
       </div>
       {{ yetki_alanlari(u) }}
@@ -52,9 +59,9 @@
   <h2 id="yeni-kullanici-baslik">Yeni kullanıcı</h2>
   <form method="post" autocomplete="off">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="ekle">
-    <label>Kullanıcı adı<input name="ad" required autocapitalize="off" pattern="[a-z0-9_.]{1,40}" placeholder="ornek.kullanici" autocomplete="off" title="Küçük harf, rakam, nokta ve alt çizgi"></label>
+    <label>Kullanıcı adı <small>(küçük harf, rakam, nokta ve alt çizgi; en çok 40 karakter)</small><input name="ad" required autocapitalize="off" pattern="[a-z0-9_.]{1,40}" placeholder="ornek.kullanici" autocomplete="off" title="Küçük harf, rakam, nokta ve alt çizgi" data-gecersiz="Kullanıcı adı yalnız küçük harf, rakam, nokta ve alt çizgi içerebilir (en çok 40 karakter)." data-bos="Kullanıcı adı zorunludur."></label>
     <label>Görünen ad<input name="gorunen_ad" maxlength="120" placeholder="Ad Soyad"></label>
-    <label>Şifre <small>(boş bırakılırsa geçici şifre üretilir; en az 8 karakter)</small><input name="sifre" type="password" minlength="8" autocomplete="new-password"></label>
+    <label>Şifre <small>(boş bırakılırsa geçici şifre üretilir; en az 8 karakter)</small><input name="sifre" type="password" minlength="8" autocomplete="new-password" data-gecersiz="Şifre en az 8 karakter olmalı."></label>
     {{ yetki_alanlari({}) }}
     <button class="btn birincil genis">Kullanıcı ekle</button>
   </form>

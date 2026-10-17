@@ -77,16 +77,19 @@ def engellenenler(ayar):
 
 # CONTRACT.md'deki imzalar korunur.
 def onayla(ayar, conn, tg_id, ad, kim="panel"):
+    """Panelden girilen ad yalnız görünen ada (first_name) yazılır; boşsa Telegram'dan gelen adlar korunur."""
     tg_id = _id(tg_id)
-    ad = (ad or "")[:120]
+    ad = str(ad or "").strip()[:120]
+    if ad == tg_id:
+        ad = ""
     with db.transaction(conn):
         conn.execute(
             "INSERT INTO tg_kullanicilar(id,username,first_name,onayli,engelli,onay_tarihi,last_seen,deneme) "
-            "VALUES(?,?,?,1,0,?,?,0) "
-            "ON CONFLICT(id) DO UPDATE SET username=CASE WHEN excluded.username<>'' THEN excluded.username ELSE tg_kullanicilar.username END, "
+            "VALUES(?,'',?,1,0,?,?,0) "
+            "ON CONFLICT(id) DO UPDATE SET "
             "first_name=CASE WHEN excluded.first_name<>'' THEN excluded.first_name ELSE tg_kullanicilar.first_name END, "
             "onayli=1,engelli=0,engel_sebep=NULL,onay_tarihi=excluded.onay_tarihi,deneme=0",
-            (tg_id, ad, ad, _simdi(), _simdi()),
+            (tg_id, ad, _simdi(), _simdi()),
         )
         conn.execute("DELETE FROM tg_oturumlar WHERE user_id=?", (tg_id,))
         conn.execute("DELETE FROM tg_girisler WHERE user_id=?", (tg_id,))
@@ -108,15 +111,17 @@ def onay_kaldir(ayar, conn, tg_id, kim="panel"):
 
 def engelle(ayar, conn, tg_id, ad, sebep, kim="panel"):
     tg_id = _id(tg_id)
-    ad, sebep = (ad or "")[:120], (sebep or "panel")[:300]
+    ad, sebep = str(ad or "").strip()[:120], (sebep or "panel")[:300]
+    if ad == tg_id:
+        ad = ""
     with db.transaction(conn):
         conn.execute(
             "INSERT INTO tg_kullanicilar(id,username,first_name,onayli,engelli,engel_sebep,last_seen,deneme) "
-            "VALUES(?,?,?,0,1,?,?,3) "
-            "ON CONFLICT(id) DO UPDATE SET username=CASE WHEN excluded.username<>'' THEN excluded.username ELSE tg_kullanicilar.username END, "
+            "VALUES(?,'',?,0,1,?,?,3) "
+            "ON CONFLICT(id) DO UPDATE SET "
             "first_name=CASE WHEN excluded.first_name<>'' THEN excluded.first_name ELSE tg_kullanicilar.first_name END, "
             "engelli=1,engel_sebep=excluded.engel_sebep,deneme=3",
-            (tg_id, ad, ad, sebep, _simdi()),
+            (tg_id, ad, sebep, _simdi()),
         )
         conn.execute("DELETE FROM tg_oturumlar WHERE user_id=?", (tg_id,))
         conn.execute("DELETE FROM tg_girisler WHERE user_id=?", (tg_id,))
@@ -313,14 +318,28 @@ def bot_calisiyor_mu(ayar):
     try:
         row = conn.execute("SELECT bot_id,heartbeat,hata FROM tg_durum WHERE heartbeat IS NOT NULL ORDER BY heartbeat DESC LIMIT 1").fetchone()
         if not row:
-            return {"kaynak": "veritabanı", "yas_sn": None, "canli": None}
+            return {"kaynak": "veritabanı", "yas_sn": None, "canli": None, "mesaj": bot_durum_metni(None), "son_sinyal": None}
         try:
             age = max(0, int((datetime.now() - datetime.strptime(row["heartbeat"], "%Y-%m-%d %H:%M:%S")).total_seconds()))
         except (TypeError, ValueError):
             age = None
-        return {"kaynak": "veritabanı", "yas_sn": age, "canli": age is not None and age < 180, "hata": _redact(row["hata"] or "")}
+        return {"kaynak": "veritabanı", "yas_sn": age, "canli": age is not None and age < 180, "hata": _redact(row["hata"] or ""),
+                "mesaj": bot_durum_metni(age), "son_sinyal": row["heartbeat"]}
     finally:
         conn.close()
+
+
+def bot_durum_metni(age):
+    """Nabız yaşını teknik olmayan Türkçe cümleye çevirir."""
+    if age is None:
+        return "Bot henüz sinyal göndermedi (süreç hiç başlamamış olabilir)"
+    if age < 180:
+        return "Çalışıyor · son sinyal %d sn önce" % age
+    if age < 3600:
+        return "Bot son %d dakikadır sinyal vermedi" % (age // 60)
+    if age < 86400:
+        return "Bot son %d saattir sinyal vermedi" % (age // 3600)
+    return "Bot son %d gündür sinyal vermedi" % (age // 86400)
 
 
 # Eski panel çağrıları için zararsız uyumluluk katmanı. Gyazo/OneDrive özelliği kaldırılmıştır.
@@ -351,17 +370,27 @@ def istatistik(conn):
             'duraklatildi':db.ayar_al(conn,'bot_durdur','0')=='1'}
 
 
+SURE_SAATLERI={'1saat':1,'2saat':2,'24saat':24,'7gun':168,'30gun':720}
+
+
+def sure_normalle(sure):
+    """Tanınmayan veya eski URL'den gelen süre değeri '' (tüm zamanlar) sayılır."""
+    value=str(sure or '').strip()
+    return value if value in SURE_SAATLERI else ''
+
+
 def kullanicilari_ara(conn,q='',durum='hepsi',sure='',limit=200):
     from datetime import timedelta
     where=['1=1'];p=[]
+    q=str(q or '').strip()
     if q:
         where.append('(id LIKE ? OR username LIKE ? OR first_name LIKE ?)');p.extend(['%'+q[:100]+'%']*3)
     if durum=='engelli':where.append('engelli=1')
     elif durum=='onayli':where.append('onayli=1 AND engelli=0')
     elif durum=='onaysiz':where.append('onayli=0 AND engelli=0')
+    sure=sure_normalle(sure)
     if sure:
-        hours={'1saat':1,'2saat':2,'24saat':24,'7gun':168,'30gun':720}.get(sure)
-        if not hours:raise ValueError('Geçersiz zaman filtresi.')
+        hours=SURE_SAATLERI[sure]
         where.append('last_seen>=?');p.append((datetime.now()-timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S'))
     return [dict(r) for r in conn.execute('SELECT * FROM tg_kullanicilar WHERE '+' AND '.join(where)+' ORDER BY last_seen DESC LIMIT ?',(*p,max(1,min(int(limit),1000))))]
 

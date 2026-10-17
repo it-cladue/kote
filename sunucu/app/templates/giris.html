@@ -14,6 +14,7 @@
 <form class="giris-kutu" method="post" autocomplete="off" aria-labelledby="giris-baslik">
   <div class="giris-logo"><span class="marka-isaret" aria-hidden="true">K</span><h1 id="giris-baslik">Kanıt Paneli</h1><p>Kanıt kayıtlarını inceleme, onay ve yönetim ekranı</p></div>
   {% with mesajlar = get_flashed_messages() %}{% if mesajlar %}<div class="bilgi" role="status">{% for m in mesajlar %}{{ m }}<br>{% endfor %}</div>{% endif %}{% endwith %}
+  {% if bilgi %}<div class="bilgi notr" role="status">{{ bilgi }}</div>{% endif %}
   {% if hata %}<div class="hata" role="alert">{{ hata }}</div>{% endif %}
   <label for="giris-kullanici">Kullanıcı adı<input id="giris-kullanici" name="kullanici" required autofocus autocapitalize="off" autocomplete="username" spellcheck="false"></label>
   <label for="giris-sifre">Şifre<input id="giris-sifre" name="sifre" type="password" required autocomplete="current-password"></label>

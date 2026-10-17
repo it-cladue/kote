@@ -51,6 +51,21 @@ cd /opt/kanit-paneli && KANIT_PW=telecc123 .venv/bin/python -m app.cli sifre-sif
 - İşlem Geçmişi'nde işlem adları Türkçe açıklamalı, sonuç durum etiketli, kayıt hedefleri tıklanabilir.
 - Durum etiketleri (Onaylı / Bekliyor / Silinen / Aktif / Pasif) tüm sayfalarda aynı.
 
+## Düzeltmeler (2.2 düzeltme turu — genel)
+
+- **Bot sayfası:** `?sure=` için tanınmayan değer 500 hatası vermez; "Tüm zamanlar" kabul edilip bir not gösterilir. Onayla / Engelle / Tam sıfırla artık üç ayrı küçük kart; her kartın kendi Telegram ID alanı var. Onaylarken ad boş bırakılırsa kişinin Telegram'daki adı korunur, sayısal ID artık ada yazılmaz; girilen ad yalnız görünen ada gider. Bot durumu "Çalışıyor · son sinyal 20 sn önce", "Bot son 12 dakikadır sinyal vermedi" veya "Bot henüz sinyal göndermedi" biçiminde; kırmızı yalnız gerçekten sinyal kesilince.
+- **Arşiv taraması:** sonuç ham JSON yerine "Arşiv tarandı: 3 dosya tarandı, 2 dosya indekslendi, 1 görsel kayıtla eşleşti." cümlesiyle gösterilir.
+- **Giriş yönlendirmesi:** giriş sonrası dönülen adres sorgu dizesini (durum, proje, filtre) korur; yalnız site içi hedef kabul edilir.
+- **Oturum düşmesi:** süperadmin bir hesabın yetkisini/şifresini değiştirince o kullanıcı "Oturumunuz sona erdi; yetkileriniz güncellendi veya şifreniz değişti…" mesajıyla giriş sayfasına gönderilir. Açık pencerede yapılan işlemler 400 (CSRF) yerine JSON 401 "Oturumunuz sona erdi, sayfayı yenileyin." alır; zil yoklaması da bunu yakalayıp kullanıcıyı giriş sayfasına taşır.
+- **Çıktı (Excel):** başlangıç > bitiş olan tarih aralığı tam sayfa "Hata 400" yerine formun içinde uyarı olarak gösterilir, form değerleri korunur (tarayıcıda göndermeden önce de kontrol edilir). Seçime uyan kayıt yoksa boş dosya inmez; "Seçime uyan kayıt yok" uyarısı ve istenirse "Yine de boş dosyayı indir" bağlantısı gösterilir. Düğme/alan adları sadeleştirildi ("Excel dosyasını indir", "Onay durumu", "Ekleyen kişi").
+- **İşlem Geçmişi:** proje kaydı artık "Kayıt #BETA" değil "Proje: BETA"; kategori kaydı "Kategori: …"; kayıt tablosunda bulunmayan eski hedefler "Kayıt anahtarı: …". Katalog ve bot işlemlerinin Türkçe adları eklendi.
+- **/saglik:** sağlık denetimi ve statik dosyalar oturum çerezi üretmez.
+- **Bildirim zili:** her öğede "#12 · PERSONEL KATEGORİ · Yeni kanıt eklendi" satırı; listede en çok 15 öğe, fazlası için "N bildirim daha · Tümünü gör" bağlantısı. `bildirim.json` öğelerinde `kayit_id`, `personel`, `kategori` alanları.
+- **Kullanıcılar:** üretilen geçici şifre, sayfanın üstünde kopyala düğmeli bir kutuda görünür ve sayfa yenilenene kadar kalır (yalnız bir kez gösterilir). Kullanıcı düzenleme formunun 500 hatası (görünen ad alanının `ad` parametresiyle çakışması) giderildi. Kullanıcı adı / şifre / Telegram ID desen hatalarında tarayıcının İngilizce uyarısı yerine Türkçe açıklama.
+- **Kanıt Kontrolü:** TXT okuma notu nötr mavi bilgi kutusu; sayfadaki tüm düğme ve alan metinleri sade Türkçe ("Dosyayı yükle", "Önizlemeyi yenile", "Kayıtlarla karşılaştır", "Yalnız bu projede ara", "Onay durumu", "Tüm sonucu Excel olarak indir").
+- **Arama kapsamı:** ana sayfa ve kayıtlar aramasında açıklama, ekleyen adı ve kategori de aranır; ana sayfadaki kutunun altında kapsam ipucu. Çıktı sayfasındaki arama alanı da aynı kapsamı kullanır.
+- **Telefon (390 px):** Bot, Bot/kullanıcı, İşlem Geçmişi, Kullanıcılar, Arşiv, Bildirimler, Çıktı ve Kanıt Kontrolü sayfalarında sayfa genişlemesi yok; tablolar kendi sarıcısında kaydırılır, kullanıcı listesi sarmalanır, Bot işlem kartları alt alta dizilir.
+
 ## Güncelleme notu
 
 Sürüm `2.2.0`. `bash deploy/apply-update.sh --dry-run` sonra `bash deploy/apply-update.sh`. Betik başlığı 2.1 → 2.2 olarak güncellendi; mantığı değişmedi. Tarayıcıda eski CSS/JS önbelleğini atlatmak için varlık bağlantıları `v=2.2.0` ile sürümlenir.
