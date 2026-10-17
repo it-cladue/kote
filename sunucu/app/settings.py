@@ -21,7 +21,7 @@ def settings():
         'TRUST_PROXY': os.getenv('TRUST_PROXY', '0'),
         'PROJELER': ['PP', 'PA', 'OF', 'HI', 'VI', 'GA'], 'SAYFA_BOYU': 48,
         'PROJE_RENK': {'PP': '#A6A6A6', 'PA': '#4472C4', 'OF': '#FFFF00', 'HI': '#FF0000', 'VI': '#7030A0', 'GA': '#00B050'},
-        'GYAZO_PROXY': '0', 'MAX_GORSEL_BYTES': 10 * 1024 * 1024,
+        'GYAZO_PROXY': os.getenv('GYAZO_PROXY', '1'), 'MAX_GORSEL_BYTES': 10 * 1024 * 1024,
     }
 
 AYAR = settings()

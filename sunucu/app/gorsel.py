@@ -9,16 +9,25 @@ import hashlib
 import os
 import re
 import tempfile
+import threading
 import time
 import unicodedata
 import warnings
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .excel_oku import link_turu_ve_kimlik
 
 GORSEL_UZANTILARI = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 KIMLIK_RX = re.compile(r"[0-9a-f]{32}", re.I)
 MAX_IMAGE_PIXELS = 25_000_000
+# Gyazo vekili: yalnız bu hostlar, yalnız 32 hex kimlik, sınırlı boyut/süre.
+GYAZO_HOSTLAR = ("gyazo.com", "i.gyazo.com")
+GYAZO_KAYNAK = "https://i.gyazo.com/{id}.jpg"
+GYAZO_MAX_BYTES = 20 * 1024 * 1024
+GYAZO_ZAMAN_ASIMI = 15
+GYAZO_OLUMSUZ_SN = 600
+GYAZO_BICIMLER = {"JPEG": ".jpg", "PNG": ".png"}
 
 
 def _baslik(adi):
@@ -132,7 +141,15 @@ class GorselCozucu:
         self.kokler = self._tekil_kokler([self.gorsel_klasor] + self.ek_klasorler)
         self.onbellek = os.path.abspath(onbellek)
         self.thumbs = os.path.join(self.onbellek, "thumbs")
+        self.gyazo_klasor = os.path.join(self.onbellek, "gyazo")
         os.makedirs(self.thumbs, exist_ok=True)
+        os.makedirs(self.gyazo_klasor, exist_ok=True)
+        self.gyazo_acik = str(ayar.get("GYAZO_PROXY", "1")).strip().lower() in ("1", "true", "evet")
+        self.gyazo_hostlar = tuple(GYAZO_HOSTLAR)
+        self.gyazo_kaynak = GYAZO_KAYNAK
+        self._http = None
+        self._gyazo_kilit = threading.Lock()
+        self._gyazo_semafor = threading.BoundedSemaphore(4)
         self._indeks = {}
         self._dosya_haritasi = {}
         self._yol_kimlik = {}
@@ -267,9 +284,170 @@ class GorselCozucu:
         """İkinci görsel (``gorsel2[_dosya]``) için aynı güvenli çözümleyici."""
         return self._yerel_dosya(kayit, ikinci=True)
 
-    def gyazo_indir(self, kayit):
-        """Uyumluluk API'si: dış Gyazo çağrısı/indirmesi bilinçli olarak kapalıdır."""
+    # ------------------------------------------------------------------ Gyazo
+    def gyazo_kimlik(self, kayit):
+        """Kayıttaki (ana veya ikinci) bağlantıdan 32 hex Gyazo kimliğini verir."""
+        _, link = self._dosya_alani(kayit, bool(kayit.get("_gorsel2")))
+        if not isinstance(link, str):
+            return None
+        tur, kimlik = link_turu_ve_kimlik(link)
+        if tur != "gyazo" or not KIMLIK_RX.fullmatch(kimlik or ""):
+            return None
+        return kimlik.lower()
+
+    def gyazo_mumkun(self, kayit):
+        """Vekil açıksa, kayıtta geçerli Gyazo kimliği varsa ve kimlik olumsuz önbellekte değilse True."""
+        kimlik = self.gyazo_kimlik(kayit) if self.gyazo_acik else None
+        if not kimlik:
+            return False
+        return bool(self._gyazo_onbellek(kimlik)) or not self._gyazo_olumsuz(kimlik)
+
+    def _gyazo_host_izinli(self, url):
+        try:
+            parts = urlparse(url)
+        except ValueError:
+            return False
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            return False
+        host = parts.hostname.lower()
+        return any(host == h or host.endswith("." + h) for h in self.gyazo_hostlar)
+
+    def _gyazo_onbellek(self, kimlik):
+        for uz in (".jpg", ".png"):
+            yol = os.path.join(self.gyazo_klasor, kimlik + uz)
+            if os.path.isfile(yol) and os.path.getsize(yol) > 0:
+                return yol
         return None
+
+    def _gyazo_olumsuz(self, kimlik):
+        isaret = os.path.join(self.gyazo_klasor, kimlik + ".yok")
+        try:
+            return time.time() - os.path.getmtime(isaret) < GYAZO_OLUMSUZ_SN
+        except OSError:
+            return False
+
+    def _gyazo_olumsuz_yaz(self, kimlik):
+        try:
+            with open(os.path.join(self.gyazo_klasor, kimlik + ".yok"), "w") as f:
+                f.write(str(int(time.time())))
+        except OSError:
+            pass
+
+    def _gyazo_http(self):
+        if self._http is None:
+            import requests
+            self._http = requests.Session()
+        return self._http
+
+    def _gyazo_getir(self, url):
+        """Yalnız izinli hostlar arasında yönlendirmeyi izler; gövdeyi sınırla okur."""
+        http = self._gyazo_http()
+        for _ in range(5):
+            if not self._gyazo_host_izinli(url):
+                return None
+            r = http.get(url, stream=True, timeout=(5, GYAZO_ZAMAN_ASIMI), allow_redirects=False,
+                         headers={"User-Agent": "KanitPaneli/2.2", "Accept": "image/*"})
+            try:
+                if r.status_code in (301, 302, 303, 307, 308):
+                    hedef = r.headers.get("Location", "")
+                    if not hedef:
+                        return None
+                    url = hedef if "://" in hedef else urlparse(url)._replace(path=hedef, query="").geturl()
+                    continue
+                if r.status_code != 200:
+                    return None
+                uzunluk = r.headers.get("Content-Length")
+                if uzunluk and uzunluk.isdigit() and int(uzunluk) > GYAZO_MAX_BYTES:
+                    return None
+                parcalar = []
+                toplam = 0
+                for parca in r.iter_content(65536):
+                    toplam += len(parca)
+                    if toplam > GYAZO_MAX_BYTES:
+                        return None
+                    parcalar.append(parca)
+                return b"".join(parcalar)
+            finally:
+                r.close()
+        return None
+
+    def gyazo_indir(self, kayit):
+        """Gyazo bağlantısını sunucu tarafında indirir, doğrular ve önbellekler.
+
+        Dönüş: yerel önbellek yolu ya da None. Başarısız kimlikler 10 dakika
+        boyunca yeniden denenmez (olumsuz önbellek). Asla kayıt satırını değiştirmez.
+        """
+        if not self.gyazo_acik:
+            return None
+        kimlik = self.gyazo_kimlik(kayit)
+        if not kimlik:
+            return None
+        yol = self._gyazo_onbellek(kimlik)
+        if yol:
+            return yol
+        if self._gyazo_olumsuz(kimlik):
+            return None
+        if not self._gyazo_semafor.acquire(timeout=20):
+            return None
+        try:
+            yol = self._gyazo_onbellek(kimlik)
+            if yol:
+                return yol
+            try:
+                veri = self._gyazo_getir(self.gyazo_kaynak.format(id=kimlik))
+            except Exception:
+                veri = None
+            if not veri:
+                self._gyazo_olumsuz_yaz(kimlik)
+                return None
+            try:
+                from PIL import Image
+                import io
+                Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", Image.DecompressionBombWarning)
+                    with Image.open(io.BytesIO(veri)) as im:
+                        bicim = str(im.format or "").upper()
+                        im.verify()
+                uz = GYAZO_BICIMLER.get(bicim)
+                if not uz:
+                    # Gyazo WEBP/GIF gibi biçimleri JPEG'e çevirerek sakla.
+                    with Image.open(io.BytesIO(veri)) as im:
+                        im.load()
+                        cikti = io.BytesIO()
+                        im.convert("RGB").save(cikti, format="JPEG", quality=90)
+                        veri = cikti.getvalue()
+                        uz = ".jpg"
+            except Exception:
+                self._gyazo_olumsuz_yaz(kimlik)
+                return None
+            hedef = os.path.join(self.gyazo_klasor, kimlik + uz)
+            fd, gecici = tempfile.mkstemp(prefix="gyazo-", suffix=".tmp", dir=self.gyazo_klasor)
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(veri)
+                os.replace(gecici, hedef)
+            except OSError:
+                if os.path.exists(gecici):
+                    os.unlink(gecici)
+                return None
+            try:
+                os.unlink(os.path.join(self.gyazo_klasor, kimlik + ".yok"))
+            except OSError:
+                pass
+            return hedef
+        finally:
+            self._gyazo_semafor.release()
+
+    def gorsel_yolu(self, kayit):
+        """Ana (veya ``_gorsel2``) görselin yolu ve kaynağı: yerel, gyazo veya yok."""
+        yol, kaynak = self.yerel_dosya(kayit)
+        if yol:
+            return yol, kaynak
+        yol = self.gyazo_indir(kayit)
+        if yol:
+            return yol, "gyazo"
+        return None, "yok"
 
     def kucuk(self, kayit, yol):
         """Doğrulanmış kaynaktan atomik 400px JPEG küçük resim üretir.
@@ -277,7 +455,7 @@ class GorselCozucu:
         Bozuk, decompression-bomb veya izinli kök dışındaki dosyada ``None``
         döner; asla rastgele/orijinal dosya yolunu geri vermez.
         """
-        if not self._guvenli(yol):
+        if not _guvenli_altinda(yol, list(self.kokler) + [self.gyazo_klasor]):
             return None
         try:
             from PIL import Image
