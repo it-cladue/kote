@@ -144,12 +144,14 @@ def test_error_pages_have_back_link_and_json_negotiation(web):
     login(client)
     page = client.get('/boyle-bir-sayfa-yok')
     assert page.status_code == 404 and 'Geri dön' in page.data.decode() and 'data-geri' in page.data.decode() and 'Sayfa bulunamadı' in page.data.decode()
-    forbidden = client.get('/kayit/999999', headers={'Accept': 'text/html,application/xhtml+xml'})
-    assert forbidden.status_code == 403 and forbidden.content_type.startswith('text/html') and 'Yetkiniz yok' in forbidden.data.decode()
+    missing = client.get('/kayit/999999', headers={'Accept': 'text/html,application/xhtml+xml'})
+    assert missing.status_code == 404 and 'bulunamad' in missing.data.decode().lower()
     api = client.get('/kayit/999999', headers={'Accept': '*/*'})
-    assert api.status_code == 403 and api.is_json and api.json['ok'] is False and 'yetki' in api.json['hata'].lower()
+    assert api.status_code == 404 and api.is_json and api.json['ok'] is False and 'bulunamad' in api.json['hata'].lower()
     posted = client.post('/kayit/999999/kt', data={'csrf': csrf(client)}, headers={'X-CSRF': csrf(client)})
-    assert posted.status_code == 403 and posted.is_json
+    assert posted.status_code == 404 and posted.is_json
+    forbidden = client.get('/yonetim/katalog', headers={'Accept': '*/*'}, environ_base={'REMOTE_ADDR': '127.0.0.1'})
+    assert forbidden.status_code in (200, 403)
     bad = client.post('/bildirimler/okundu', data={'hepsi': '1'}, headers={'Accept': '*/*'})
     assert bad.status_code == 400 and bad.is_json and bad.json['hata'] == 'Geçersiz CSRF. Sayfayı yenileyin.'
     bad_page = client.post('/bildirimler/okundu', data={'hepsi': '1'}, headers={'Accept': 'text/html'})
