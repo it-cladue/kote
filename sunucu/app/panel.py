@@ -30,6 +30,7 @@ if not secret:
 if len(secret) < 32:
     raise RuntimeError('SESSION_SECRET en az 32 karakter olmalı.')
 app = Flask(__name__)
+app.json.ensure_ascii=False
 app.secret_key = secret
 CEREZSIZ_UCLAR=('static','saglik')
 
@@ -304,10 +305,19 @@ def ana():
 
 SAYFA_BOYLARI=(24,48,96)
 
-def _json_hata(code,message):
-    """Kayit uclarinda hatayi JSON olarak dondurur; arayuz okunur Turkce toast gosterir."""
+def _json_hata(code,message,**ek):
+    """Kayit uclarinda hata: fetch/XHR ve POST isteklerine JSON (arayuz Turkce toast gosterir);
+    tarayicida dogrudan acilan /kayit, /gorsel, /kucuk adresleri ise mevcut Turkce HTML hata sayfasini alir."""
     from flask import make_response
-    abort(make_response(jsonify(ok=False,hata=message,kod=code),code))
+    if _json_bekleniyor() or request.method not in ('GET','HEAD'):
+        abort(make_response(jsonify(ok=False,hata=message,kod=code,**ek),code))
+    abort(code,message)
+
+def _degisiklik_damgasi():
+    """Kendi işleminden sonra arayüzün 'Yeni değişiklik var' şeridini kendi değişikliği için göstermemesi
+    amacıyla zil yoklamasıyla aynı değişiklik damgası döndürülür (hesaplanamazsa None)."""
+    try: return _scoped_counts()[1]
+    except Exception: return None
 
 def _tr_kucuk(value):
     """Türkçe'ye uygun büyük/küçük harf duyarsız karşılaştırma anahtarı (İ→i, I→ı)."""
@@ -370,9 +380,13 @@ def kayit_sozluk(row):
     try: path,source=COZUCU.yerel_dosya(d)
     except Exception: path,source=None,'yok'
     if not path and COZUCU.gyazo_mumkun(d): source='gyazo'
+    dosya=d.get('gorsel_dosya') or ''
+    kayip=bool(str(dosya).strip()) and not path
+    if kayip and source!='gyazo': source='kayip'
     try: ikinci=COZUCU.ikinci_dosya(d)[0] or COZUCU.gyazo_mumkun(dict(d,_gorsel2=True))
     except Exception: ikinci=None
     d.update(gorsel_var=bool(path) or source=='gyazo',gorsel_yerel=bool(path),gorsel_kaynak=source,gorsel2_var=bool(ikinci),renk=renk(d['proje']),
+             gorsel_kayip=kayip,gorsel_dosya_adi=(os.path.basename(str(dosya).replace('\\','/').rstrip('/')) or None) if kayip else None,
              izin_gyazo=kayit_izin(d,'kt') and kayit_izin(d,'gorsel') and bool(path) and not d['silindi'],izin_kt=kayit_izin(d,'kt'),izin_yorum=kayit_izin(d,'kt'),izin_duzenle=kayit_izin(d,'duzenle'),izin_sil=kayit_izin(d,'sil'),geri_al_olur=bool(d['silindi']))
     link=d.get('link') or ''; d['dis_link']=link if re.match(r'^https?://',link) else None
     link2=d.get('gorsel2') or ''; d['dis_link2']=link2 if re.match(r'^https?://',link2) else None
@@ -419,7 +433,7 @@ def kayitlar():
     if view not in ('tablo','kart','galeri'): view='tablo'
     try: acik=int(args.get('ac','') or 0)
     except ValueError: acik=0
-    return render_template('kayitlar.html',kayitlar=records,toplam=total,sayfa=page,sayfa_sayisi=pages,f=f,izinli=allowed,kategoriler=cats,gorunum=view,sayac=counts,sayfa_boyu=size,sayfa_boylari=SAYFA_BOYLARI,toplu_kt=toplu_kt,uyari=uyari,acik_kayit=acik or None,filtre_aktif=bool(f.get('q') or f.get('kategori') or f.get('ekleyen') or f.get('tarih1') or f.get('tarih2') or f.get('tarihsiz') or f.get('proje')))
+    return render_template('kayitlar.html',kayitlar=records,toplam=total,sayfa=page,sayfa_sayisi=pages,f=f,izinli=allowed,kategoriler=cats,gorunum=view,sayac=counts,sayfa_boyu=size,sayfa_boylari=SAYFA_BOYLARI,toplu_kt=toplu_kt,uyari=uyari,acik_kayit=acik or None,damga=_degisiklik_damgasi() or '',filtre_aktif=bool(f.get('q') or f.get('kategori') or f.get('ekleyen') or f.get('tarih1') or f.get('tarih2') or f.get('tarihsiz') or f.get('proje')))
 
 @app.route('/kayit/<int:kid>')
 @giris_gerekli
@@ -450,7 +464,7 @@ def kayit_json(kid):
             if d['gorsel_yerel']:
                 yol,_=COZUCU.yerel_dosya(dict(r)); d['gorsel_bozuk']=bool(yol) and not COZUCU.gecerli(yol)
         except Exception: d['gorsel_bozuk']=False
-        try: d['gecmis']=[log_row(x) for x in baglanti().execute('SELECT zaman,kullanici,islem,eski,yeni FROM denetim WHERE anahtar=? ORDER BY id DESC LIMIT 30',(r['anahtar'],))] if r['anahtar'] else []
+        try: d['gecmis']=[log_row(x) for x in baglanti().execute('SELECT zaman,kullanici,islem,eski,yeni,aciklama FROM denetim WHERE anahtar=? ORDER BY id DESC LIMIT 30',(r['anahtar'],))] if r['anahtar'] else []
         except Exception: d['gecmis']=[]
         return jsonify(d)
     except Exception as error:
@@ -460,7 +474,7 @@ def kayit_json(kid):
 def _kayit_al(kid,action):
     r=baglanti().execute('SELECT * FROM kayitlar WHERE id=?',(kid,)).fetchone()
     if not r: _json_hata(404,'Kayıt bulunamadı; silinmiş veya taşınmış olabilir.')
-    if not kayit_izin(r,action): _json_hata(403,'Bu kayıt için yetkiniz yok.')
+    if not kayit_izin(r,action): _json_hata(403,'Bu kayıt için yetkiniz yok; kayıt '+str(r['proje'] or '?')+' projesine ait.',proje=r['proje'])
     return r
 
 def version_check(r):
@@ -484,7 +498,7 @@ def kayit_kt(kid):
         if r['silindi']: _json_hata(400,'Silinen kayıt onaylanamaz; önce geri alın.')
         v=1 if request.form.get('deger','1')=='1' else 0
         _kt_uygula(c,r,v); db.degisti(c)
-    return jsonify(ok=True,kt=v)
+    return jsonify(ok=True,kt=v,damga=_degisiklik_damgasi())
 
 @app.route('/kayitlar/toplu-kt',methods=['POST'])
 @giris_gerekli
@@ -516,6 +530,7 @@ def kayitlar_toplu_kt():
     if result['yetkisiz']: parts.append('%d kayıt için yetki yok' % result['yetkisiz'])
     if result['bulunamadi']: parts.append('%d kayıt bulunamadı' % result['bulunamadi'])
     result['mesaj']='; '.join(parts)+'.'
+    result['damga']=_degisiklik_damgasi()
     return jsonify(result)
 
 GYAZO_DURUM_ADLARI={'bekliyor':'Sırada bekliyor','tekrar':'Yeniden denenecek','calisiyor':'Gönderiliyor','verify':'Bağlantı doğrulanıyor','tamam':'Tamamlandı','hata':'Başarısız','belirsiz':'Sonuç belirsiz','iptal':'İptal edildi'}
@@ -606,7 +621,7 @@ def kayit_duzenle(kid):
         if vals:
             c.execute('UPDATE kayitlar SET '+','.join(f'{k}=?' for k in vals)+',surum=surum+1,guncelleme=? WHERE id=?',(*vals.values(),simdi(),kid))
             db.denetim_yaz(c,g.k['kullanici_adi'],'duzenle',r['proje'],r['anahtar'],json.dumps({k:r[k] for k in vals},ensure_ascii=False),json.dumps(vals,ensure_ascii=False),ip()); db.degisti(c)
-    return jsonify(ok=True,degisiklik=bool(vals))
+    return jsonify(ok=True,degisiklik=bool(vals),damga=_degisiklik_damgasi())
 
 @app.route('/kayit/<int:kid>/sil',methods=['POST'])
 @giris_gerekli
@@ -626,7 +641,7 @@ def _delete_state(kid,value):
         reason=(request.form.get('sebep') or '').strip()[:300]
         c.execute('UPDATE kayitlar SET silindi=?,silen=?,silme_zamani=?,surum=surum+1,guncelleme=? WHERE id=?',(value,g.k['kullanici_adi'] if value else None,simdi() if value else None,simdi(),kid))
         db.denetim_yaz(c,g.k['kullanici_adi'],'sil' if value else 'geri_al',r['proje'],r['anahtar'],r['silindi'],value,ip(),aciklama=reason or None); db.degisti(c)
-    return jsonify(ok=True,degisiklik=True)
+    return jsonify(ok=True,degisiklik=True,damga=_degisiklik_damgasi())
 
 def _bozuk_gorsel_yaniti(kucuk=False):
     """Bozuk/okunamayan dosya için ham baytlar yerine açıklayıcı yer tutucu görsel (200, X-Gorsel-Durum: bozuk)."""
@@ -878,7 +893,7 @@ def kayit_yorum(kid):
         cid=discussion.add(c,kid,g.k['kullanici_adi'],request.form.get('yorum',''),request.form.get('alici',''),request.form.get('yanit_id') or None)
     except PermissionError:abort(403)
     except ValueError as e:return jsonify(ok=False,hata=str(e)),400
-    return jsonify(ok=True,yorum_id=cid)
+    return jsonify(ok=True,yorum_id=cid,damga=_degisiklik_damgasi())
 
 @app.route('/arsiv',methods=['GET','POST'])
 @admin_gerekli

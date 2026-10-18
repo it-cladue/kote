@@ -62,7 +62,7 @@ def test_detail_json_for_every_record_shape(web):
     d = c.get(f'/kayit/{legacy}').json
     assert d['gorsel_kaynak'] == 'gyazo' and d['gorsel_var'] and d['dis_link'] == 'https://gyazo.com/' + GID and d['kt'] == 1 and d['excel_durum'] == 'silinmis'
     d = c.get(f'/kayit/{missing_file}').json
-    assert not d['gorsel_var'] and d['gorsel_kaynak'] == 'yok' and d['gorsel_url'] is None
+    assert not d['gorsel_var'] and d['gorsel_kaynak'] == 'kayip' and d['gorsel_kayip'] and d['gorsel_url'] is None  # dosya yolu var, dosya yok (son QA K3)
     d = c.get(f'/kayit/{deleted}').json
     assert d['silindi'] == 1 and d['geri_al_olur'] and d['silen'] == 'testadmin'
     d = c.get(f'/kayit/{broken_json}').json
@@ -77,10 +77,11 @@ def test_detail_json_for_every_record_shape(web):
 
 def test_detail_errors_are_json_with_turkish_message(web):
     c, a = web; login(c)
-    r = c.get('/kayit/999999'); assert r.status_code == 404 and 'bulunamadı' in r.json['hata']
+    xhr = {'X-Requested-With': 'XMLHttpRequest'}  # fetch() çağrısı JSON alır; tarayıcıda doğrudan açılan adres HTML hata sayfası (son QA K6)
+    r = c.get('/kayit/999999', headers=xhr); assert r.status_code == 404 and 'bulunamadı' in r.json['hata']
     account(a, 'ofonly', 'OF:oku'); pa = seed(a, 'PA', 'pa:1')
     c.post('/cikis', data={'csrf': csrf(c)}); login(c, 'ofonly')
-    r = c.get(f'/kayit/{pa}'); assert r.status_code == 403 and r.json['hata']
+    r = c.get(f'/kayit/{pa}', headers=xhr); assert r.status_code == 403 and r.json['hata']
     r = c.post(f'/kayit/{pa}/kt', data={'csrf': csrf(c)}); assert r.status_code == 403 and r.json['ok'] is False
 
 

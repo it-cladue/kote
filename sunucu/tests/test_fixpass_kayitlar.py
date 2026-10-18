@@ -48,7 +48,7 @@ def template(name):
 def test_missing_record_is_404_everywhere_and_archive_link_reports_inline(web):
     c, a = web; login(c)
     for url in ('/kayit/424242', '/gorsel/424242', '/kucuk/424242'):
-        r = c.get(url); assert r.status_code == 404, url
+        r = c.get(url, headers={'X-Requested-With': 'XMLHttpRequest'}); assert r.status_code == 404, url  # fetch() çağrısı: JSON
         assert 'bulunamadı' in r.json['hata']
     assert c.post('/kayit/424242/kt', data={'csrf': csrf(c)}).status_code == 404
     # Arşiv: yanlış kayıt numarası hata sayfası yerine arşiv sayfasında okunur mesaj

@@ -68,6 +68,10 @@
 .kayit-sayfa .mini-kutu .mini { width: 84px; height: 60px; object-fit: cover; display: block; border-radius: 0; }
 .kayit-sayfa .mini-kutu.hatali .mini { display: none; }
 .kayit-sayfa .mini-kutu.hatali::after { content: 'Görsel açılamadı'; font-size: 10.5px; text-align: center; padding: 0 4px; }
+/* Dosyası sunucuda bulunamayan kayıt: "—" yerine belirgin "Dosya yok" işareti (liste, kart, galeri) */
+.kayit-sayfa .mini-kutu.bos.kayip { background: #ffedd5; color: #9a3412; font-weight: 700; font-size: 11px; border: 1px dashed #fb923c; }
+[data-theme="dark"] .kayit-sayfa .mini-kutu.bos.kayip { background: #4a2d16; color: #ffc48a; border-color: #b45309; }
+.kayit-sayfa .gorsel-yok-yazi.kayip, .kayit-sayfa .galeri-gorsel .gorsel-yok-kutu.kayip { color: #fdba74; font-weight: 700; }
 .kayit-sayfa .mini-etiket { position: absolute; right: 3px; bottom: 3px; padding: 0 5px; border-radius: 4px; background: rgba(17,24,39,.78); color: #fff; font-size: 9.5px; font-weight: 700; letter-spacing: .03em; }
 .kayit-sayfa .kayit.cikarildi { opacity: .42; }
 
@@ -290,6 +294,9 @@ body.lightbox-acik { overflow: hidden; }
   .kayit-sayfa .kayit-sec { width: 24px; height: 24px; margin: 8px; }
   .kayit-sayfa .kart-sec input { width: 24px; height: 24px; }
   .kayit-sayfa .toplu-arac .btn { min-height: 40px; }
+  /* Filtre alanları (Kategori, Ara, Ekleyen, tarihler) ve Düzenle formu: dokunma hedefi ≥40px */
+  .kayit-sayfa .filtre-alan input, .kayit-sayfa .filtre-alan select, .kayit-sayfa .duzenle-izgara input, .kayit-sayfa .duzenle-izgara select, .kayit-sayfa .yorum-form select { min-height: 40px; font-size: 14px; }
+  .kayit-sayfa .duzenle-dugmeler .btn { min-height: 40px; }
   /* Tablo görünümü telefonda okunur kart listesine dönüşür: yatay kaydırma ve min-width yok */
   .kayit-sayfa .tablo-sarici { overflow: visible; border: 0; background: transparent; box-shadow: none; border-radius: 0; }
   .kayit-sayfa .kayit-tablo { min-width: 0; display: block; border: 0; background: transparent; box-shadow: none; border-radius: 0; }
