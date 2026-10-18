@@ -1,7 +1,11 @@
 {% extends "base.html" %}
 {% block baslik %}Kullanıcılar — Kanıt Paneli{% endblock %}
 {% block icerik %}
-{% set eylem_adlari = {'kt':'Onay / yorum','duzenle':'Düzenleme','sil':'Silme'} %}
+{% set eylem_adlari = {'kt':'Onay','duzenle':'Düzenleme','sil':'Silme','oku':'Okuma','gorsel':'Görsel'} %}
+{% macro kapsam_ozeti(eylemler) -%}
+{%- set sirali = ['kt','duzenle','sil']|select('in', eylemler)|list -%}
+{%- if sirali %}{% for e in sirali %}{{ eylem_adlari.get(e, e) }}{{ ', ' if not loop.last }}{% endfor %}{% else %}yalnız okuma{% endif -%}
+{%- endmacro %}
 {% macro yetki_alanlari(values, prefix='') -%}
   {% set parsed = values.parsed_yetkiler|default({}) %}{% set secili_projeler = parsed.get('projeler',[]) %}{% set eylemler = parsed.get('eylemler',{}) %}
   <fieldset class="yetki-alanlari"><legend>Rol ve proje kapsamı</legend>
@@ -33,7 +37,7 @@
   {% set p = u.parsed_yetkiler %}
   <tr class="{{ 'soluk' if not u.aktif }}" id="kullanici-{{ u.kullanici_adi }}">
     <td><div class="kullanici-satir-ad"><b>{{ u.ad or u.kullanici_adi }}</b><small>{{ u.kullanici_adi }}</small><button type="button" class="btn kucuk yalniz-telefon" data-ac="duzenle-{{ u.kullanici_adi }}" aria-expanded="false" aria-controls="duzenle-{{ u.kullanici_adi }}">Düzenle</button></div></td>
-    <td>{% if p.rol == 'superadmin' %}<span class="durum-etiket notr">Süperadmin · tüm projeler</span>{% else %}<div class="kapsam-listesi">{% for proje in p.projeler %}<span class="rozet" style="background:{{ renk(proje) }};color:{{ metin_rengi(renk(proje)) }}" title="{{ proje }}: {{ (p.eylemler.get(proje,[])|map('replace','kt','onay')|join(', ')) or 'okuma' }}">{{ proje }}</span>{% else %}<small>Proje yetkisi yok</small>{% endfor %}{% if p.projeler %}<small>{% for proje in p.projeler %}{{ proje }}: {% set ekstra = p.eylemler.get(proje,[])|reject('in',['oku','gorsel'])|list %}{{ ekstra|map('replace','kt','onay')|join(', ') if ekstra else 'yalnız okuma' }}{{ ' · ' if not loop.last }}{% endfor %}</small>{% endif %}</div>{% endif %}</td>
+    <td>{% if p.rol == 'superadmin' %}<span class="durum-etiket notr tek-satir">Süperadmin</span><small class="kapsam-notu">tüm projeler</small>{% else %}<div class="kapsam-listesi">{% for proje in p.projeler %}<span class="rozet" style="background:{{ renk(proje) }};color:{{ metin_rengi(renk(proje)) }}" title="{{ proje }}: {{ kapsam_ozeti(p.eylemler.get(proje,[])) }}">{{ proje }}</span>{% else %}<small>Proje yetkisi yok</small>{% endfor %}{% if p.projeler %}<small>{% for proje in p.projeler %}{{ proje }}: {{ kapsam_ozeti(p.eylemler.get(proje,[])) }}{{ ' · ' if not loop.last }}{% endfor %}</small>{% endif %}</div>{% endif %}</td>
     <td>{% if u.aktif %}<span class="durum-etiket aktif">Aktif</span>{% else %}<span class="durum-etiket pasif">Pasif</span>{% endif %}{% if u.sifre_degistir %}<br><small>İlk girişte şifre değiştirecek</small>{% endif %}{% if u.son_giris %}<br><small>Son giriş: {{ u.son_giris }}</small>{% endif %}</td>
     <td class="islem-hucre"><button type="button" class="btn kucuk" data-ac="duzenle-{{ u.kullanici_adi }}" aria-expanded="false" aria-controls="duzenle-{{ u.kullanici_adi }}">Düzenle</button></td>
   </tr>

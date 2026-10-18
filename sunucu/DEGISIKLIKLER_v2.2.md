@@ -83,6 +83,33 @@ cd /opt/kanit-paneli && KANIT_PW=telecc123 .venv/bin/python -m app.cli sifre-sif
 - **Arama kapsamı:** ana sayfa ve kayıtlar aramasında açıklama, ekleyen adı ve kategori de aranır; ana sayfadaki kutunun altında kapsam ipucu. Çıktı sayfasındaki arama alanı da aynı kapsamı kullanır.
 - **Telefon (390 px):** Bot, Bot/kullanıcı, İşlem Geçmişi, Kullanıcılar, Arşiv, Bildirimler, Çıktı ve Kanıt Kontrolü sayfalarında sayfa genişlemesi yok; tablolar kendi sarıcısında kaydırılır, kullanıcı listesi sarmalanır, Bot işlem kartları alt alta dizilir.
 
+## Düzeltmeler (son QA turu)
+
+Genel ekran düzeltmeleri:
+
+- **İşlem Geçmişi:** silme nedeni "Ayrıntı" sütununda "Sebep: …" olarak görünür; onay/silme satırlarında "Önceki: 0 / Yeni: 1" yerine "Onay: bekliyor → onaylı", "Silindi", "Geri alındı" gibi okunur metin. Ters tarih aralığı formun içinde uyarı olarak gösterilir.
+- **İşlem adları:** bildirim okuma, Telegram (kanıt ekleme, şifreyle giriş, engelleme, eski/yanlış düğme), bot yönetimi (bakım modu, onay, engel, sıfırlama, yedek…), katalog ve Gyazo işlemleri ana sayfada ve İşlem Geçmişi'nde Türkçe adla yazılır; sözlükte olmayan kod ham haliyle iki kez basılmaz. Kullanıcının kendi "bildirim okundu" hareketleri ana sayfadaki "Son işlemler" akışını doldurmaz.
+- **Bildirimler:** başlangıç > bitiş olan tarih aralığı tam sayfa "400" yerine formda satır içi uyarı; seçimler korunur. Uzun personel değerinde telefonda sayfa genişlemez.
+- **Tablolar:** Telegram ekleyen profili ve diğer tablolarda uzun personel/üye ID değerleri komşu sütunlara taşmaz (hücre içinde sarılır; tam değer ipucu olarak görünür).
+- **Kanıt Kontrolü:** sonuç adımındaki iki indirme düğmesi telefonda alt alta sarılır (≥ 40 px); adım 3 eşleştirme tablosu telefonda satır satır sarmalanır, geniş ekranda yana kaydırma ipucu; "Kontrol zamanı" hem sayfada hem indirilen "Kontrol bilgisi" sayfasında yerel saatle "gg.aa.yyyy ss:dd" biçiminde.
+- **Oturum düşmesi (iki sekme):** yetki/şifre değişince düşme bilgisi yeni giriş yapılana kadar korunur; her sekme "Oturumunuz sona erdi; yetkileriniz güncellendi veya şifreniz değişti…" açıklamasını görür. Oturumu olmayan her gönderim CSRF kontrolünden önce JSON 401 "Oturumunuz sona erdi, sayfayı yenileyin." (XHR) ya da açıklamalı giriş sayfası (form) alır; panel eski sekmedeki "Geçersiz CSRF" 400'ünde de giriş sayfasına yönlendirir ve giriş sonrası aynı sayfaya döner.
+- **Proje / Kategoriler:** proje kodu, kategori kodu ve soru anahtarı alanlarında tarayıcının İngilizce uyarısı yerine Türkçe açıklama ("Proje kodu yalnız BÜYÜK harf, rakam ve alt çizgi (en çok 24).").
+- **Kullanıcılar:** kapsam özeti ve rozet ipucu "HI: Onay, Düzenleme, Silme" biçiminde Türkçe ve sabit sırada; "Süperadmin" etiketi tek satır, "tüm projeler" altında. Ana sayfada "Proje bazında iş yükü" başlığı telefonda notun üstünde tam genişlikte.
+- **Telefon dokunma hedefleri:** menü altındaki Şifre / Çıkış / Koyu tema, zil listesindeki "Kaydı aç" / "Okundu", Çıktı proje çipleri, Kanıt Kontrolü indirme düğmeleri ve Arşiv "Kayıtla ilişkilendir" ≥ 40 px.
+- **Hamburger menü:** yönetim sayfasındayken menü açılınca "Yönetim" alt listesi açık ve aktif sayfa vurgulu gelir; hamburger dokunuşu alt menüyü kapatmaz.
+- Statik dosya sürüm etiketi `v=2.2.3` (eski görünüm kalırsa Ctrl+F5).
+
+Kayıtlar sayfası düzeltmeleri (K1–K8):
+
+- **K1 – Toplu onay araç çubuğu:** "Yenile" / "Sonuçları yenile" sonrasında seçim yapılınca çubuk yeniden görünür ve toplu onay çalışır; yenileme sonrası seçim sıfırlanır.
+- **K2 – Kayıt penceresi "İşlem geçmişi":** silme sebebi "Silindi · admin · Sebep: …" olarak görünür; onay satırları "Onaylandı" / "Onay kaldırıldı".
+- **K3 – Kayıp görsel dosyası:** dosyası sunucuda bulunmayan kayıt, hiç görseli olmayan kayıttan ayrılır: pencerede turuncu "Görsel dosyası sunucuda bulunamadı… Arşiv'den yeniden ilişkilendirebilirsiniz." uyarısı; listede/kartta "Dosya yok" işareti.
+- **K4 – "Sonuçları yenile" şeridi:** kullanıcının kendi onay/silme/toplu işleminden sonra gereksiz yere çıkmaz.
+- **K5 – Boş yorum:** "Gönder ve bildir" boş kutuyla basılınca Türkçe "Göndermeden önce bir yorum yazın." uyarısı.
+- **K6 – Doğrudan açılan adresler:** /gorsel, /kucuk, /kayit adresleri tarayıcıda açılınca ham JSON yerine Türkçe hata sayfası; JSON yanıtlarında Türkçe karakterler okunur.
+- **K7 – Yetkisiz / olmayan kayıt bağlantısı:** `?ac=` ile açılınca pencere yarım kalmaz: "Kayıt açılamadı" başlığı, yalnız açıklama ve Kapat; proje kodu biliniyorsa söylenir.
+- **K8 – Telefon:** Kayıtlar filtre alanları (Kategori, Ara) ve Düzenle formundaki seçim/giriş alanları ≥ 40 px.
+
 ## Güncelleme notu
 
-Sürüm `2.2.0`. `bash deploy/apply-update.sh --dry-run` sonra `bash deploy/apply-update.sh`. Betik başlığı 2.1 → 2.2 olarak güncellendi; mantığı değişmedi. Tarayıcıda eski CSS/JS önbelleğini atlatmak için varlık bağlantıları `v=2.2.2` ile sürümlenir. Tema varsayılanı artık cihazın açık/koyu tercihine uyar (tercih yoksa açık tema); daha önce seçilmiş tema tarayıcıda korunur.
+Sürüm `2.2.0`. `bash deploy/apply-update.sh --dry-run` sonra `bash deploy/apply-update.sh`. Betik başlığı 2.1 → 2.2 olarak güncellendi; mantığı değişmedi. Tarayıcıda eski CSS/JS önbelleğini atlatmak için varlık bağlantıları `v=2.2.3` ile sürümlenir. Tema varsayılanı artık cihazın açık/koyu tercihine uyar (tercih yoksa açık tema); daha önce seçilmiş tema tarayıcıda korunur.

@@ -150,15 +150,19 @@ def before():
         if u and u['aktif'] and session.get('sv')==u['session_version']:
             g.k=u
         else:
-            # Yetki/şifre değişti veya hesap kapandı: işaret, zil yoklaması gibi XHR'lar tarafından tüketilmesin diye
-            # giriş sayfası görülene kadar oturumda kalır.
-            session.clear();session['dustu']=1;g.oturum_dustu=True
+            # Yetki/şifre değişti veya hesap kapandı: işaret, zil yoklaması ya da ikinci sekme tarafından tüketilmesin diye
+            # yeni bir giriş yapılana kadar oturumda kalır (giriş sayfası görülmesi işareti silmez).
+            session.clear();session['dustu']=1;session['dustu_zaman']=simdi();g.oturum_dustu=True
     elif session.get('dustu'):
         g.oturum_dustu=True
     g.yk=yetki.coz(g.k['yetki'] if g.k else '')
     session.setdefault('csrf',secrets.token_hex(24))
     if request.method in ('POST','PUT','PATCH','DELETE'):
-        if g.oturum_dustu:return _oturum_dustu_yaniti()
+        if not g.k and request.endpoint!='giris':
+            # Oturumu olmayan her gönderim CSRF kontrolünden ÖNCE açıklamalı yanıt alır:
+            # XHR'a JSON 401, sayfa gönderimine /giris?neden=oturum (çıkış isteği doğrudan giriş sayfasına).
+            if request.endpoint=='cikis':return redirect(url_for('giris'))
+            return _oturum_dustu_yaniti()
         token=request.form.get('csrf') or request.headers.get('X-CSRF','')
         if not secrets.compare_digest(token,session.get('csrf','')):
             abort(400,'Geçersiz CSRF. Sayfayı yenileyin.')
@@ -190,7 +194,7 @@ def giris_gerekli(f):
     def wrapper(*a,**kw):
         if not g.k:
             if g.get('oturum_dustu'):return _oturum_dustu_yaniti()
-            if _json_bekleniyor():return jsonify(ok=False,hata='Giriş gerekli; sayfayı yenileyip yeniden giriş yapın.',kod=401,giris=url_for('giris')),401
+            if _json_bekleniyor():return jsonify(ok=False,hata='Giriş gerekli; sayfayı yenileyip yeniden giriş yapın.',kod=401,giris=url_for('giris',neden='oturum')),401
             return redirect(url_for('giris',sonraki=_sonraki_hedef()))
         if g.k['sifre_degistir'] and request.endpoint not in ('sifre_degistir','cikis'):
             return redirect(url_for('sifre_degistir'))
@@ -230,8 +234,12 @@ def giris():
         time.sleep(.3)
     if not kullanicilar.var_mi(AYAR):
         hata='Henüz panel hesabı oluşturulmadı. Sunucuda python -m app.cli admin-ekle komutunu çalıştırın.'
-    dustu=bool(session.pop('dustu',None))
-    bilgi=OTURUM_MESAJI if request.method=='GET' and (request.args.get('neden')=='oturum' or dustu) and not g.k else None
+    # Düşme işareti burada silinmez; başarılı giriş session.clear() ile temizler. Böylece ikinci sekme de açıklamayı görür.
+    dustu=bool(session.get('dustu'))
+    bilgi=None
+    if request.method=='GET' and not g.k:
+        if dustu:bilgi=OTURUM_MESAJI
+        elif request.args.get('neden')=='oturum':bilgi='Oturumunuz sona erdi. Lütfen yeniden giriş yapın.'
     return render_template('giris.html',hata=hata,bilgi=bilgi)
 
 @app.route('/cikis',methods=['POST'])
@@ -277,13 +285,50 @@ def _son_islemler(allowed,limit=10):
     elif allowed:where,params='k.proje IN ('+','.join('?' for _ in allowed)+')',list(allowed)
     else:return []
     rows=[]
-    for row in baglanti().execute('SELECT d.*,k.id record_id FROM denetim d LEFT JOIN kayitlar k ON k.anahtar=d.anahtar WHERE '+where+' ORDER BY d.id DESC LIMIT ?',[*params,limit]):
+    # Kullanıcının kendi "okundu" hareketleri akışı doldurmasın; İşlem Geçmişi'nde görünmeye devam eder.
+    for row in baglanti().execute("SELECT d.*,k.id record_id FROM denetim d LEFT JOIN kayitlar k ON k.anahtar=d.anahtar WHERE "+where+" AND d.islem<>'bildirim_okundu' ORDER BY d.id DESC LIMIT ?",[*params,limit]):
         item=log_row(row)
         if item.get('proje') and item['proje'] not in allowed and not g.yk['admin']:continue
         rows.append(item)
     return rows
 
-ISLEM_ADLARI={'giris':'Giriş yaptı','giris_hata':'Hatalı giriş denemesi','onayla':'Kaydı onayladı','onay_kaldir':'Onayı kaldırdı','duzenle':'Kaydı düzenledi','sil':'Kaydı sildi','geri_al':'Kaydı geri aldı','yorum_ekle':'Yorum yazdı','soru_yonelt':'Soru yöneltti','yanit_ekle':'Yanıt verdi','gyazo_istek':'Gyazo dönüşümü istedi','disa_aktar':'Excel çıktısı aldı','dosya_kontrol':'Dosya kontrolü yaptı','kullanici_ekle':'Kullanıcı ekledi','kullanici_guncelle':'Kullanıcıyı güncelledi','sifre_degisti':'Parolasını değiştirdi','arsiv_esle':'Arşiv görseli eşledi','beklenen_proje':'Beklenen projeyi atadı','yeni_kayit':'Yeni kanıt ekledi','sunucu_hata':'Sunucu hatası'}
+# Ana sayfa "Son işlemler" cümle biçimi. Kodlar: panel.py, bot.py, bot_yonetim.py, katalog.py, kullanicilar.py, yetki.py,
+# discussion.py, donusum_isleri.py, bildirim_gecmisi.py içindeki denetim_yaz çağrıları.
+ISLEM_ADLARI={'giris':'Giriş yaptı','giris_hata':'Hatalı giriş denemesi','onayla':'Kaydı onayladı','onay_kaldir':'Onayı kaldırdı','duzenle':'Kaydı düzenledi','sil':'Kaydı sildi','geri_al':'Kaydı geri aldı','yorum_ekle':'Yorum yazdı','soru_yonelt':'Soru yöneltti','yanit_ekle':'Yanıt verdi','gyazo_istek':'Gyazo dönüşümü istedi','disa_aktar':'Excel çıktısı aldı','dosya_kontrol':'Dosya kontrolü yaptı','kullanici_ekle':'Kullanıcı ekledi','kullanici_guncelle':'Kullanıcıyı güncelledi','sifre_degisti':'Parolasını değiştirdi','arsiv_esle':'Arşiv görseli eşledi','beklenen_proje':'Beklenen projeyi atadı','yeni_kayit':'Yeni kanıt ekledi','sunucu_hata':'Sunucu hatası',
+ 'bildirim_okundu':'Bildirimleri okudu','ice_aktar':'İçe aktarım yaptı','yetki_kanonik':'Yetki tanımı düzeltildi',
+ 'telegram_kayit':'Telegram ile kanıt ekledi','bot_kayit':'Telegram ile kanıt ekledi','telegram_onay':'Telegram botuna şifreyle giriş yaptı','telegram_engel':'Telegram botunda engellendi','telegram_eski_buton':'Telegram botunda eski düğmeye bastı','telegram_yanlis_adim_butonu':'Telegram botunda yanlış adımda düğmeye bastı',
+ 'bot_bakim_ac':'Bakım modunu açtı','bot_bakim_kapat':'Bakım modunu kapattı','bot_bakim':'Bakım modunu değiştirdi','bot_onayla':'Telegram kullanıcısını onayladı','bot_onay_kaldir':'Telegram onayını kaldırdı','bot_engelle':'Telegram kullanıcısını engelledi','bot_engel_kaldir':'Telegram engelini kaldırdı','bot_tam_sifirla':'Telegram kullanıcısını tam sıfırladı','bot_oturum_temizle':'Bot oturumunu temizledi','bot_kontrol':'Botu duraklattı / sürdürdü','bot_yedek':'Veritabanı yedeği aldı','bot_inbox_tekrar':'Bekleyen bot mesajlarını yeniden denedi','bot_kategori_kaydet':'Bot kategorisini kaydetti','bot_kategori_sil':'Bot kategorisini pasife aldı','bot_kategori_yayinla':'Bot kategorilerini yayınladı',
+ 'katalog_proje_kaydet':'Proje tanımını kaydetti','katalog_kategori_kaydet':'Kategori tanımını kaydetti',
+ 'gyazo_link_guncelle':'Gyazo bağlantısını güncelledi','gyazo_link_yerel_korundu':'Gyazo bağlantısı eklenmedi, yerel görsel korundu'}
+# İşlem Geçmişi tablosu için kısa ad biçimi.
+DENETIM_ADLARI={'giris':'Giriş','giris_hata':'Hatalı giriş','onayla':'Onay','onay_kaldir':'Onay kaldırma','duzenle':'Düzenleme','sil':'Silme','geri_al':'Geri alma','yorum_ekle':'Yorum','soru_yonelt':'Soru','yanit_ekle':'Yanıt','gyazo_istek':'Gyazo isteği','disa_aktar':'Excel çıktısı','dosya_kontrol':'Dosya kontrolü','kullanici_ekle':'Kullanıcı ekleme','kullanici_guncelle':'Kullanıcı güncelleme','sifre_degisti':'Şifre değişimi','arsiv_esle':'Arşiv eşleme','beklenen_proje':'Beklenen proje','yeni_kayit':'Yeni kanıt','bildirim_okundu':'Bildirim okundu','sunucu_hata':'Sunucu hatası','ice_aktar':'İçe aktarım','yetki_kanonik':'Yetki düzeltme',
+ 'katalog_proje_kaydet':'Proje kaydı','katalog_kategori_kaydet':'Kategori kaydı',
+ 'telegram_kayit':'Telegram ile kanıt','bot_kayit':'Telegram ile kanıt','telegram_onay':'Telegram: şifreyle giriş','telegram_engel':'Telegram: engellendi','telegram_eski_buton':'Telegram: eski düğme','telegram_yanlis_adim_butonu':'Telegram: yanlış adım düğmesi',
+ 'bot_onayla':'Bot: kullanıcı onayı','bot_onay_kaldir':'Bot: onay kaldırma','bot_engelle':'Bot: engelleme','bot_engel_kaldir':'Bot: engel kaldırma','bot_tam_sifirla':'Bot: tam sıfırlama','bot_oturum_temizle':'Bot: oturum temizleme','bot_bakim':'Bot: bakım modu','bot_bakim_ac':'Bot: bakım modu açıldı','bot_bakim_kapat':'Bot: bakım modu kapatıldı','bot_kontrol':'Bot: duraklat/sürdür','bot_yedek':'Bot: veritabanı yedeği','bot_inbox_tekrar':'Bot: tekrar deneme','bot_kategori_kaydet':'Bot: kategori kaydı','bot_kategori_sil':'Bot: kategori pasife','bot_kategori_yayinla':'Bot: kategori yayını',
+ 'gyazo_link_guncelle':'Gyazo bağlantısı','gyazo_link_yerel_korundu':'Gyazo: yerel görsel korundu'}
+
+def islem_adi(code,adlar=None):
+    """Sözlükte olmayan kod ham yazılmaz; alt çizgiler boşluğa çevrilir (kod ikinci kez basılmaz)."""
+    code=str(code or '')
+    return (adlar or ISLEM_ADLARI).get(code) or code.replace('_',' ')
+
+def _onay_metni(value):
+    return 'onaylı' if str(value or '').strip().lower() in ('1','true','onayli','onaylı') else 'bekliyor'
+
+def _denetim_ayrinti(item):
+    """İşlem Geçmişi "Ayrıntı" sütunu: kt/silindi gibi 0/1 değerleri okunur metne çevrilir.
+    Dönüş: (satırlar, açılır-kapanır mı). Serbest eski/yeni değerleri "Önceki / yeni" olarak katlanır."""
+    code=str(item.get('islem') or '');eski=item.get('eski');yeni=item.get('yeni')
+    if code in ('onayla','onay_kaldir'):return ['Onay: '+_onay_metni(eski)+' → '+_onay_metni(yeni)],False
+    if code in ('sil','geri_al'):return ['Silindi' if code=='sil' else 'Geri alındı'],False
+    if code=='bildirim_okundu':
+        try:adet=int(json.loads(yeni or '{}').get('adet') or 0)
+        except (ValueError,TypeError,AttributeError):adet=0
+        return [str(adet)+' bildirim okundu' if adet else 'Bildirimler okundu'],False
+    lines=[]
+    if eski:lines.append('Önceki: '+str(eski))
+    if yeni:lines.append('Yeni: '+str(yeni))
+    return lines,True
 
 @app.route('/')
 @giris_gerekli
@@ -784,17 +829,21 @@ def denetim():
         if filters[key]:where.append('d.'+key+' LIKE ?');params.append('%'+filters[key]+'%')
     if filters['q']:
         where.append('(d.kullanici LIKE ? OR d.islem LIKE ? OR d.anahtar LIKE ?)');params.extend(['%'+filters['q']+'%']*3)
+    uyari=None
     for key,op,tail in (('tarih1','>=',' 00:00:00'),('tarih2','<=',' 23:59:59')):
         if filters[key]:
             try:datetime.strptime(filters[key],'%Y-%m-%d')
-            except ValueError:abort(400)
+            except ValueError:uyari='Geçersiz tarih.';continue
             where.append('d.zaman '+op+' ?');params.append(filters[key]+tail)
+    if filters['tarih1'] and filters['tarih2'] and filters['tarih1']>filters['tarih2']:
+        # Bildirimler sayfasıyla aynı kural: tam sayfa 400 yerine formda uyarı; form değerleri korunur.
+        uyari='Başlangıç tarihi bitişten sonra olamaz.'
     try:page=max(1,min(1000000,int(request.args.get('s','1'))))
     except ValueError:abort(400)
     source=' FROM denetim d LEFT JOIN kayitlar k ON k.anahtar=d.anahtar WHERE '+' AND '.join(where)
-    total=baglanti().execute('SELECT COUNT(*)'+source,params).fetchone()[0]
+    total=0 if uyari else baglanti().execute('SELECT COUNT(*)'+source,params).fetchone()[0]
     rows=[]
-    for row in baglanti().execute('SELECT d.*,k.id record_id'+source+' ORDER BY d.id DESC LIMIT 50 OFFSET ?',[*params,(page-1)*50]):
+    for row in ([] if uyari else baglanti().execute('SELECT d.*,k.id record_id'+source+' ORDER BY d.id DESC LIMIT 50 OFFSET ?',[*params,(page-1)*50])):
         item=log_row(row)
         if item['record_id']:item.update(hedef_turu='kayit',hedef_id=str(item['record_id']))
         elif item.get('hedef_turu')=='kayit':
@@ -802,8 +851,11 @@ def denetim():
             item['hedef_turu']='proje' if str(item.get('islem') or '').startswith('katalog_proje') else 'anahtar'
         if 'hata' in item['islem']:item['sonuc']='hata'
         item['sonuc']={'ok':'Başarılı','hata':'Hata','uyari':'Uyarı'}.get(item.get('sonuc'),item.get('sonuc') or 'Tamamlandı')
+        item['islem_adi']=islem_adi(item['islem'],DENETIM_ADLARI);item['islem_bilinen']=item['islem'] in DENETIM_ADLARI
+        item['ayrinti'],item['ayrinti_katla']=_denetim_ayrinti(item)
+        item['sebep_etiketi']='Sebep' if item['islem'] in ('sil','geri_al') else 'Açıklama'
         rows.append(item)
-    return render_template('denetim.html',logs=rows,kayitlar=rows,toplam=total,sayfa=page,sayfa_sayisi=max(1,(total+49)//50),filters=filters,q=filters['q'])
+    return render_template('denetim.html',logs=rows,kayitlar=rows,toplam=total,sayfa=page,sayfa_sayisi=max(1,(total+49)//50),filters=filters,q=filters['q'],islem_adlari=DENETIM_ADLARI,uyari=uyari)
 
 
 @app.route('/durum.json')
@@ -849,7 +901,11 @@ def bildirim_sayfasi():
     if 'sayfa' in filters and 's' not in filters:filters['s']=filters['sayfa']
     try:data=bildirim_gecmisi.liste(baglanti(),g.k['kullanici_adi'],_allowed(),filters)
     except PermissionError:abort(403)
-    except ValueError:abort(400)
+    except ValueError as error:
+        # Ters tarih aralığı gibi girdi hataları: tam sayfa 400 yerine formun içinde uyarı; seçimler korunur.
+        kept={key:str(filters.get(key,''))[:40] for key in ('tur','proje','tarih1','tarih2')}
+        kept['okundu']=filters.get('okundu','') if filters.get('okundu') in ('0','1') else ''
+        return render_template('bildirimler.html',bildirimler=[],toplam=0,sayfa=1,sayfa_sayisi=1,counts={},turler=[],filters=kept,uyari=str(error))
     data['filters']['okundu']='0' if data['filters']['durum']=='okunmamis' else '1' if data['filters']['durum']=='okundu' else ''
     return render_template('bildirimler.html',**data)
 
@@ -1108,7 +1164,8 @@ def excel_kontrol():
         report_page=min(report_page,report_pages)
         report=dict(report,rows=[dict(row,ids=row['ids'][:20],display_remaining=max(0,len(row['ids'])-20)) for row in rows[(report_page-1)*100:report_page*100]])
     if workbook and path:workbook['extension']=path.suffix
-    return render_template('excel_check.html',workbook=workbook,report=report,options=options,hata=hata,izinli=allowed,upload_ready=bool(path),report_page=report_page,report_pages=report_pages,report_status=report_status)
+    kontrol_zamani=excel_check.yerel_zaman_metni((report or {}).get('metadata',{}).get('checked_at','')) if report else ''
+    return render_template('excel_check.html',workbook=workbook,report=report,options=options,hata=hata,izinli=allowed,upload_ready=bool(path),report_page=report_page,report_pages=report_pages,report_status=report_status,kontrol_zamani=kontrol_zamani)
 
 def _safe_excel(value):
     text=re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]','',str('' if value is None else value))
@@ -1141,7 +1198,8 @@ def excel_kontrol_indir():
     for column in ws.columns:ws.column_dimensions[column[0].column_letter].width=min(50,max(15,max(len(str(cell.value or '')) for cell in column)+2))
     metadata=wb.create_sheet('Kontrol bilgisi');metadata.append(['Alan','Değer'])
     meta=report.get('metadata',{})
-    for key,value in [('Kontrol zamanı (UTC)',meta.get('checked_at','')),('Kapsam',meta.get('scope',{})),('Seçenekler',meta.get('options',options)),('Limitler',meta.get('limits',{})),('Kaynak adı',json.loads((folder/'owner.json').read_text()).get('name',''))]:
+    from . import excel_check
+    for key,value in [('Kontrol zamanı',excel_check.yerel_zaman_metni(meta.get('checked_at',''))),('Kapsam',meta.get('scope',{})),('Seçenekler',meta.get('options',options)),('Limitler',meta.get('limits',{})),('Kaynak adı',json.loads((folder/'owner.json').read_text()).get('name',''))]:
         metadata.append([key,_safe_excel(json.dumps(value,ensure_ascii=False) if isinstance(value,(dict,list)) else value)])
     metadata.column_dimensions['A'].width=25;metadata.column_dimensions['B'].width=90
     stream=io.BytesIO();wb.save(stream);stream.seek(0)

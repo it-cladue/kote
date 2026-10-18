@@ -6,9 +6,9 @@
 <title>{% block baslik %}Kanıt Paneli{% endblock %}</title>
 <meta name="csrf" content="{{ csrf }}">
 <meta name="color-scheme" content="dark light">
-<script src="{{ url_for('static', filename='tema.js',v='2.2.2') }}"></script>
+<script src="{{ url_for('static', filename='tema.js',v='2.2.3') }}"></script>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="{{ url_for('static', filename='stil.css',v='2.2.2') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='stil.css',v='2.2.3') }}">
 {% block head %}{% endblock %}
 </head>
 <body>
@@ -75,7 +75,7 @@
 window.PANEL_KULLANICI = {{ (k.kullanici_adi if k else "")|tojson }};
 window.PROJE_RENKLERI = {{ proje_renkleri|default({})|tojson }};
 </script>
-<script src="{{ url_for('static', filename='panel.js',v='2.2.2') }}"></script>
+<script src="{{ url_for('static', filename='panel.js',v='2.2.3') }}"></script>
 {% if k %}<script>Panel.menu();Panel.bildirimler();</script>{% endif %}
 {% block script %}{% endblock %}
 </body>

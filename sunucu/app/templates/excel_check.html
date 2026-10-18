@@ -123,8 +123,9 @@
     {% else %}
     <fieldset>
       <legend>Alan eşleştirmesi</legend>
+      <p class="kucukyazi eslestirme-ipucu">Tablo dar ekranda yana kaydırılabilir: "Karşılaştırmaya dahil" kutularına ulaşmak için tabloyu yana kaydırın.</p>
       <div class="tablo-kaydir">
-        <table class="tablo">
+        <table class="tablo eslestirme-tablo">
           <thead><tr><th scope="col">Kanıt alanı</th><th scope="col">Dosyadaki sütun</th><th scope="col">Karşılaştırmaya dahil</th></tr></thead>
           <tbody>
           {% for alan, ad in alanlar %}
@@ -157,11 +158,11 @@
 <section class="kart" aria-labelledby="sonuc-baslik">
   <div class="sekme-satir">
     <div><h2 id="sonuc-baslik" class="adim-baslik"><span class="adim-no">4</span> Kontrol sonucu</h2><p class="kucukyazi">Toplam {{ report.total|default(0) }} satır kontrol edildi; {{ meta.get('skipped_blank_rows', 0) }} boş satır atlandı.</p></div>
-    <div class="gorunumler"><a class="btn" href="{{ url_for('excel_kontrol_indir') }}">Tüm sonucu Excel olarak indir</a><a class="btn" href="{{ url_for('excel_kontrol_indir', eksik=1) }}">Yalnız bulunamayanları indir</a></div>
+    <div class="gorunumler kontrol-indir"><a class="btn" href="{{ url_for('excel_kontrol_indir') }}">Tüm sonucu Excel olarak indir</a><a class="btn" href="{{ url_for('excel_kontrol_indir', eksik=1) }}">Yalnız bulunamayanları indir</a></div>
   </div>
   {% if meta %}
   <dl class="kucukyazi">
-    <dt>Kontrol zamanı</dt><dd>{{ meta.get('checked_at', '—') }} (kayıtların o andaki durumu esas alındı)</dd>
+    <dt>Kontrol zamanı</dt><dd>{{ kontrol_zamani or meta.get('checked_at', '—') }} (kayıtların o andaki durumu esas alındı)</dd>
     <dt>Kapsam</dt><dd>{{ meta.get('scope', {}).get('fixed_project') or 'Yetkili tüm projeler' }}; onay durumu: {{ {'hepsi':'hepsi','onayli':'yalnız onaylı','bekleyen':'yalnız onay bekleyen'}.get(meta.get('scope', {}).get('kt', 'hepsi'), meta.get('scope', {}).get('kt', 'hepsi')) }}</dd>
     <dt>Kaynak</dt><dd>{{ {'xlsx':'Excel (XLSX)','ods':'ODS','delimited':'Ayraçlı metin (CSV/TSV/TXT)','id_list':'TXT ID listesi'}.get(meta.get('options', {}).get('format', ''), meta.get('options', {}).get('format', '—')) }}{% if meta.get('options', {}).get('sheet') %}; sayfa: {{ meta.get('options', {}).get('sheet') }}{% endif %}{% if meta.get('options', {}).get('header_row') is not none %}; başlık satırı {{ meta.get('options', {}).get('header_row') }}{% endif %}</dd>
   </dl>

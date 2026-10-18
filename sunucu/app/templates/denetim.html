@@ -17,7 +17,8 @@
     <button class="btn birincil" type="submit">Uygula</button>
     {% if flt.get('q') or flt.get('kullanici') or flt.get('islem') or flt.get('proje') or flt.get('tarih1') or flt.get('tarih2') %}<a class="btn" href="{{ url_for('denetim') }}">Temizle</a>{% endif %}
   </div>
-  <details class="gelismis-filtre" {% if flt.get('tarih1') or flt.get('tarih2') %}open{% endif %}><summary>Tarih aralığı</summary><div class="filtre-ileri"><label for="denetim-tarih1">Başlangıç<input id="denetim-tarih1" type="date" name="tarih1" value="{{ flt.get('tarih1','') }}"></label><label for="denetim-tarih2">Bitiş<input id="denetim-tarih2" type="date" name="tarih2" value="{{ flt.get('tarih2','') }}"></label></div></details>
+  <details class="gelismis-filtre" {% if flt.get('tarih1') or flt.get('tarih2') %}open{% endif %}><summary>Tarih aralığı</summary><div class="filtre-ileri"><label for="denetim-tarih1">Başlangıç<input id="denetim-tarih1" type="date" name="tarih1" value="{{ flt.get('tarih1','') }}" {% if uyari %}aria-invalid="true"{% endif %}></label><label for="denetim-tarih2">Bitiş<input id="denetim-tarih2" type="date" name="tarih2" value="{{ flt.get('tarih2','') }}" {% if uyari %}aria-invalid="true"{% endif %}></label></div></details>
+  {% if uyari %}<div class="hata filtre-uyari" role="alert" id="denetim-uyari">{{ uyari }} Tarihleri düzeltip yeniden uygulayın.</div>{% endif %}
 </form>
 <datalist id="islem-listesi">{% for code in islem_adlari %}<option value="{{ code }}">{% endfor %}</datalist>
 <p class="sonuc-ozeti"><b>{{ toplam|default(logs|length) }}</b> işlem{% if sayfa_sayisi|default(1) > 1 %} · sayfa {{ sayfa|default(1) }} / {{ sayfa_sayisi }}{% endif %}</p>
@@ -27,11 +28,11 @@
   <tbody>
   {% for r in logs %}
   <tr>
-    <td class="nowrap">{{ r.zaman }}</td><td><b>{{ r.kullanici or r.aktor or 'Sistem' }}</b></td><td>{{ islem_adlari.get(r.islem, r.islem) }}<br><code>{{ r.islem }}</code></td>
+    <td class="nowrap">{{ r.zaman }}</td><td><b>{{ r.kullanici or r.aktor or 'Sistem' }}</b></td><td>{{ r.islem_adi or islem_adlari.get(r.islem) or (r.islem or '')|replace('_',' ') }}{% if r.islem_bilinen or r.islem in islem_adlari %}<br><code>{{ r.islem }}</code>{% endif %}</td>
     <td>{% if r.hedef_turu == 'kayit' and r.hedef_id %}<a href="{{ url_for('kayitlar', proje=r.proje, durum='hepsi', ac=r.hedef_id) }}">Kayıt #{{ r.hedef_id }}</a>{% elif r.hedef_turu or r.hedef_id %}{{ {'hesap':'Hesap','kategori':'Kategori','proje':'Proje','anahtar':'Kayıt anahtarı','sistem':'Sistem','bildirim':'Bildirim','kontrol':'Kontrol'}.get(r.hedef_turu, r.hedef_turu or 'Kayıt') }}{% if r.hedef_id %}: {{ r.hedef_id }}{% endif %}{% else %}{{ r.anahtar or '—' }}{% endif %}</td>
     <td>{% if r.proje %}<span class="rozet" style="background:{{ renk(r.proje) }};color:{{ metin_rengi(renk(r.proje)) }}">{{ r.proje }}</span>{% endif %}</td>
     <td>{% set sonuc = r.sonuc or r.aciklama or 'Tamamlandı' %}<span class="durum-etiket {{ 'silinen' if sonuc == 'Hata' else 'bekliyor' if sonuc == 'Uyarı' else 'onayli' }}">{{ sonuc }}</span></td>
-    <td>{% if r.eski or r.yeni %}<details class="deger-detay"><summary>Önceki / yeni</summary>{% if r.eski %}<p><b>Önceki:</b> {{ r.eski }}</p>{% endif %}{% if r.yeni %}<p><b>Yeni:</b> {{ r.yeni }}</p>{% endif %}</details>{% else %}<span class="kucukyazi">—</span>{% endif %}</td>
+    <td class="denetim-ayrinti">{% if r.aciklama %}<p class="denetim-sebep"><b>{{ r.sebep_etiketi or 'Açıklama' }}:</b> {{ r.aciklama }}</p>{% endif %}{% if r.ayrinti is defined %}{% if r.ayrinti and r.ayrinti_katla %}<details class="deger-detay"><summary>Önceki / yeni</summary>{% for satir in r.ayrinti %}<p>{{ satir }}</p>{% endfor %}</details>{% elif r.ayrinti %}{% for satir in r.ayrinti %}<p>{{ satir }}</p>{% endfor %}{% elif not r.aciklama %}<span class="kucukyazi">—</span>{% endif %}{% elif r.eski or r.yeni %}<details class="deger-detay"><summary>Önceki / yeni</summary>{% if r.eski %}<p><b>Önceki:</b> {{ r.eski }}</p>{% endif %}{% if r.yeni %}<p><b>Yeni:</b> {{ r.yeni }}</p>{% endif %}</details>{% elif not r.aciklama %}<span class="kucukyazi">—</span>{% endif %}</td>
   </tr>
   {% else %}<tr><td colspan="7"><div class="bos-tablo">Bu filtrede işlem yok.</div></td></tr>{% endfor %}
   </tbody>

@@ -9,8 +9,8 @@
 <form method="post" data-category-form data-initial-questions='{{ (kategori.questions if kategori else [])|tojson }}'>
 <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="kategori_kaydet"><input type="hidden" name="revision" value="{{ '' if yeni else kategori.revision }}"><input type="hidden" name="questions_json" value="[]" data-questions-json>
 <fieldset class="katalog-bilgi"><legend>Kategori bilgisi</legend>
-<label>Kod <input name="code" required maxlength="48" pattern="[a-z0-9_]{1,48}" autocapitalize="off" value="{{ '' if yeni else kategori.code }}" {{ 'readonly' if not yeni }} placeholder="ornek_kategori"></label>
-<label>Görünen ad <input name="label" required maxlength="120" value="{{ '' if yeni else kategori.label }}" placeholder="Kategori adı"></label>
+<label>Kod <input name="code" required maxlength="48" pattern="[a-z0-9_]{1,48}" autocapitalize="off" value="{{ '' if yeni else kategori.code }}" {{ 'readonly' if not yeni }} placeholder="ornek_kategori" data-gecersiz="Kategori kodu yalnız küçük harf, rakam ve alt çizgi içerebilir (en çok 48)." data-bos="Kategori kodu zorunludur."></label>
+<label>Görünen ad <input name="label" required maxlength="120" value="{{ '' if yeni else kategori.label }}" placeholder="Kategori adı" data-bos="Görünen ad zorunludur."></label>
 <label>Soru şablonu <select name="mode" data-mode-select>
 <option value="custom" {{ 'selected' if (yeni or kategori.mode=='custom') }}>Özel soru akışı</option>
 <option value="tek_uye" {{ 'selected' if not yeni and kategori.mode=='tek_uye' }}>Personel + üye ID</option>
@@ -32,7 +32,7 @@
 <div class="katalog-ekleme-grid">
 <details class="kart katalog-ekleme" id="yeni-proje"><summary>Yeni proje ekle</summary><p class="kucukyazi">Yeni proje normal adminlere otomatik açılmaz; Kullanıcılar ekranından hesaba ayrıca yetki verin.</p>
 <form method="post" data-project-form><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="proje_kaydet"><input type="hidden" name="revision" value="">
-<fieldset class="katalog-bilgi"><legend>Proje bilgisi</legend><label>Kod <input name="code" required pattern="[A-Z0-9_]{1,24}" maxlength="24" autocapitalize="characters" placeholder="YENI_PROJE"></label><label>Görünen ad <input name="label" required maxlength="120"></label><label>Renk <input type="color" name="color" required value="#4472C4"></label><label class="katalog-checkbox"><input type="checkbox" name="active" value="1" checked> Aktif</label></fieldset><button class="btn birincil">Proje ekle</button></form>
+<fieldset class="katalog-bilgi"><legend>Proje bilgisi</legend><label>Kod <input name="code" required pattern="[A-Z0-9_]{1,24}" maxlength="24" autocapitalize="characters" placeholder="YENI_PROJE" data-gecersiz="Proje kodu yalnız BÜYÜK harf, rakam ve alt çizgi (en çok 24)." data-bos="Proje kodu zorunludur."></label><label>Görünen ad <input name="label" required maxlength="120" data-bos="Görünen ad zorunludur."></label><label>Renk <input type="color" name="color" required value="#4472C4"></label><label class="katalog-checkbox"><input type="checkbox" name="active" value="1" checked> Aktif</label></fieldset><button class="btn birincil">Proje ekle</button></form>
 </details>
 <details class="kart katalog-ekleme" id="yeni-kategori"><summary>Yeni kategori ekle</summary>{{ kategori_form(none,True) }}</details>
 </div>
@@ -45,4 +45,4 @@
 {% for kategori in kategoriler %}<details class="katalog-kayit {{ 'soluk' if not kategori.aktif }}"><summary><b>{{ kategori.label }}</b><code>{{ kategori.code }}</code><small>{% if kategori.aktif %}<span class="durum-etiket aktif">Aktif</span>{% else %}<span class="durum-etiket pasif">Pasif</span>{% endif %}</small></summary>{{ kategori_form(kategori) }}</details>{% else %}<p>Henüz kategori yok.</p>{% endfor %}</section>
 </div></div>
 {% endblock %}
-{% block script %}<script src="{{ url_for('static',filename='katalog.js',v='2.2.0') }}"></script>{% endblock %}
+{% block script %}<script src="{{ url_for('static',filename='katalog.js',v='2.2.3') }}"></script>{% endblock %}

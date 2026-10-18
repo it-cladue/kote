@@ -28,6 +28,22 @@ class ExcelCheckError(ValueError):
     """Kullanıcıya gösterilebilecek, dosya yolu içermeyen doğrulama hatası."""
 
 
+def yerel_zaman_metni(value: Any) -> str:
+    """Rapordaki UTC/ISO damgasını sunucunun yerel saatiyle "gg.aa.yyyy ss:dd" biçiminde verir.
+
+    Boş değer boş döner; çözülemeyen değer olduğu gibi döner (bilgi kaybolmasın)."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone()
+    return parsed.strftime("%d.%m.%Y %H:%M")
+
+
 def _as_error(exc: Exception) -> ExcelCheckError:
     return ExcelCheckError(str(exc))
 

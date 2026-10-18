@@ -41,7 +41,8 @@
     const legend = make("legend", {}, question.preset ? `Hazır soru: ${question.preset}` : "Özel soru");
     item.append(legend);
 
-    const key = make("input", { type: "text", maxlength: "40", pattern: "[a-z][a-z0-9_]{0,39}", "data-question-key": "", value: question.key || "" });
+    const key = make("input", { type: "text", maxlength: "40", pattern: "[a-z][a-z0-9_]{0,39}", "data-question-key": "", value: question.key || "",
+      "data-gecersiz": "Soru anahtarı küçük harfle başlamalı; yalnız küçük harf, rakam ve alt çizgi (en çok 40).", "data-bos": "Soru anahtarı zorunludur." });
     key.readOnly = Boolean(question.preset);
     item.append(inputLabel("Anahtar ", key));
 

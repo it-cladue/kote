@@ -28,7 +28,7 @@ def test_menu_links_per_role_and_version(web):
     html = client.get('/').data.decode()
     for text in ('>Ana sayfa<', 'href="/kayitlar"', 'href="/disa-aktar"', '>Çıktı<', '>Kanıt Kontrolü<', '>Bildirimler<', '>İşlem Geçmişi<',
                  'Yönetim', 'href="/yonetim/katalog"', 'href="/yonetim/kullanicilar"', 'href="/bot"', 'href="/arsiv"',
-                 'data-menu-dugme', 'id="zil"', 'id="bildirim-kutu"', 'Tümünü okundu say', 'Süperadmin', 'stil.css?v=2.2.0', 'panel.js?v=2.2.0'):
+                 'data-menu-dugme', 'id="zil"', 'id="bildirim-kutu"', 'Tümünü okundu say', 'Süperadmin', 'stil.css?v=2.2.3', 'panel.js?v=2.2.3'):
         assert text in html, text
     assert '<title>Ana sayfa — Kanıt Paneli</title>' in html
     assert '<title>Kayıtlar — Kanıt Paneli</title>' in client.get('/kayitlar').data.decode()
@@ -227,4 +227,4 @@ def test_other_pages_render_with_new_header_pattern(web):
         assert 'class="ust-etiket"' in html and '<h1' in html, url
         assert 'onclick=' not in html, url
     giris = client.get('/giris').data.decode()
-    assert 'Kanıt Paneli' in giris and 'giris-kutu' in giris and 'stil.css?v=2.2.0' in giris
+    assert 'Kanıt Paneli' in giris and 'giris-kutu' in giris and 'stil.css?v=2.2.3' in giris

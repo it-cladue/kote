@@ -211,7 +211,7 @@ def test_health_and_static_do_not_set_session_cookie(web):
     c, a = web
     r = c.get('/saglik')
     assert r.status_code == 200 and r.headers.get('X-Kanit-Paneli') == '2.2.0' and 'Set-Cookie' not in r.headers
-    r = c.get('/static/stil.css?v=2.2.0')
+    r = c.get('/static/stil.css?v=2.2.3')
     assert r.status_code == 200 and 'Set-Cookie' not in r.headers
     assert 'kanit_session=' in c.get('/giris').headers.get('Set-Cookie', '')
     login(c)
@@ -315,7 +315,7 @@ def test_asset_version_and_table_wrapper_rule(web):
     c, a = web; login(c)
     for url in ('/bot', '/denetim', '/yonetim/kullanicilar', '/arsiv', '/bildirimler'):
         html = c.get(url).data.decode()
-        assert 'stil.css?v=2.2.0' in html and 'panel.js?v=2.2.0' in html, url
+        assert 'stil.css?v=2.2.3' in html and 'panel.js?v=2.2.3' in html, url
     css = (STATIC / 'stil.css').read_text(encoding='utf-8')
     assert '.tablo-sarici, .kaydir, .tablo-kaydir { position: relative; max-width: 100%; }' in css
     assert '.iki-kolon > *, .kullanici-izgara > *' in css and '.kullanici-listesi .tablo { min-width: 0; }' in css

@@ -8,7 +8,8 @@ window.Panel = (function () {
   function post(url, data) { var fd=new URLSearchParams(); Object.keys(data||{}).forEach(function(k){ if(Array.isArray(data[k]))data[k].forEach(function(v){fd.append(k,v);}); else fd.append(k,data[k]); }); return fetch(url,{method:'POST',credentials:'same-origin',body:fd,headers:{'X-CSRF':csrf}}).then(parseResponse); }
   var oturumYonlendirildi=false;
   function oturumDustu(message,girisUrl){ if(oturumYonlendirildi)return; oturumYonlendirildi=true; var hedef=(girisUrl||'/giris?neden=oturum'); if(hedef.indexOf('sonraki=')<0)hedef+=(hedef.indexOf('?')<0?'?':'&')+'sonraki='+encodeURIComponent(window.location.pathname+window.location.search); toast(message||'Oturumunuz sona erdi, sayfayı yenileyin.',true); setTimeout(function(){window.location.href=hedef;},1500); }
-  function parseResponse(r) { if(r.status===403)throw new Error('Bu işlem için yetkiniz yok.'); if(r.status===401||r.redirected){ return r.json().catch(function(){return {};}).then(function(d){ oturumDustu(d&&d.hata,d&&d.giris); throw new Error((d&&d.hata)||'Oturumunuz sona erdi, sayfayı yenileyin.'); }); } return r.json().catch(function(){return {};}).then(function(d){if(!r.ok)throw new Error(d.hata||'İşlem yapılamadı ('+r.status+')'); return d;}); }
+  /* Oturum düşmesi belirtileri: 401, giriş sayfasına yönlendirme ya da eski sekmenin "Geçersiz CSRF" 400'ü → giriş sayfası (sonraki ile). */
+  function parseResponse(r) { if(r.status===403)throw new Error('Bu işlem için yetkiniz yok.'); if(r.status===401||r.redirected){ return r.json().catch(function(){return {};}).then(function(d){ oturumDustu(d&&d.hata,d&&d.giris); throw new Error((d&&d.hata)||'Oturumunuz sona erdi, sayfayı yenileyin.'); }); } return r.json().catch(function(){return {};}).then(function(d){if(r.status===400&&/Geçersiz CSRF/i.test(d.hata||'')){oturumDustu('Oturumunuz sona erdi, sayfayı yenileyin.');throw new Error('Oturumunuz sona erdi, sayfayı yenileyin.');}if(!r.ok)throw new Error(d.hata||'İşlem yapılamadı ('+r.status+')'); return d;}); }
   function postBildirim(payload, legacy) { return fetch('/bildirimler/okundu',{method:'POST',credentials:'same-origin',headers:{'X-CSRF':csrf,'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(parseResponse).catch(function(){ return post('/bildirimler/okundu',legacy || (payload.hepsi?{hepsi:'1'}:{id:(payload.ids||[])[0]})); }); }
   function editable(target) { if(!target)return false; var name=(target.tagName||'').toLowerCase(); return name==='input'||name==='textarea'||name==='select'||name==='button'||target.isContentEditable; }
   function setChangeStrip(show) { var s=document.getElementById('degisiklik-serit'); if(s)s.classList.toggle('gizli',!show); }
@@ -361,15 +362,19 @@ window.Panel = (function () {
   }
   function menu(){
     var header=document.getElementById('ust-menu');if(!header)return;
-    var burger=header.querySelector('[data-menu-dugme]'), nav=document.getElementById('ana-menu');
-    if(burger&&nav){burger.addEventListener('click',function(){var open=!header.classList.contains('menu-acik');header.classList.toggle('menu-acik',open);burger.setAttribute('aria-expanded',String(open));burger.setAttribute('aria-label',open?'Menüyü kapat':'Menüyü aç');});}
+    var burger=header.querySelector('[data-menu-dugme]'), nav=document.getElementById('ana-menu'), aktifAcilirlar=[];
+    function telefon(){return window.matchMedia('(max-width:900px)').matches;}
+    if(burger&&nav){burger.addEventListener('click',function(){var open=!header.classList.contains('menu-acik');header.classList.toggle('menu-acik',open);burger.setAttribute('aria-expanded',String(open));burger.setAttribute('aria-label',open?'Menüyü kapat':'Menüyü aç');
+      /* Yönetim sayfasındayken menü açılınca alt menü açık ve aktif sayfa vurgulu gelsin. */
+      if(open&&telefon())aktifAcilirlar.forEach(function(ac){ac(true);});});}
     Array.prototype.forEach.call(header.querySelectorAll('[data-acilir]'),function(btn){
       var panel=document.getElementById(btn.getAttribute('data-acilir'));if(!panel)return;
       function set(open){panel.hidden=!open;btn.setAttribute('aria-expanded',String(open));}
       btn.addEventListener('click',function(e){e.preventDefault();set(panel.hidden);if(!panel.hidden){var first=panel.querySelector('a');if(first&&window.matchMedia('(min-width:901px)').matches)first.focus();}});
-      document.addEventListener('click',function(e){if(panel.hidden)return;if(btn.contains(e.target)||panel.contains(e.target))return;set(false);});
+      /* Hamburger dokunuşu "dışarı tıklama" sayılmaz; alt menü yalnız gerçekten dışına tıklanınca kapanır. */
+      document.addEventListener('click',function(e){if(panel.hidden)return;if(btn.contains(e.target)||panel.contains(e.target))return;if(burger&&(e.target===burger||burger.contains(e.target)))return;set(false);});
       document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!panel.hidden){set(false);btn.focus();}});
-      if(window.matchMedia('(max-width:900px)').matches&&btn.classList.contains('aktif'))set(true);
+      if(btn.classList.contains('aktif')){aktifAcilirlar.push(set);if(telefon())set(true);}
     });
     document.addEventListener('keydown',function(e){if(e.key==='Escape'&&header.classList.contains('menu-acik')&&burger){header.classList.remove('menu-acik');burger.setAttribute('aria-expanded','false');}});
   }

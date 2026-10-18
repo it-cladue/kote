@@ -242,7 +242,8 @@ legend { font-size: 12px; font-weight: 700; color: var(--soluk); padding: 0 6px;
 .tablo { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--kart); border: 1px solid var(--cizgi); border-radius: var(--yuvarlak); overflow: hidden; min-width: 720px; font-size: 14px; }
 .tablo th, .tablo td { padding: 10px 12px; border-bottom: 1px solid var(--cizgi); text-align: left; vertical-align: middle; }
 .tablo th { background: var(--yuzey-2); font-weight: 650; font-size: 12px; color: var(--soluk); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
-.tablo td { max-width: 320px; }
+.tablo td { max-width: 320px; overflow-wrap: anywhere; } /* uzun personel/üye değerleri komşu sütunlara taşmaz */
+.tablo td.sarmal { word-break: normal; overflow-wrap: anywhere; }
 .tablo tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--yuzey-2) 55%, transparent); }
 .tablo tbody tr:hover td { background: var(--birincil-yumusak); }
 .tablo tbody tr:last-child td { border-bottom: 0; }
@@ -334,6 +335,14 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
 .sekme.aktif { background: var(--kart); color: var(--yazi); border-color: var(--cizgi); box-shadow: var(--golge); font-weight: 650; }
 .sekme.bekleyen:not(.aktif) b { color: var(--turuncu); } .sekme.onayli:not(.aktif) b { color: var(--yesil); } .sekme.silinen:not(.aktif) b { color: var(--kirmizi); }
 .gorunumler { display: flex; align-items: center; gap: 2px; }
+/* Kanıt Kontrolü sonuç adımı: indirme düğmeleri sarmalanır, dokunma hedefi ≥ 40 px. */
+.gorunumler.kontrol-indir { flex-wrap: wrap; gap: 8px; }
+.gorunumler.kontrol-indir .btn { min-height: 40px; border-color: var(--cizgi-koyu); color: var(--yazi); background: var(--kart); }
+.tek-satir { white-space: nowrap; }
+.kapsam-notu { display: block; margin-top: 4px; }
+.filtre .filtre-uyari { margin: 12px 0 0; }
+.denetim-ayrinti p { margin: 2px 0; }
+.denetim-ayrinti .denetim-sebep { overflow-wrap: anywhere; }
 .gorunumler span { font-size: 12.5px; color: var(--soluk); margin-right: 4px; }
 .gorunumler a { padding: 6px 11px; border-radius: 7px; color: var(--soluk); border: 1px solid transparent; font-size: 13.5px; }
 .gorunumler a.aktif { background: var(--kart); color: var(--yazi); border-color: var(--cizgi); box-shadow: var(--golge); }
@@ -428,6 +437,9 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
 .bildirim-satir.okunmamis { border-left: 4px solid var(--birincil); background: color-mix(in srgb, var(--birincil-yumusak) 55%, var(--kart)); }
 .bildirim-satir-baslik, .bildirim-satir-alt { display: flex; gap: 9px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
 .bildirim-satir-baslik > div, .bildirim-satir-alt { display: flex; gap: 8px; align-items: center; }
+/* Uzun personel/kayıt bilgisi satırı sarılır; sayfa telefonda genişlemez. */
+.bildirim-satir-alt > .kucukyazi { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.bildirim-satir-alt > span:last-child { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .bildirim-satir p { margin: 8px 0; color: var(--yazi); }
 .bildirim-satir time { font-size: 12.5px; color: var(--soluk); }
 
@@ -575,6 +587,14 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
   .deger-liste { grid-template-columns: 1fr; }
 }
 .menu-mobil-alt { display: none; }
+/* Telefon dokunma hedefleri: menü alt düğmeleri, zil listesi, proje çipleri, sayfa içi düğmeler ≥ 40 px. */
+@media (max-width: 700px) {
+  .icerik .btn, .bildirim-kutu .btn, .menu-mobil-alt .btn, .ust .menu .menu-mobil-alt a.btn, .ust .menu .menu-mobil-alt button.btn { min-height: 40px; }
+  .cip span { min-height: 40px; display: inline-flex; align-items: center; }
+  .ozet-baslik { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .gorunumler.kontrol-indir { width: 100%; }
+  .gorunumler.kontrol-indir .btn { flex: 1 1 100%; }
+}
 @media (max-width: 620px) {
   .icerik { padding: var(--b2) var(--b2) 36px; }
   body { font-size: 14.5px; }
@@ -589,7 +609,16 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
   .durum-serit .durum-etiket { white-space: normal; text-align: left; }
   .filtre-satir input, .filtre-satir select { flex: 1 1 100%; width: 100%; }
   .filtre-satir .btn, .buton-satir .btn { min-height: 40px; }
-  .satir-form .btn.kucuk, .tablo .btn.kucuk { min-height: 36px; padding: 6px 10px; }
+  .satir-form .btn.kucuk, .tablo .btn.kucuk { min-height: 40px; padding: 6px 10px; }
+  /* Kanıt Kontrolü adım 3: eşleştirme tablosu telefonda yana kaydırılmaz, satırlar alt alta sarmalanır. */
+  .eslestirme-tablo { min-width: 0; }
+  .eslestirme-tablo thead { display: none; }
+  .eslestirme-tablo tr { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--cizgi); padding: 6px 0; }
+  .eslestirme-tablo td { flex: 1 1 100%; max-width: none; border-bottom: 0; padding: 4px 12px; }
+  .eslestirme-tablo td:first-child { font-weight: 600; }
+  .eslestirme-tablo select { width: 100%; min-height: 40px; }
+  .eslestirme-tablo td label { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; }
+  .eslestirme-ipucu { display: none; }
   .sifre-deger code { font-size: 16px; }
   .kart-baslik .btn { flex: 1 1 auto; }
   /* Kullanıcı listesi: telefonda yatay kaydırma yerine sarmalanır; Düzenle düğmesi ad hücresine taşınır, işlem sütunu gizlenir. */
@@ -598,7 +627,7 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
   .kullanici-listesi .tablo .islem-hucre { display: none; }
   .kullanici-listesi .tablo td[colspan] { display: table-cell; }
   .kullanici-listesi .kapsam-listesi { max-width: 150px; }
-  .yalniz-telefon { display: inline-flex; margin-top: 6px; min-height: 36px; }
+  .yalniz-telefon { display: inline-flex; margin-top: 6px; min-height: 40px; }
   .modal-kontrol { position: sticky; top: 0; justify-content: flex-end; padding: 8px; background: var(--kart); margin-left: auto; width: max-content; }
   .modal-bilgi, .yorum-genis { padding: 16px; }
   .alanlar { grid-template-columns: 100px 1fr; }

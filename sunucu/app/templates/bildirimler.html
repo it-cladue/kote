@@ -11,10 +11,11 @@
     <div><label for="bildirim-durum">Durum</label><select id="bildirim-durum" name="okundu"><option value="" {{ 'selected' if not flt.get('okundu','') }}>Tümü</option><option value="0" {{ 'selected' if flt.get('okundu','') in ['0','okunmamis'] }}>Okunmamış</option><option value="1" {{ 'selected' if flt.get('okundu','') in ['1','okundu'] }}>Okunmuş</option></select></div>
     <div><label for="bildirim-tur">Tür</label><select id="bildirim-tur" name="tur"><option value="">Tüm türler</option>{% for code, label in [('kanit','Yeni kanıt'),('onay','Onay'),('soru','Soru'),('yanit','Yanıt'),('yorum','Yorum')] %}<option value="{{ code }}" {{ 'selected' if flt.get('tur','') == code }}>{{ label }}</option>{% endfor %}</select></div>
     {% if projeler()|length > 1 %}<div><label for="bildirim-proje">Proje</label><select id="bildirim-proje" name="proje"><option value="">Tüm yetkili projeler</option>{% for p in projeler() %}<option value="{{ p }}" {{ 'selected' if flt.get('proje','') == p }}>{{ p }}</option>{% endfor %}</select></div>{% endif %}
-    <div><label for="bildirim-tarih1">Başlangıç</label><input id="bildirim-tarih1" type="date" name="tarih1" value="{{ flt.get('tarih1','') }}"></div>
-    <div><label for="bildirim-tarih2">Bitiş</label><input id="bildirim-tarih2" type="date" name="tarih2" value="{{ flt.get('tarih2','') }}"></div>
+    <div><label for="bildirim-tarih1">Başlangıç</label><input id="bildirim-tarih1" type="date" name="tarih1" value="{{ flt.get('tarih1','') }}" {% if uyari %}aria-invalid="true" aria-describedby="bildirim-uyari"{% endif %}></div>
+    <div><label for="bildirim-tarih2">Bitiş</label><input id="bildirim-tarih2" type="date" name="tarih2" value="{{ flt.get('tarih2','') }}" {% if uyari %}aria-invalid="true" aria-describedby="bildirim-uyari"{% endif %}></div>
     <button class="btn birincil">Uygula</button><a class="btn" href="{{ url_for('bildirim_sayfasi') }}">Temizle</a>
   </div>
+  {% if uyari %}<div class="hata filtre-uyari" role="alert" id="bildirim-uyari">{{ uyari }} Tarihleri düzeltip yeniden uygulayın.</div>{% endif %}
 </form>
 <p class="sonuc-ozeti"><b>{{ toplam|default(bildirimler|length) }}</b> bildirim{% if counts is defined and counts.okunmamis is defined %} · <b>{{ counts.okunmamis }}</b> okunmamış{% endif %}{% if sayfa_sayisi|default(1)>1 %} · sayfa {{ sayfa|default(1) }} / {{ sayfa_sayisi }}{% endif %}</p>
 <div class="bildirim-sayfa-listesi" id="bildirim-sayfa-listesi">

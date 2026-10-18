@@ -51,7 +51,7 @@
     {% for r in son_islemler %}
       <li>
         <time datetime="{{ r.zaman }}">{{ r.zaman }}</time>
-        <div class="islem-metin"><b>{{ r.kullanici or 'Sistem' }}</b> · {{ islem_adlari.get(r.islem, r.islem) }}{% if r.proje %} <span class="rozet" style="background:{{ renk(r.proje) }};color:{{ metin_rengi(renk(r.proje)) }}">{{ r.proje }}</span>{% endif %}{% if r.record_id %}<small>Kayıt #{{ r.record_id }}</small>{% elif r.hedef_turu == 'hesap' and r.hedef_id %}<small>Hesap: {{ r.hedef_id }}</small>{% endif %}</div>
+        <div class="islem-metin"><b>{{ r.kullanici or 'Sistem' }}</b> · {{ islem_adlari.get(r.islem) or (r.islem or '')|replace('_',' ') }}{% if r.proje %} <span class="rozet" style="background:{{ renk(r.proje) }};color:{{ metin_rengi(renk(r.proje)) }}">{{ r.proje }}</span>{% endif %}{% if r.record_id %}<small>Kayıt #{{ r.record_id }}</small>{% elif r.hedef_turu == 'hesap' and r.hedef_id %}<small>Hesap: {{ r.hedef_id }}</small>{% endif %}</div>
         <span>{% if r.record_id %}<a class="btn kucuk hayalet" href="{{ url_for('kayitlar', proje=r.proje, durum='hepsi', ac=r.record_id) }}">Kaydı aç</a>{% elif r.sonuc == 'hata' %}<span class="durum-etiket silinen">Hata</span>{% endif %}</span>
       </li>
     {% else %}
