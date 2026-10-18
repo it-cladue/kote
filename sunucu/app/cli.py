@@ -5,32 +5,55 @@ import json
 import os
 import shutil
 import sqlite3
+import sys
 from datetime import datetime
 from pathlib import Path
 from . import db, kullanicilar
 from .settings import AYAR, ROOT
 
+class _TurkceParser(argparse.ArgumentParser):
+    """argparse'ın İngilizce metinlerini Türkçeleştirir."""
+    def __init__(self,*a,**k):
+        k.setdefault('add_help',False)
+        super().__init__(*a,**k)
+        self.add_argument('-h','--help',action='help',help='Bu yardımı göster ve çık')
+        self._positionals.title='Zorunlu değerler'; self._optionals.title='Seçenekler'
+    def error(self,message):
+        if 'invalid choice' in message:
+            secim=message.split("'")[1] if "'" in message else ''
+            message="bilinmeyen komut '"+secim+"'. Komutlar: "+', '.join(self._subparsers._group_actions[0].choices.keys()) if self._subparsers else message
+        elif 'required' in message: message='eksik değer: '+message.split(':')[-1].strip()
+        self.print_usage(sys.stderr); raise SystemExit('Hata: '+message+" ('--help' ile kullanım bilgisi)")
+
+def _alt(sub,ad,aciklama):
+    return sub.add_parser(ad,help=aciklama,description=aciklama)
+
 def main():
-    parser=argparse.ArgumentParser(description='Kanıt Paneli sunucu araçları')
-    sub=parser.add_subparsers(dest='command',required=True)
-    admin=sub.add_parser('admin-ekle',help='İlk veya ek panel hesabını oluştur')
-    admin.add_argument('ad',nargs='?',default='admin'); admin.add_argument('--yetki',default='admin')
-    reset=sub.add_parser('sifre-sifirla',help='Mevcut hesabın parolasını sıfırla ve hesabı aktif et');reset.add_argument('ad')
+    parser=_TurkceParser(prog='python -m app.cli',description='Kanıt Paneli sunucu araçları',epilog='Örnek: KANIT_PW=GucluParola1 python -m app.cli sifre-sifirla admin --password-env KANIT_PW --kalici')
+    sub=parser.add_subparsers(dest='command',required=True,title='Komutlar',metavar='KOMUT')
+    admin=_alt(sub,'admin-ekle','İlk veya ek panel hesabını oluştur')
+    admin.add_argument('ad',nargs='?',default='admin',help='Kullanıcı adı (varsayılan: admin)'); admin.add_argument('--yetki',default='admin',help="Yetki: admin, superadmin veya 'OF:oku,kt' gibi proje kapsamı")
+    reset=_alt(sub,'sifre-sifirla','Mevcut hesabın parolasını sıfırla ve hesabı aktif et');reset.add_argument('ad',help='Kullanıcı adı')
     for command in (admin,reset):
-        command.add_argument('--password-env',help='Parolanın mevcut ortam değişkeni adı; değeri komut satırına yazmayın')
+        command.add_argument('--password-env',metavar='DEGISKEN',help='Parolanın okunacağı ortam değişkeninin adı; parolayı komut satırına yazmayın')
         command.add_argument('--kalici',action='store_true',help='Parola kalıcıdır; ilk girişte değiştirme zorunluluğu konmaz')
-    old=sub.add_parser('ice-aktar',help='Eski klasörü/Exceli bir kez aktar; canlı Excel bağlantısı kurmaz')
-    old.add_argument('kaynak')
-    sub.add_parser('arsiv-tara',help='Sunucuya taşınmış telegram_gorseller klasörünü indeksle')
-    backup=sub.add_parser('yedekle',help='Tutarlı SQLite yedeği ve isteğe bağlı görsel kopyası')
-    backup.add_argument('hedef');backup.add_argument('--gorseller',action='store_true')
-    sub.add_parser('durum');sub.add_parser('veritabani-kur')
+    old=_alt(sub,'ice-aktar','Eski klasörü/Exceli bir kez aktar; canlı Excel bağlantısı kurmaz')
+    old.add_argument('kaynak',help='Eski Excel dosyası veya bot klasörü yolu')
+    _alt(sub,'arsiv-tara','Sunucuya taşınmış telegram_gorseller klasörünü indeksle')
+    backup=_alt(sub,'yedekle','Tutarlı SQLite yedeği ve isteğe bağlı görsel kopyası')
+    backup.add_argument('hedef',help='Yedeklerin yazılacağı klasör (altına tarihli klasör açılır)');backup.add_argument('--gorseller',action='store_true',help='Görsel ve arşiv klasörlerini de kopyala')
+    _alt(sub,'durum','Kayıt sayısı, dosya yolları ve bot gelen kutusu özeti');_alt(sub,'veritabani-kur','Veritabanı dosyasını ve şemayı oluştur')
     args=parser.parse_args()
     if args.command in ('admin-ekle','sifre-sifirla'):
         env=getattr(args,'password_env',None)
         if env and not os.getenv(env,''): raise SystemExit('Ortam değişkeni boş: '+env)
-        password=os.getenv(env,'') if env else getpass.getpass('En az 8 karakter parola: ')
-        if not env and password!=getpass.getpass('Parola tekrar: '): raise SystemExit('Parolalar aynı değil.')
+        if env: password=os.getenv(env,'')
+        else:
+            if not sys.stdin.isatty(): raise SystemExit('Parola sorulamıyor (terminal yok). Parolayı ortam değişkeniyle verin: KANIT_PW=... python -m app.cli '+args.command+' '+args.ad+' --password-env KANIT_PW')
+            try:
+                password=getpass.getpass('En az 8 karakter parola: ')
+                if password!=getpass.getpass('Parola tekrar: '): raise SystemExit('Parolalar aynı değil.')
+            except (EOFError,KeyboardInterrupt): raise SystemExit('\nParola girişi iptal edildi.')
         try:
             if args.command=='admin-ekle':
                 # admin-ekle ile verilen parola sunucu operatörüne aittir; kalıcıdır.

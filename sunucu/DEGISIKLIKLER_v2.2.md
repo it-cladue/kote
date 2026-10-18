@@ -110,6 +110,13 @@ Kayıtlar sayfası düzeltmeleri (K1–K8):
 - **K7 – Yetkisiz / olmayan kayıt bağlantısı:** `?ac=` ile açılınca pencere yarım kalmaz: "Kayıt açılamadı" başlığı, yalnız açıklama ve Kapat; proje kodu biliniyorsa söylenir.
 - **K8 – Telefon:** Kayıtlar filtre alanları (Kategori, Ara) ve Düzenle formundaki seçim/giriş alanları ≥ 40 px.
 
+Veri ve sunucu tarafı (son tur):
+
+- **Çıktı sayımı:** "kaç kayıt indirilecek" ön kontrolü artık satırları çekmeden sayar; birkaç kullanıcı aynı anda Excel alırken yavaşlama kalktı.
+- **Proje çipleri:** veritabanına elle girilmiş küçük harfli/bilinmeyen proje kodları ayrı bir çip olarak görünmez; büyük harfe çevrilip tekilleştirilir.
+- **Sunucu komutları (`app.cli`):** yardım ve hata metinleri Türkçe ("bilinmeyen komut", "eksik değer"); her komutun açıklaması var; terminal olmadan (betik/boru içinden) parola istenirse ham Python hatası yerine `--password-env` kullanmanız söylenir.
+- Paket manifesti `DOSYA_DOGRULAMA.sha256` 2.2 dosyalarıyla yeniden üretildi (`sha256sum -c DOSYA_DOGRULAMA.sha256` ile doğrulanabilir); ZIP içinde `__pycache__` / `.pytest_cache` yok.
+
 ## Güncelleme notu
 
 Sürüm `2.2.0`. `bash deploy/apply-update.sh --dry-run` sonra `bash deploy/apply-update.sh`. Betik başlığı 2.1 → 2.2 olarak güncellendi; mantığı değişmedi. Tarayıcıda eski CSS/JS önbelleğini atlatmak için varlık bağlantıları `v=2.2.3` ile sürümlenir. Tema varsayılanı artık cihazın açık/koyu tercihine uyar (tercih yoksa açık tema); daha önce seçilmiş tema tarayıcıda korunur.

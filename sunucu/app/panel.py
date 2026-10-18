@@ -69,8 +69,10 @@ def _all_project_info():
         items=katalog.list_projects(baglanti(),active_only=False)
         known={p['code'] for p in items}
         for row in baglanti().execute('SELECT DISTINCT proje FROM kayitlar'):
-            if row['proje'] not in known:
-                items.append(dict(code=row['proje'],label=row['proje'],color='#64748b',aktif=0,revision=0))
+            # Elle girilmiş küçük harfli/bilinmeyen kodlar ayrı bir çip olmasın: büyük harfe çevrilip tekilleştirilir.
+            code=(row['proje'] or '').strip().upper()
+            if code and code not in known:
+                known.add(code); items.append(dict(code=code,label=code,color='#64748b',aktif=0,revision=0))
         g.project_info=items
     return g.project_info
 
@@ -1046,10 +1048,12 @@ def disa_aktar_xlsx():
         if sayim or _json_bekleniyor():return jsonify(ok=False,hata=hata,kod=400),400
         return _cikti_sayfasi(request.args,hata=hata,status=400)
     a=request.args.to_dict(flat=False); a.setdefault('durum',['hepsi']); w,p,_=_filtre_sql(MultiDict(a),yetki.izinli_projeler(g.yk,projeler()))
-    rows=baglanti().execute(f'SELECT * FROM kayitlar WHERE {w} ORDER BY proje,tarih,id',p).fetchall()
     if sayim:
         # Çıktı formu indirmeden önce sayımı sorar; 0 kayıtta boş dosya yerine sayfada uyarı gösterir.
-        return jsonify(ok=True,adet=len(rows),mesaj=('Seçime uyan kayıt yok; dosya indirilmedi. Tarih aralığını veya diğer koşulları genişletin.' if not rows else '%d kayıt dosyaya yazılıyor.' % len(rows)))
+        # Yalnız sayım istendiğinden satırlar çekilmez (eşzamanlı kullanıcılarda hız).
+        adet=baglanti().execute(f'SELECT COUNT(*) FROM kayitlar WHERE {w}',p).fetchone()[0]
+        return jsonify(ok=True,adet=adet,mesaj=('Seçime uyan kayıt yok; dosya indirilmedi. Tarih aralığını veya diğer koşulları genişletin.' if not adet else '%d kayıt dosyaya yazılıyor.' % adet))
+    rows=baglanti().execute(f'SELECT * FROM kayitlar WHERE {w} ORDER BY proje,tarih,id',p).fetchall()
     wb=openpyxl.Workbook(); ws=wb.active; ws.title='Kayıtlar'
     columns=[('Kayıt ID','id'),('Proje','proje'),('Kategori','kategori'),('Personel','personel'),('Üye ID','uye_id'),('Ana üye ID','ana_uye_id'),('Tür','tip'),('Tarih','tarih'),('KT','kt'),('Onaylayan','kt_kim'),('Ekleyen','ekleyen_ad'),('Lead ID','lead_id'),('Eski link','link'),('Açıklama','aciklama'),('Ek not','ek_not'),('Ek sorular','soru_ozet')]
     ws.append([a for a,b in columns])
