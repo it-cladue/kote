@@ -16,7 +16,7 @@ from PIL import Image, UnidentifiedImageError
 from . import db, yetki, kullanicilar, gorsel, bot_yonetim
 from .settings import AYAR, ROOT
 
-SURUM = '2.2.0'
+SURUM = '2.2.1'
 secret_path = Path(AYAR['BOT_KLASOR']) / 'session.key'
 secret = os.getenv('SESSION_SECRET')
 if not secret:

@@ -185,3 +185,17 @@ def test_arsiv_tara_only_auto_assigns_a_single_exact_link_id(tmp_path):
         assert satirlar[GID2] is None
     finally:
         conn.close()
+
+
+def test_kategori_sutunundaki_link_tasinir():
+    """Kaymış eski satırlarda Kategori sütunundaki bağlantı link alanına taşınır."""
+    from app import ice_aktar
+    s = {"kategori": "https://teamzone.gyazo.com/abcdef0123456789abcdef0123456789", "link": "", "ek_not": ""}
+    assert ice_aktar._kategori_linkini_tasi(s) is True
+    assert s["link"].startswith("https://teamzone.gyazo.com/") and s["kategori"] == "" and "düzeltildi" in s["ek_not"]
+    s2 = {"kategori": "https://i.gyazo.com/x.png", "link": "28.06.2026", "ek_not": None}
+    assert ice_aktar._kategori_linkini_tasi(s2) is True and "28.06.2026" in s2["ek_not"]
+    s3 = {"kategori": "ARK", "link": "https://gyazo.com/abc", "ek_not": ""}
+    assert ice_aktar._kategori_linkini_tasi(s3) is False and s3["kategori"] == "ARK"
+    s4 = {"kategori": "https://i.gyazo.com/a.png", "link": "https://gyazo.com/b", "ek_not": ""}
+    assert ice_aktar._kategori_linkini_tasi(s4) is False

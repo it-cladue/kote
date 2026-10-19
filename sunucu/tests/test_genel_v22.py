@@ -23,7 +23,7 @@ def account(config, name, role, password='Test-Password-123!'):
 def test_menu_links_per_role_and_version(web):
     client, config = web
     account(config, 'ofonly', 'OF:oku,kt')
-    assert client.get('/saglik').headers['X-Kanit-Paneli'] == '2.2.0'
+    assert client.get('/saglik').headers['X-Kanit-Paneli'] == '2.2.1'
     login(client)
     html = client.get('/').data.decode()
     for text in ('>Ana sayfa<', 'href="/kayitlar"', 'href="/disa-aktar"', '>Çıktı<', '>Kanıt Kontrolü<', '>Bildirimler<', '>İşlem Geçmişi<',

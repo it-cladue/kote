@@ -2,6 +2,12 @@
 
 Bu sürüm kullanım kolaylığı ve modern görünüm güncellemesidir. Veritabanı yapısı yalnız eklemeli geçişle değişir; mevcut kayıtlar, kullanıcılar, katalog ve görseller korunur. Bağımlılık listesi (`requirements.txt`) değişmemiştir; `deploy/apply-update.sh` ile 2.1 üzerine doğrudan uygulanır.
 
+## 2.2.1 (19 Ekim 2026)
+
+- **Eski veri aktarımı (`ice-aktar`):** eski Excel'de sütunu kaymış satırlarda Kategori hücresindeki görsel bağlantısı link alanına taşınır (gerçek veride 114 satır); taşıma notu kaydın ek notuna yazılır. Rapor çıktısında `onarilan` sayısı görünür.
+- Alan adı kurulum betiği `deploy/setup-domain-https.sh` (README 1a), Türkçe CLI yardımı, çıktı sayımı ve proje çipi düzeltmeleri bu sürümde.
+- Gerçek veriyle prova: 7 proje, 5.498 kayıt, 153 onaylı / 1 engelli Telegram kullanıcısı, 11 kategori; tüm sayfalar ve kayıt ayrıntıları hatasız.
+
 ## Görünüm ve gezinme
 
 - Yeni görsel sistem: sakin palet, koyu üst menü, 15 px temel yazı, tutarlı 8 px aralık ölçeği, hafif gölgeli kartlar, zebra/sabit başlıklı tablolar, belirgin birincil/ikincil/tehlike düğmeleri ve odak halkaları. Koyu/açık tema düğmesi korundu.
@@ -121,4 +127,4 @@ Veri ve sunucu tarafı (son tur):
 
 ## Güncelleme notu
 
-Sürüm `2.2.0`. `bash deploy/apply-update.sh --dry-run` sonra `bash deploy/apply-update.sh`. Betik başlığı 2.1 → 2.2 olarak güncellendi; mantığı değişmedi. Tarayıcıda eski CSS/JS önbelleğini atlatmak için varlık bağlantıları `v=2.2.3` ile sürümlenir. Tema varsayılanı artık cihazın açık/koyu tercihine uyar (tercih yoksa açık tema); daha önce seçilmiş tema tarayıcıda korunur.
+Sürüm `2.2.1`. `bash deploy/apply-update.sh --dry-run` sonra `bash deploy/apply-update.sh`. Betik başlığı 2.1 → 2.2 olarak güncellendi; mantığı değişmedi. Tarayıcıda eski CSS/JS önbelleğini atlatmak için varlık bağlantıları `v=2.2.3` ile sürümlenir. Tema varsayılanı artık cihazın açık/koyu tercihine uyar (tercih yoksa açık tema); daha önce seçilmiş tema tarayıcıda korunur.

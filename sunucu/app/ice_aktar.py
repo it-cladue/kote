@@ -112,6 +112,26 @@ def _idleri_oku(yol):
     return sonuc
 
 
+def _kategori_linkini_tasi(s):
+    """Eski Excel'de kaymış satırlar: Kategori sütununda görsel bağlantısı varsa onu link alanına taşır.
+
+    Yalnız link alanı boş veya bağlantı olmayan bir metinse uygulanır; eski metin açıklamaya eklenir.
+    """
+    kat = str(s.get("kategori") or "").strip()
+    if not re.match(r"^https?://", kat, re.IGNORECASE):
+        return False
+    link = str(s.get("link") or "").strip()
+    if link and re.match(r"^https?://", link, re.IGNORECASE):
+        return False
+    s["kategori"] = ""
+    s["link"] = kat
+    not_ = "Eski Excel satırında bağlantı Kategori sütunundaydı; aktarımda düzeltildi."
+    if link:
+        not_ += " Link sütunundaki metin: " + link[:120]
+    s["ek_not"] = ((s.get("ek_not") or "") + " " + not_).strip()
+    return True
+
+
 def _eski_kullanicilar(kok, conn):
     """Eski Telegram kullanıcı listelerini açık importta tg_kullanicilar'a ekler.
 
@@ -243,6 +263,8 @@ def calistir(ayar, conn, onbellek_klasor, gorsel_cozucu=None, zorla=False, kayna
                 proje = proje_normalize(ham_proje)
                 rapor["sayfalar"][proje] = len(satirlar)
                 for s in satirlar:
+                    if _kategori_linkini_tasi(s):
+                        rapor["onarilan"] = rapor.get("onarilan", 0) + 1
                     anahtar = _legacy_anahtar(kaynak_id, proje, s["satir"])
                     ek, tur = _ekleyen(harita, s["link"])
                     gorsel_dosya, gorsel2_dosya = _gorselleri_coz(s, proje, gorsel_cozucu)
