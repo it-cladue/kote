@@ -16,7 +16,7 @@ from PIL import Image, UnidentifiedImageError
 from . import db, yetki, kullanicilar, gorsel, bot_yonetim
 from .settings import AYAR, ROOT
 
-SURUM = '2.2.1'
+SURUM = '2.2.2'
 secret_path = Path(AYAR['BOT_KLASOR']) / 'session.key'
 secret = os.getenv('SESSION_SECRET')
 if not secret:
@@ -437,6 +437,10 @@ def kayit_sozluk(row):
              izin_gyazo=kayit_izin(d,'kt') and kayit_izin(d,'gorsel') and bool(path) and not d['silindi'],izin_kt=kayit_izin(d,'kt'),izin_yorum=kayit_izin(d,'kt'),izin_duzenle=kayit_izin(d,'duzenle'),izin_sil=kayit_izin(d,'sil'),geri_al_olur=bool(d['silindi']))
     link=d.get('link') or ''; d['dis_link']=link if re.match(r'^https?://',link) else None
     link2=d.get('gorsel2') or ''; d['dis_link2']=link2 if re.match(r'^https?://',link2) else None
+    d['giris_tipi_metni']=GIRIS_TIPI_ADLARI.get(d.get('giris_tipi') or '',d.get('giris_tipi') or '')
+    d['kaynak_metni']=KAYNAK_ADLARI.get(d.get('kaynak') or '',d.get('kaynak') or '')
+    d.setdefault('gorsel_dosya_adi',os.path.basename(str(d['gorsel_dosya'])) if d.get('gorsel_dosya') else None)
+    d['gorsel2_dosya_adi']=os.path.basename(str(d['gorsel2_dosya'])) if d.get('gorsel2_dosya') else None
     for name in ('file_id','file_unique_id','chat_id','gorsel_dosya','gorsel2_dosya'):
         d.pop(name,None)
     return d
@@ -1036,6 +1040,40 @@ def _cikti_sayfasi(secim=None,hata=None,status=200):
 def disa_aktar_sayfasi():
     return _cikti_sayfasi()
 
+def _yorum_ozetleri(ids):
+    """Kayıt başına yorum sayısı ve son yorum (çıktı için)."""
+    out={}
+    if not ids:return out
+    c=baglanti()
+    for i in range(0,len(ids),900):
+        parca=ids[i:i+900];yer=','.join('?'*len(parca))
+        for r in c.execute(f'SELECT kayit_id,COUNT(*) adet,MAX(id) son FROM yorumlar WHERE kayit_id IN ({yer}) GROUP BY kayit_id',parca):
+            out[r['kayit_id']]={'adet':r['adet'],'son':r['son']}
+    if out:
+        sonlar=[v['son'] for v in out.values()]
+        for i in range(0,len(sonlar),900):
+            parca=sonlar[i:i+900];yer=','.join('?'*len(parca))
+            for r in c.execute(f'SELECT id,kayit_id,kullanici,zaman,metin FROM yorumlar WHERE id IN ({yer})',parca):
+                out[r['kayit_id']]['metin']=f"{r['kullanici']} ({r['zaman']}): {r['metin']}"
+    return out
+
+GIRIS_TIPI_ADLARI={'resim':'Görsel','lead':'Lead ID','metin':'Metin','link':'Bağlantı'}
+KAYNAK_ADLARI={'telegram':'Telegram','excel':'Eski Excel','legacy_excel':'Eski Excel','panel':'Panel'}
+
+def _cikti_degeri(r,name,yorumlar):
+    """Çıktı hücresi: türetilmiş alanlar okunur metin, diğerleri olduğu gibi."""
+    if name=='soru_ozet':return '\n'.join(x['label']+': '+str(x['value']) for x in _question_answers(r))
+    if name=='durum_metni':return 'Silindi' if r['silindi'] else ('Onaylı' if r['kt'] else 'Bekliyor')
+    if name=='giris_tipi_metni':return GIRIS_TIPI_ADLARI.get(r['giris_tipi'] or '',r['giris_tipi'] or '')
+    if name=='kaynak_metni':return KAYNAK_ADLARI.get(r['kaynak'] or '',r['kaynak'] or '')
+    if name=='gorsel_dosya_adi':return os.path.basename(str(r['gorsel_dosya'])) if r['gorsel_dosya'] else ''
+    if name=='yorum_sayisi':return (yorumlar.get(r['id']) or {}).get('adet',0)
+    if name=='son_yorum':return (yorumlar.get(r['id']) or {}).get('metin','')
+    if name=='panel_link':return request.url_root.rstrip('/')+'/kayitlar?durum=hepsi&ac='+str(r['id'])
+    v=r[name]
+    return v if v is not None else ''
+
+
 @app.route('/disa-aktar.xlsx')
 @giris_gerekli
 def disa_aktar_xlsx():
@@ -1055,12 +1093,14 @@ def disa_aktar_xlsx():
         return jsonify(ok=True,adet=adet,mesaj=('Seçime uyan kayıt yok; dosya indirilmedi. Tarih aralığını veya diğer koşulları genişletin.' if not adet else '%d kayıt dosyaya yazılıyor.' % adet))
     rows=baglanti().execute(f'SELECT * FROM kayitlar WHERE {w} ORDER BY proje,tarih,id',p).fetchall()
     wb=openpyxl.Workbook(); ws=wb.active; ws.title='Kayıtlar'
-    columns=[('Kayıt ID','id'),('Proje','proje'),('Kategori','kategori'),('Personel','personel'),('Üye ID','uye_id'),('Ana üye ID','ana_uye_id'),('Tür','tip'),('Tarih','tarih'),('KT','kt'),('Onaylayan','kt_kim'),('Ekleyen','ekleyen_ad'),('Lead ID','lead_id'),('Eski link','link'),('Açıklama','aciklama'),('Ek not','ek_not'),('Ek sorular','soru_ozet')]
+    # Girilen her alan çıktıda: eski Excel düzeni + panelde eklenen bilgiler (durum, onay, ekleyen, yorum, bağlantı).
+    columns=[('Kayıt ID','id'),('Proje','proje'),('Kategori','kategori'),('Personel','personel'),('Üye ID','uye_id'),('Ana üye ID','ana_uye_id'),('Sessiz / Telesekreter','tip'),('Lead ID','lead_id'),('Tarih','tarih'),('Durum','durum_metni'),('KT','kt'),('Onaylayan','kt_kim'),('Onay zamanı','kt_zaman'),('Ekleyen','ekleyen_ad'),('Ekleyen Telegram ID','ekleyen_id'),('Giriş tipi','giris_tipi_metni'),('Kaynak','kaynak_metni'),('Görsel bağlantısı','link'),('2. görsel bağlantısı','gorsel2'),('Görsel dosyası','gorsel_dosya_adi'),('Açıklama','aciklama'),('Ek not','ek_not'),('Ek sorular','soru_ozet'),('Yorum sayısı','yorum_sayisi'),('Son yorum','son_yorum'),('Silen','silen'),('Silme zamanı','silme_zamani'),('Eski Excel satırı','excel_satir'),('Panel bağlantısı','panel_link')]
     ws.append([a for a,b in columns])
+    yorumlar=_yorum_ozetleri([r['id'] for r in rows])
     for r in rows:
         vals=[]
         for _,name in columns:
-            v='\n'.join(x['label']+': '+str(x['value']) for x in _question_answers(r)) if name=='soru_ozet' else (r[name] if r[name] is not None else '')
+            v=_cikti_degeri(r,name,yorumlar)
             if isinstance(v,str): v=re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]','',v)
             if isinstance(v,str) and v.startswith(('=','+','-','@','\t','\r')): v="'"+v
             vals.append(v)

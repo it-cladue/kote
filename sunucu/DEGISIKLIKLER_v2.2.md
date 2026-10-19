@@ -2,6 +2,10 @@
 
 Bu sürüm kullanım kolaylığı ve modern görünüm güncellemesidir. Veritabanı yapısı yalnız eklemeli geçişle değişir; mevcut kayıtlar, kullanıcılar, katalog ve görseller korunur. Bağımlılık listesi (`requirements.txt`) değişmemiştir; `deploy/apply-update.sh` ile 2.1 üzerine doğrudan uygulanır.
 
+## 2.2.2 (19 Ekim 2026)
+
+- **Girilen her bilgi hem detayda hem Excel çıktısında.** Kayıt penceresindeki Bilgi alanına eklendi: Sessiz / Telesekreter, Giriş tipi, Görsel ve 2. görsel bağlantıları (tıklanabilir), görsel dosya adları, eski Excel satır numarası, son güncelleme. Excel çıktısı (Çıktı sayfası ve "Excel (bu görünüm)") artık 29 sütun: Kayıt ID, Proje, Kategori, Personel, Üye ID, Ana üye ID, Sessiz / Telesekreter, Lead ID, Tarih, Durum, KT, Onaylayan, Onay zamanı, Ekleyen, Ekleyen Telegram ID, Giriş tipi, Kaynak, Görsel bağlantısı, 2. görsel bağlantısı, Görsel dosyası, Açıklama, Ek not, Ek sorular, Yorum sayısı, Son yorum, Silen, Silme zamanı, Eski Excel satırı, Panel bağlantısı (tıklayınca kayıt panelde açılır). 5.498 kayıtlık tam çıktı yaklaşık 3 saniye.
+
 ## 2.2.1 (19 Ekim 2026)
 
 - **Eski veri aktarımı (`ice-aktar`):** eski Excel'de sütunu kaymış satırlarda Kategori hücresindeki görsel bağlantısı link alanına taşınır (gerçek veride 114 satır); taşıma notu kaydın ek notuna yazılır. Rapor çıktısında `onarilan` sayısı görünür.
@@ -127,4 +131,4 @@ Veri ve sunucu tarafı (son tur):
 
 ## Güncelleme notu
 
-Sürüm `2.2.1`. `bash deploy/apply-update.sh --dry-run` sonra `bash deploy/apply-update.sh`. Betik başlığı 2.1 → 2.2 olarak güncellendi; mantığı değişmedi. Tarayıcıda eski CSS/JS önbelleğini atlatmak için varlık bağlantıları `v=2.2.3` ile sürümlenir. Tema varsayılanı artık cihazın açık/koyu tercihine uyar (tercih yoksa açık tema); daha önce seçilmiş tema tarayıcıda korunur.
+Sürüm `2.2.2`. `bash deploy/apply-update.sh --dry-run` sonra `bash deploy/apply-update.sh`. Betik başlığı 2.1 → 2.2 olarak güncellendi; mantığı değişmedi. Tarayıcıda eski CSS/JS önbelleğini atlatmak için varlık bağlantıları `v=2.2.3` ile sürümlenir. Tema varsayılanı artık cihazın açık/koyu tercihine uyar (tercih yoksa açık tema); daha önce seçilmiş tema tarayıcıda korunur.

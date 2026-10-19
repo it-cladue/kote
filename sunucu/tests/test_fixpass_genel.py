@@ -210,7 +210,7 @@ def test_audit_target_label_for_project_and_missing_record(web):
 def test_health_and_static_do_not_set_session_cookie(web):
     c, a = web
     r = c.get('/saglik')
-    assert r.status_code == 200 and r.headers.get('X-Kanit-Paneli') == '2.2.1' and 'Set-Cookie' not in r.headers
+    assert r.status_code == 200 and r.headers.get('X-Kanit-Paneli') == '2.2.2' and 'Set-Cookie' not in r.headers
     r = c.get('/static/stil.css?v=2.2.3')
     assert r.status_code == 200 and 'Set-Cookie' not in r.headers
     assert 'kanit_session=' in c.get('/giris').headers.get('Set-Cookie', '')

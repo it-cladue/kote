@@ -46,7 +46,7 @@ curl -fsS http://127.0.0.1:18080/saglik
 systemctl status kanit-web kanit-bot --no-pager -l
 ```
 
-`OK` iç servis sağlığıdır (yanıt başlığı `X-Kanit-Paneli: 2.2.1`); dış HTTPS erişimini tarayıcıdaki mevcut IP adresinden kontrol et. Tarayıcı eski görünümü gösteriyorsa sayfayı Ctrl+F5 ile yenile. Daha önce kapalı olan bot yardımcı tarafından kendiliğinden başlatılmaz. Bot ayarların doluysa ve gerçekten başlatmak istiyorsan `systemctl start kanit-bot` kullan. Aynı Telegram anahtarıyla başka PowerShell, Docker veya test botu süreci çalıştırma.
+`OK` iç servis sağlığıdır (yanıt başlığı `X-Kanit-Paneli: 2.2.2`); dış HTTPS erişimini tarayıcıdaki mevcut IP adresinden kontrol et. Tarayıcı eski görünümü gösteriyorsa sayfayı Ctrl+F5 ile yenile. Daha önce kapalı olan bot yardımcı tarafından kendiliğinden başlatılmaz. Bot ayarların doluysa ve gerçekten başlatmak istiyorsan `systemctl start kanit-bot` kullan. Aynı Telegram anahtarıyla başka PowerShell, Docker veya test botu süreci çalıştırma.
 
 ## 1a. Alan adı ile HTTPS (Plesk ekranı olmadan)
 
