@@ -7,7 +7,8 @@
 # Ne yapar:
 #   1. Ön kontrol: alan adının bu sunucuya baktığı, 80 portu üzerinden doğrulama yolunun
 #      çalıştığı, panelin sağlıklı olduğu ve nginx yapılandırmasının temiz olduğu denetlenir.
-#   2. /etc/nginx/conf.d/kanit-panel.conf dosyası yazılır (yalnız bu alan adı için).
+#   2. /etc/nginx/conf.d/zz020_kanit-panel.conf dosyası yazılır (yalnız bu alan adı için; Plesk
+#      bloklarından sonra yüklenir, varsayılan sunucu olmaz).
 #      Plesk'in kendi site dosyalarına, vhost'larına, Apache'ye veya posta ayarlarına dokunulmaz.
 #   3. Sertifika, IP sertifikasıyla aynı ayrı Certbot ortamından (/opt/kanit-certbot) ve aynı
 #      doğrulanmış webroot yöntemiyle alınır (/opt/kanit-ssl/config altına).
@@ -20,7 +21,7 @@ IFS=$'\n\t'
 
 # Test ortamı için ezilebilir değerler (canlı sunucuda değiştirmeyin).
 IP="${KANIT_IP:-217.156.123.36}"
-CONF="${KANIT_CONF:-/etc/nginx/conf.d/kanit-panel.conf}"
+CONF="${KANIT_CONF:-/etc/nginx/conf.d/zz020_kanit-panel.conf}"
 WEBROOT="${KANIT_WEBROOT:-/var/www/vhosts/default/htdocs}"
 CERTBOT="${KANIT_CERTBOT:-/opt/kanit-certbot/bin/certbot}"
 SSL_BASE="${KANIT_SSL_BASE:-/opt/kanit-ssl}"
@@ -48,7 +49,7 @@ for arg in "$@"; do
         --dry-run) DRY_RUN=1 ;;
         --kaldir) KALDIR=1 ;;
         -h|--help)
-            sed -n '2,19p' "$0"; exit 0 ;;
+            sed -n '2,18p' "$0"; exit 0 ;;
         --*) echo "HATA: Bilinmeyen seçenek: $arg (--help)" >&2; exit 2 ;;
         *)
             if [[ -z "$DOMAIN" ]]; then DOMAIN="$arg"
@@ -72,7 +73,8 @@ if (( KALDIR )); then
     rm -f -- "$CONF"
     if "$NGINX_BIN" -t >/dev/null 2>&1; then
         "$SYSTEMCTL" reload "$NGINX_SERVICE" 2>&1 | grep -v 'signal process started' >&2 || true
-        bilgi "Alan adı yapılandırması kaldırıldı ($CONF). Sertifika ve zamanlayıcı dokunulmadan bırakıldı."
+        bilgi "Alan adı yapılandırması kaldırıldı ($CONF). Sertifika ve yenileme zamanlayıcısı dokunulmadan bırakıldı."
+        bilgi "Alan adı artık bu sunucuya bakmayacaksa sertifikayı da silin ki zamanlayıcı boşuna denemesin: $CERTBOT delete --cert-name $CERT_NAME --config-dir $SSL_BASE/config --work-dir $SSL_BASE/work --logs-dir $SSL_BASE/logs"
     else
         fatal 'nginx yapılandırması dosya kaldırıldıktan sonra bile hatalı; Plesk nginx yeniden yüklenmedi. Çıktıyı paylaşın.'
     fi
@@ -81,7 +83,8 @@ fi
 
 # ---------------------------------------------------------------- girdi
 [[ -n "$DOMAIN" && -n "$EMAIL" ]] || { sed -n '2,5p' "$0"; fatal 'Alan adı ve e-posta gerekli.'; }
-DOMAIN="${DOMAIN,,}"
+DOMAIN="$(LC_ALL=C tr '[:upper:]' '[:lower:]' <<<"$DOMAIN")"
+EMAIL="$(LC_ALL=C tr '[:upper:]' '[:lower:]' <<<"$EMAIL")"
 [[ "$DOMAIN" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$ ]] || fatal "Alan adı geçersiz görünüyor: $DOMAIN (örnek: panel.alanadi.com)"
 [[ "$EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[a-z]{2,}$ ]] || fatal "E-posta geçersiz görünüyor: $EMAIL"
 
@@ -98,13 +101,20 @@ if ! "$NGINX_BIN" -t >/dev/null 2>&1; then
     fatal 'Mevcut nginx yapılandırması zaten hatalı (nginx -t). Hiçbir şey değiştirilmedi; "nginx -t" çıktısını paylaşın.'
 fi
 [[ "$(curl -fsS --noproxy '*' --connect-timeout 5 --max-time 10 "$PANEL_URL/saglik" 2>/dev/null || true)" == 'OK' ]] \
-    || fatal "Panel iç sağlık kontrolü başarısız ($PANEL_URL/saglik). Önce 'systemctl status kanit-web' bakın."
+    || fatal "Panel iç sağlık kontrolü başarısız ($PANEL_URL/saglik). Önce 'systemctl status kanit-web' çıktısına bakın."
 
 # DNS: alan adı bu sunucuya bakmalı.
-COZUM="$(getent ahosts "$DOMAIN" | awk '{print $1}' | sort -u | tr '\n' ' ' || true)"
-if [[ " $COZUM " != *" $IP "* ]]; then
-    fatal "DNS kaydı henüz bu sunucuya bakmıyor. $DOMAIN şu an şuraya çözülüyor: ${COZUM:-hiçbir yere}. Beklenen: $IP. A kaydını ekleyin (Cloudflare kullanıyorsanız bulut simgesi GRİ olmalı) ve 5-10 dk sonra tekrar deneyin."
+COZUM="$(getent ahosts "$DOMAIN" | awk '{print $1}' | sort -u | tr '\n' ' ' | sed 's/ $//' || true)"
+if [[ "$COZUM" != "$IP" ]]; then
+    fatal "DNS kaydı bu sunucuya bakmıyor veya başka adresler de var. $DOMAIN şu an şuraya çözülüyor: ${COZUM:-hiçbir yere}. Beklenen yalnız: $IP. Tek bir A kaydı olmalı (AAAA/IPv6 kaydı olmamalı; Cloudflare kullanıyorsanız bulut simgesi GRİ olmalı). Dışarıdan görünen kaydı şu komutla kontrol edin: dig +short $DOMAIN @1.1.1.1 — 5-10 dk sonra tekrar deneyin."
 fi
+# Plesk'in IP için varsayılan sunucusu olmalı; yoksa yalnız uyarı (panel bloğu Plesk bloklarından sonra yüklenir).
+IP_RE="${IP//./\\.}"
+for p in 80 443; do
+    if ! "$NGINX_BIN" -T 2>/dev/null | grep -Eq "(^|[[:space:];{])listen[[:space:]]+$IP_RE:$p[^;]*default_server"; then
+        bilgi "UYARI: Plesk nginx'te $IP:$p için default_server tanımı görülmedi; IP ile doğrudan açılan istekler Plesk'in ilk bloğuna düşmeye devam eder."
+    fi
+done
 
 # 80 portu doğrulama yolu: Plesk nginx bu alan adını varsayılan siteye düşürmeli.
 CHALLENGE_DIR="$WEBROOT/.well-known/acme-challenge"
@@ -125,17 +135,18 @@ bilgi "Yazılacak dosya: $CONF (yalnız bu alan adının bloğu)."
 bilgi "Sertifika: $CERT_DIR (Certbot: $CERTBOT, webroot: $WEBROOT)."
 bilgi "Dokunulmayacak: Plesk vhost dosyaları, betofficetvguncel.com, Apache, posta, güvenlik duvarı, kanit-ip-proxy (IP:18443 çalışmaya devam eder)."
 if (( DRY_RUN )); then
-    bilgi 'DRY-RUN_TAMAM: Yalnız kontrol yapıldı; hiçbir dosya veya servis değiştirilmedi.'
+    bilgi 'DRY-RUN_TAMAM: Yalnız kontrol yapıldı; nginx, sertifika ve servisler değiştirilmedi (doğrulama klasöründeki geçici test dosyası silindi).'
     exit 0
 fi
 
 # ---------------------------------------------------------------- değişiklikler
 CONF_WRITTEN=0
+ADIM='hazırlık'
 rollback() {
     local code="$1"
     trap - ERR INT TERM
     set +e
-    echo "KURULUM_HATASI [$code]: Bu betiğin yazdığı nginx dosyası geri alınıyor." >&2
+    echo "KURULUM_HATASI [$code] — adım: $ADIM. Bu betiğin yazdığı nginx dosyası geri alınıyor." >&2
     cleanup_test_file
     if (( CONF_WRITTEN )) && [[ -f "$CONF" ]]; then
         rm -f -- "$CONF"
@@ -147,6 +158,8 @@ rollback() {
 trap 'rollback "$?"' ERR
 trap 'rollback 130' INT
 trap 'rollback 143' TERM
+# Bu noktadan sonra fatal da geri alma yapar.
+fatal() { echo "DUR: $*" >&2; rollback 1; }
 
 nginx_test_ve_yukle() {
     if ! "$NGINX_BIN" -t >/dev/null 2>&1; then
@@ -154,8 +167,13 @@ nginx_test_ve_yukle() {
         "$NGINX_BIN" -t 2>&1 | sed 's/^/   /' >&2 || true
         return 1
     fi
-    "$SYSTEMCTL" reload "$NGINX_SERVICE" 2>&1 | grep -v 'signal process started' >&2 || true
-    return "${PIPESTATUS[0]}"
+    local cikti
+    if ! cikti="$("$SYSTEMCTL" reload "$NGINX_SERVICE" 2>&1)"; then
+        echo "nginx yeniden yüklenemedi: $cikti" >&2
+        return 1
+    fi
+    printf '%s\n' "$cikti" | grep -v 'signal process started' >&2 || true
+    return 0
 }
 
 http_blogu() {
@@ -210,13 +228,25 @@ NGINX
 }
 
 # 1) Yalnız 80 bloğu (sertifika henüz yok).
+ADIM='1/4 nginx 80 bloğu'
 CONF_WRITTEN=1
 http_blogu > "$CONF"
 chmod 644 "$CONF"
 nginx_test_ve_yukle
+# Yeniden yükleme birkaç saniye sürebilir; yönlendirme görülene kadar kısa aralıklarla denenir.
+YONLENDIRME=''
+for deneme in 1 2 3 4 5 6 7 8 9 10; do
+    YONLENDIRME="$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 --resolve "$DOMAIN:80:$IP" "http://$DOMAIN/" || true)"
+    [[ "$YONLENDIRME" == '301' ]] && break
+    sleep 1
+done
+[[ "$YONLENDIRME" == '301' ]] || fatal "80 bloğu yüklendi ama http://$DOMAIN/ beklenen yönlendirmeyi vermedi (HTTP $YONLENDIRME). nginx yeniden yüklemesi uygulanmamış olabilir; 'systemctl status nginx' çıktısını paylaşın."
 bilgi "1/4 nginx 80 bloğu eklendi ve yeniden yüklendi."
 
 # 2) Sertifika (varsa yeniden kullanılır; süresi azsa Certbot kendisi yeniler).
+ADIM='2/4 sertifika alma'
+CERTBOT_LOG="$SSL_BASE/logs/kanit-domain-kurulum.log"
+install -d -m 700 "$SSL_BASE/logs"
 if [[ -r "$CERT_DIR/fullchain.pem" ]] && openssl x509 -in "$CERT_DIR/fullchain.pem" -checkend 604800 -noout >/dev/null 2>&1 \
    && openssl x509 -in "$CERT_DIR/fullchain.pem" -noout -ext subjectAltName 2>/dev/null | grep -Fq "DNS:$DOMAIN"; then
     bilgi "2/4 Mevcut sertifika kullanılıyor ($CERT_DIR, en az 7 gün geçerli)."
@@ -224,25 +254,35 @@ else
     "$CERTBOT" certonly --webroot -w "$WEBROOT" -d "$DOMAIN" --cert-name "$CERT_NAME" \
         --config-dir "$SSL_BASE/config" --work-dir "$SSL_BASE/work" --logs-dir "$SSL_BASE/logs" \
         --non-interactive --agree-tos --no-eff-email -m "$EMAIL" --keep-until-expiring \
-        --deploy-hook "$SYSTEMCTL reload $NGINX_SERVICE" >/dev/null
+        --deploy-hook "$SYSTEMCTL reload $NGINX_SERVICE" >"$CERTBOT_LOG" 2>&1 || {
+            echo 'Sertifika alınamadı. Certbot açıklaması:' >&2
+            sed 's/^/   /' "$CERTBOT_LOG" >&2 || true
+            fatal "Let's Encrypt doğrulaması başarısız. Çoğu zaman sebep: DNS henüz yayılmadı ya da 80 portu dışarıdan kapalı. Günlük: $CERTBOT_LOG"
+        }
     [[ -r "$CERT_DIR/fullchain.pem" && -r "$CERT_DIR/privkey.pem" ]] || fatal 'Certbot bitti ama sertifika dosyaları bulunamadı.'
     bilgi "2/4 Sertifika alındı: $CERT_DIR"
 fi
 
 # 3) 443 bloğu.
+ADIM='3/4 HTTPS bloğu ve sağlık kontrolü'
 { http_blogu; https_blogu; } > "$CONF"
 nginx_test_ve_yukle
 # shellcheck disable=SC2086
-SONUC="$(curl -fs --noproxy '*' $CURL_EXTRA --retry 10 --retry-connrefused --retry-delay 1 --connect-timeout 5 --max-time 10 \
-    --resolve "$DOMAIN:443:$IP" "https://$DOMAIN/saglik")"
+if ! SONUC="$(curl -fsS --noproxy '*' $CURL_EXTRA --retry 10 --retry-connrefused --retry-delay 1 --connect-timeout 5 --max-time 10 \
+    --resolve "$DOMAIN:443:$IP" "https://$DOMAIN/saglik" 2>&1)"; then
+    fatal "https://$DOMAIN/saglik erişilemedi: $SONUC"
+fi
 [[ "$SONUC" == 'OK' ]] || fatal "https://$DOMAIN/saglik beklenen OK yanıtını vermedi: $SONUC"
 bilgi "3/4 HTTPS doğrulandı: https://$DOMAIN/saglik -> OK"
 
 # 4) Otomatik yenileme: IP ve alan adı sertifikaları birlikte; her iki nginx yeniden yüklenir.
+ADIM='4/4 yenileme zamanlayıcısı'
 install -d -m 755 "$UNIT_DIR"
 cat > "$UNIT_DIR/$TIMER_NAME.service" <<SERVICE
 [Unit]
 Description=Kanit Paneli sertifika yenileme (IP + alan adi)
+After=network-online.target
+Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=$CERTBOT renew --quiet --config-dir $SSL_BASE/config --work-dir $SSL_BASE/work --logs-dir $SSL_BASE/logs --deploy-hook "systemctl reload $IP_PROXY_SERVICE; systemctl reload $NGINX_SERVICE"
@@ -251,7 +291,7 @@ cat > "$UNIT_DIR/$TIMER_NAME.timer" <<TIMER
 [Unit]
 Description=Kanit Paneli sertifika yenileme zamanlayicisi
 [Timer]
-OnCalendar=*-*-* 03,15:17:00
+OnCalendar=*-*-* 00/6:17:00
 RandomizedDelaySec=20m
 Persistent=true
 [Install]
@@ -259,8 +299,10 @@ WantedBy=timers.target
 TIMER
 chmod 644 "$UNIT_DIR/$TIMER_NAME.service" "$UNIT_DIR/$TIMER_NAME.timer"
 "$SYSTEMCTL" daemon-reload
-"$SYSTEMCTL" enable --now "$TIMER_NAME.timer" >/dev/null 2>&1
-bilgi "4/4 Otomatik yenileme kuruldu: $TIMER_NAME.timer (günde iki kez kontrol)."
+if ! ZAMANLAYICI="$("$SYSTEMCTL" enable --now "$TIMER_NAME.timer" 2>&1)"; then
+    fatal "Yenileme zamanlayıcısı etkinleştirilemedi: $ZAMANLAYICI"
+fi
+bilgi "4/4 Otomatik yenileme kuruldu: $TIMER_NAME.timer (6 saatte bir kontrol; IP ve alan adı sertifikaları birlikte)."
 
 trap - ERR INT TERM
 bilgi ''

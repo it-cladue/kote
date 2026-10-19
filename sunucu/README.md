@@ -50,7 +50,7 @@ systemctl status kanit-web kanit-bot --no-pager -l
 
 ## 1a. Alan adı ile HTTPS (Plesk ekranı olmadan)
 
-Plesk lisansı olmasa da Plesk'in nginx'i çalışmaya devam eder; panel alan adı o nginx'e tek bir ayar dosyasıyla (`/etc/nginx/conf.d/kanit-panel.conf`) eklenir. Mevcut siteye, Apache'ye, postaya ve `IP:18443` erişimine dokunulmaz.
+Plesk lisansı olmasa da Plesk'in nginx'i çalışmaya devam eder; panel alan adı o nginx'e tek bir ayar dosyasıyla (`/etc/nginx/conf.d/zz020_kanit-panel.conf`) eklenir. Mevcut siteye, Apache'ye, postaya ve `IP:18443` erişimine dokunulmaz.
 
 Önce alan adının DNS'inde bir **A kaydı** açın: ad `panel`, hedef `217.156.123.36` (Cloudflare DNS kullanıyorsanız bulut simgesi gri, yani proxy kapalı). 5-10 dakika sonra:
 
@@ -60,7 +60,7 @@ bash deploy/setup-domain-https.sh panel.alanadiniz.com eposta@ornek.com --dry-ru
 bash deploy/setup-domain-https.sh panel.alanadiniz.com eposta@ornek.com
 ```
 
-Betik sırasıyla: DNS'in bu sunucuya baktığını ve 80 portundaki doğrulama yolunu kontrol eder, nginx'e 80 bloğunu ekler, sertifikayı IP sertifikasıyla aynı ayrı Certbot ortamından (`/opt/kanit-certbot`, `/opt/kanit-ssl/config`) alır, 443 bloğunu ekler, `https://panel.alanadiniz.com/saglik` ile doğrular ve `kanit-sertifika.timer` zamanlayıcısını kurar (günde iki kez; IP ve alan adı sertifikalarını birlikte yeniler, iki nginx'i de yeniden yükler). Sonunda **ALAN_ADI_HTTPS_TAMAM** yazar. Hata olursa yalnız kendi yazdığı dosyayı geri alır. Kaldırmak için `bash deploy/setup-domain-https.sh --kaldir`.
+Betik sırasıyla: DNS'in bu sunucuya baktığını ve 80 portundaki doğrulama yolunu kontrol eder, nginx'e 80 bloğunu ekler, sertifikayı IP sertifikasıyla aynı ayrı Certbot ortamından (`/opt/kanit-certbot`, `/opt/kanit-ssl/config`) alır, 443 bloğunu ekler, `https://panel.alanadiniz.com/saglik` ile doğrular ve `kanit-sertifika.timer` zamanlayıcısını kurar (6 saatte bir; IP ve alan adı sertifikalarını birlikte yeniler, iki nginx'i de yeniden yükler). Sonunda **ALAN_ADI_HTTPS_TAMAM** yazar. Hata olursa yalnız kendi yazdığı dosyayı geri alır. Kaldırmak için `bash deploy/setup-domain-https.sh --kaldir`. **Uyarı:** alan adı yapılandırması dururken `/opt/kanit-ssl/config/live/kanit-domain` klasörünü elle silmeyin; nginx açılmaz. Önce `--kaldir` çalıştırın.
 
 ## 2. Telegram akışı
 
