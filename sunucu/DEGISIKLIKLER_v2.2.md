@@ -117,6 +117,8 @@ Veri ve sunucu tarafı (son tur):
 - **Sunucu komutları (`app.cli`):** yardım ve hata metinleri Türkçe ("bilinmeyen komut", "eksik değer"); her komutun açıklaması var; terminal olmadan (betik/boru içinden) parola istenirse ham Python hatası yerine `--password-env` kullanmanız söylenir.
 - Paket manifesti `DOSYA_DOGRULAMA.sha256` 2.2 dosyalarıyla yeniden üretildi (`sha256sum -c DOSYA_DOGRULAMA.sha256` ile doğrulanabilir); ZIP içinde `__pycache__` / `.pytest_cache` yok.
 
+- **Alan adı kurulumu:** yeni `deploy/setup-domain-https.sh` betiği; Plesk ekranı kullanılmadan, mevcut siteye dokunmadan panel alan adını Plesk nginx'ine ekler, Let's Encrypt sertifikası alır ve IP + alan adı sertifikaları için otomatik yenileme zamanlayıcısı kurar (README 1a).
+
 ## Güncelleme notu
 
 Sürüm `2.2.0`. `bash deploy/apply-update.sh --dry-run` sonra `bash deploy/apply-update.sh`. Betik başlığı 2.1 → 2.2 olarak güncellendi; mantığı değişmedi. Tarayıcıda eski CSS/JS önbelleğini atlatmak için varlık bağlantıları `v=2.2.3` ile sürümlenir. Tema varsayılanı artık cihazın açık/koyu tercihine uyar (tercih yoksa açık tema); daha önce seçilmiş tema tarayıcıda korunur.

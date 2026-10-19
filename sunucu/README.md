@@ -48,6 +48,20 @@ systemctl status kanit-web kanit-bot --no-pager -l
 
 `OK` iç servis sağlığıdır (yanıt başlığı `X-Kanit-Paneli: 2.2.0`); dış HTTPS erişimini tarayıcıdaki mevcut IP adresinden kontrol et. Tarayıcı eski görünümü gösteriyorsa sayfayı Ctrl+F5 ile yenile. Daha önce kapalı olan bot yardımcı tarafından kendiliğinden başlatılmaz. Bot ayarların doluysa ve gerçekten başlatmak istiyorsan `systemctl start kanit-bot` kullan. Aynı Telegram anahtarıyla başka PowerShell, Docker veya test botu süreci çalıştırma.
 
+## 1a. Alan adı ile HTTPS (Plesk ekranı olmadan)
+
+Plesk lisansı olmasa da Plesk'in nginx'i çalışmaya devam eder; panel alan adı o nginx'e tek bir ayar dosyasıyla (`/etc/nginx/conf.d/kanit-panel.conf`) eklenir. Mevcut siteye, Apache'ye, postaya ve `IP:18443` erişimine dokunulmaz.
+
+Önce alan adının DNS'inde bir **A kaydı** açın: ad `panel`, hedef `217.156.123.36` (Cloudflare DNS kullanıyorsanız bulut simgesi gri, yani proxy kapalı). 5-10 dakika sonra:
+
+```bash
+cd /root/kanit-kurulum/guncelleme22/KanitPaneli_Sunucu_v2.2
+bash deploy/setup-domain-https.sh panel.alanadiniz.com eposta@ornek.com --dry-run
+bash deploy/setup-domain-https.sh panel.alanadiniz.com eposta@ornek.com
+```
+
+Betik sırasıyla: DNS'in bu sunucuya baktığını ve 80 portundaki doğrulama yolunu kontrol eder, nginx'e 80 bloğunu ekler, sertifikayı IP sertifikasıyla aynı ayrı Certbot ortamından (`/opt/kanit-certbot`, `/opt/kanit-ssl/config`) alır, 443 bloğunu ekler, `https://panel.alanadiniz.com/saglik` ile doğrular ve `kanit-sertifika.timer` zamanlayıcısını kurar (günde iki kez; IP ve alan adı sertifikalarını birlikte yeniler, iki nginx'i de yeniden yükler). Sonunda **ALAN_ADI_HTTPS_TAMAM** yazar. Hata olursa yalnız kendi yazdığı dosyayı geri alır. Kaldırmak için `bash deploy/setup-domain-https.sh --kaldir`.
+
 ## 2. Telegram akışı
 
 İlk `/start` girişinde mevcut `BOT_PASSWORD` sorulur. Web admin parolası bundan ayrıdır. Başarılı giriş bot kimliği ve kullanıcıya özel tutulur. Fotoğraf ya da görsel belge gönder; **sunucuda görsel** veya **Gyazo bağlantısı** seç; proje, kategori ve soruları tamamla; onayla.
