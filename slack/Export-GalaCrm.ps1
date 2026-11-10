@@ -48,7 +48,7 @@ param(
     # ===================================================
     [string] $Start,                              # yyyy-MM-dd (dahil) - boşsa sınırsız
     [string] $End,                                # yyyy-MM-dd (dahil) - boşsa bugüne kadar
-    [string] $Output,                             # .xlsx yolu - boşsa scriptin yanına yazar
+    [string] $Output,                             # .xlsx yolu - boşsa Masaüstü'ne yazar
     [switch] $SkipThreads,                        # thread yanıtlarını çekme (daha hızlı)
     [switch] $IncludeSystem,                      # katıldı/ayrıldı mesajlarını da yaz
     [int]    $PageSize = 200
@@ -558,7 +558,9 @@ $Sheets = [ordered]@{
 # ---------------------------------------------------------------- Excel
 if (-not $Output) {
     $tag = if ($Start -or $End) { "$(if ($Start) { $Start } else { 'bas' })_$(if ($End) { $End } else { 'bugun' })" } else { (Get-Date).ToString('yyyyMMdd_HHmm') }
-    $Output = Join-Path $ScriptDir ("gala_{0}_{1}.xlsx" -f ($ChannelName -replace '[^\w\-]', '_'), $tag)
+    $Desktop = [Environment]::GetFolderPath('Desktop')
+    if (-not $Desktop -or -not (Test-Path $Desktop)) { $Desktop = $ScriptDir }
+    $Output = Join-Path $Desktop ("gala_{0}_{1}.xlsx" -f ($ChannelName -replace '[^\w\-]', '_'), $tag)
 }
 if (Test-Path $Output) { Remove-Item $Output -Force }
 
