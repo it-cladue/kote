@@ -56,6 +56,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+trap {
+    Write-Host ("HATA (satır {0}): {1}" -f $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message) -ForegroundColor Red
+    Write-Host ("  " + $_.InvocationInfo.Line.Trim()) -ForegroundColor DarkGray
+    break
+}
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 
@@ -558,7 +563,12 @@ $Sheets = [ordered]@{
 
 # ---------------------------------------------------------------- Excel
 if (-not $Output) {
-    $tag = if ($Start -or $End) { "$(if ($Start) { $Start } else { 'bas' })_$(if ($End) { $End } else { 'bugun' })" } else { (Get-Date).ToString('yyyyMMdd_HHmm') }
+    $tag = (Get-Date).ToString('yyyyMMdd_HHmm')
+    if ($Start -or $End) {
+        $s1 = 'bas';   if ($Start) { $s1 = $Start }
+        $s2 = 'bugun'; if ($End)   { $s2 = $End }
+        $tag = "${s1}_${s2}"
+    }
     $dir = $OutDir
     if (-not $dir) { $dir = [Environment]::GetFolderPath('Desktop') }
     if (-not $dir -or -not (Test-Path $dir)) { try { $null = New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop } catch { $dir = $ScriptDir } }
