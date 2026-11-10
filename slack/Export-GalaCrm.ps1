@@ -534,23 +534,32 @@ $Responders = @($Rows | Where-Object { $_.'Yanıtlayan' -and $_.'Yanıtlayan' -n
     })
 
 $answered = @($Rows | Where-Object { $_.'Yanıt Durumu' -eq 'Yanıtlandı' }).Count
-$apiCalls = [int](Get-Variable -Name ApiCalls -Scope Script -ValueOnly)
-$Info = @(
-    [pscustomobject]@{ Alan = 'Workspace';         Değer = [string]$auth.team }
-    [pscustomobject]@{ Alan = 'Kanal';             Değer = "#$ChannelName ($Channel)" }
-    [pscustomobject]@{ Alan = 'Gönderen filtresi'; Değer = $(if ($BotName) { "$BotName ($filteredOut başka mesaj atlandı)" } else { 'yok' }) }
-    [pscustomobject]@{ Alan = 'Çekim zamanı';      Değer = (Get-Date).ToString('dd.MM.yyyy HH:mm') }
-    [pscustomobject]@{ Alan = 'Saat dilimi';       Değer = $Tz.Id }
-    [pscustomobject]@{ Alan = 'İstenen aralık';    Değer = "$(if ($Start) { $Start } else { 'başlangıç' }) -> $(if ($End) { $End } else { 'bugün' })" }
-    [pscustomobject]@{ Alan = 'Bildirim sayısı';   Değer = $Rows.Count }
-    [pscustomobject]@{ Alan = 'Yanıtlanan';        Değer = $answered }
-    [pscustomobject]@{ Alan = 'Yanıtsız';          Değer = $Rows.Count - $answered }
-    [pscustomobject]@{ Alan = 'Farklı üye';        Değer = @($Rows | ForEach-Object { $_.'Üye ID' } | Select-Object -Unique).Count }
-    [pscustomobject]@{ Alan = 'Farklı BTag';       Değer = @($Rows | ForEach-Object { $_.BTag } | Select-Object -Unique).Count }
-    [pscustomobject]@{ Alan = 'Diğer mesaj';       Değer = $Others.Count }
-    [pscustomobject]@{ Alan = 'API çağrısı';       Değer = $apiCalls }
-    [pscustomobject]@{ Alan = 'Not';               Değer = 'Bildirimler sayfasında kırmızı satır = thread yanıtı yok. Yanıt Süresi = bildirim ile ilk yanıt arasındaki dakika.' }
-)
+$InfoList = New-Object System.Collections.Generic.List[object]
+function Add-Info {
+    param([string] $Alan, $Deger)
+    $o = New-Object PSObject
+    $o | Add-Member -MemberType NoteProperty -Name 'Alan'  -Value $Alan
+    $o | Add-Member -MemberType NoteProperty -Name 'Değer' -Value ([string]$Deger)
+    $InfoList.Add($o)
+}
+$aralik = 'başlangıç'; if ($Start) { $aralik = $Start }
+$aralikSon = 'bugün';  if ($End)   { $aralikSon = $End }
+$filtreMetni = 'yok';  if ($BotName) { $filtreMetni = "$BotName ($filteredOut başka mesaj atlandı)" }
+Add-Info 'Workspace'         $auth.team
+Add-Info 'Kanal'             "#$ChannelName ($Channel)"
+Add-Info 'Gönderen filtresi' $filtreMetni
+Add-Info 'Çekim zamanı'      (Get-Date).ToString('dd.MM.yyyy HH:mm')
+Add-Info 'Saat dilimi'       $Tz.Id
+Add-Info 'İstenen aralık'    "$aralik -> $aralikSon"
+Add-Info 'Bildirim sayısı'   $Rows.Count
+Add-Info 'Yanıtlanan'        $answered
+Add-Info 'Yanıtsız'          ($Rows.Count - $answered)
+Add-Info 'Farklı üye'        (@($Rows | ForEach-Object { $_.'Üye ID' } | Select-Object -Unique).Count)
+Add-Info 'Farklı BTag'       (@($Rows | ForEach-Object { $_.BTag } | Select-Object -Unique).Count)
+Add-Info 'Diğer mesaj'       $Others.Count
+Add-Info 'API çağrısı'       (Get-Variable -Name ApiCalls -Scope Script -ValueOnly)
+Add-Info 'Not'               'Bildirimler sayfasında kırmızı satır = thread yanıtı yok. Yanıt Süresi = bildirim ile ilk yanıt arasındaki dakika.'
+$Info = @($InfoList)
 
 $Sheets = [ordered]@{
     'Bildirimler'    = @($Rows)
