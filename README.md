@@ -85,3 +85,8 @@ powershell -ExecutionPolicy Bypass -File .\slack\Export-GalaCrm.ps1 -Start 2026-
 
 Gereken bot scope'ları: `channels:history` (açık kanal) veya `groups:history` (özel kanal), `users:read`;
 kanal adı için isteğe bağlı `channels:read` / `groups:read`. Bot kanala ekli olmalı (`/invite @BotAdı`).
+
+## slack/Export-GalaCrm.py
+
+`Export-GalaCrm.ps1` ile aynı işi yapan Python sürümü (Windows PowerShell 5.1'de derleyici hatası alanlar için).
+Dosyanın başındaki `TOKEN`, `CHANNEL`, `OUT_DIR` değerlerini doldur; `pip install openpyxl` sonra `python Export-GalaCrm.py`.
