@@ -70,3 +70,18 @@ python .\slack\Build-MemnuniyetReport.py slack_p-ft-memnuniyet_2026-09-16_2026-0
 | Yanıtsızlar | Sadece yanıtlanmamış bildirimler |
 | Günlük, Günlük x TS, Gün Tipi | Gün, gün x TS ve 8/15/21. gün kırılımları |
 | Ham Mesajlar, Bilgi | Kaynak veri ve uyarılar (Slack'in göstermediği bot mesajları dahil) |
+
+## slack/Export-GalaCrm.ps1
+
+Gala CRM Botu'nun kanala attığı bildirimleri (Kategori, Renk, Açıklama, Üye ID, BTag) ve thread
+yanıtlarını PowerShell ile Excel'e aktarır. Python gerektirmez; Excel çıktısı için ImportExcel modülünü
+ilk çalıştırmada kendisi kurar (kuramazsa bilgisayardaki Excel ile, o da yoksa CSV yazar).
+
+```powershell
+# Scriptin param bloğunda $Token ve $Channel değerlerini doldur, sonra:
+powershell -ExecutionPolicy Bypass -File .\slack\Export-GalaCrm.ps1
+powershell -ExecutionPolicy Bypass -File .\slack\Export-GalaCrm.ps1 -Start 2026-11-01 -End 2026-11-09
+```
+
+Gereken bot scope'ları: `channels:history` (açık kanal) veya `groups:history` (özel kanal), `users:read`;
+kanal adı için isteğe bağlı `channels:read` / `groups:read`. Bot kanala ekli olmalı (`/invite @BotAdı`).
