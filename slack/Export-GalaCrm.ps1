@@ -44,7 +44,7 @@ param(
     # ================== BURAYI DOLDUR ==================
     [string] $Token   = "xoxb-BURAYA-TOKEN",      # Bot User OAuth Token
     [string] $Channel = "C0000000000",            # Kanal ID (kanal adına sağ tık > Kanal ayrıntıları > en altta)
-    [string] $BotName = "Gala CRM Botu",          # Sadece bu app'in yazdıkları alınır (boş = herkes)
+    [string] $BotName = "",                       # Boş = kanaldaki HER mesaj alınır. "Gala CRM Botu" yazarsan sadece o app'inkiler
     # ===================================================
     [string] $Start,                              # yyyy-MM-dd (dahil) - boşsa sınırsız
     [string] $End,                                # yyyy-MM-dd (dahil) - boşsa bugüne kadar
