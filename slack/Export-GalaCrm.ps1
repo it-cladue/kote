@@ -279,7 +279,7 @@ function ConvertFrom-GalaText {
         }
         $title = $title.Trim(' ', '*', '_')
         if ($emoji) {
-            $key = ($emoji -replace '[️‍]', '')
+            $key = ($emoji -replace '[\uFE0F\u200D]', '')
             if ($EmojiColor.ContainsKey($key)) { $color = $EmojiColor[$key] } else { $color = $emoji }
         }
     }
