@@ -48,7 +48,8 @@ param(
     # ===================================================
     [string] $Start,                              # yyyy-MM-dd (dahil) - boşsa sınırsız
     [string] $End,                                # yyyy-MM-dd (dahil) - boşsa bugüne kadar
-    [string] $Output,                             # .xlsx yolu - boşsa Masaüstü'ne yazar
+    [string] $OutDir = "",                        # Çıktı klasörü, örn: "C:\Users\IT\Desktop\kalityepanel" (boş = Masaüstü)
+    [string] $Output,                             # tam .xlsx yolu vermek istersen (boşsa OutDir'e yazar)
     [switch] $SkipThreads,                        # thread yanıtlarını çekme (daha hızlı)
     [switch] $IncludeSystem,                      # katıldı/ayrıldı mesajlarını da yaz
     [int]    $PageSize = 200
@@ -558,9 +559,10 @@ $Sheets = [ordered]@{
 # ---------------------------------------------------------------- Excel
 if (-not $Output) {
     $tag = if ($Start -or $End) { "$(if ($Start) { $Start } else { 'bas' })_$(if ($End) { $End } else { 'bugun' })" } else { (Get-Date).ToString('yyyyMMdd_HHmm') }
-    $Desktop = [Environment]::GetFolderPath('Desktop')
-    if (-not $Desktop -or -not (Test-Path $Desktop)) { $Desktop = $ScriptDir }
-    $Output = Join-Path $Desktop ("gala_{0}_{1}.xlsx" -f ($ChannelName -replace '[^\w\-]', '_'), $tag)
+    $dir = $OutDir
+    if (-not $dir) { $dir = [Environment]::GetFolderPath('Desktop') }
+    if (-not $dir -or -not (Test-Path $dir)) { try { $null = New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop } catch { $dir = $ScriptDir } }
+    $Output = Join-Path $dir ("gala_{0}_{1}.xlsx" -f ($ChannelName -replace '[^\w\-]', '_'), $tag)
 }
 if (Test-Path $Output) { Remove-Item $Output -Force }
 
