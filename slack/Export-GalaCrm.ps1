@@ -534,6 +534,7 @@ $Responders = @($Rows | Where-Object { $_.'Yanıtlayan' -and $_.'Yanıtlayan' -n
     })
 
 $answered = @($Rows | Where-Object { $_.'Yanıt Durumu' -eq 'Yanıtlandı' }).Count
+$apiCalls = [int](Get-Variable -Name ApiCalls -Scope Script -ValueOnly)
 $Info = @(
     [pscustomobject]@{ Alan = 'Workspace';         Değer = [string]$auth.team }
     [pscustomobject]@{ Alan = 'Kanal';             Değer = "#$ChannelName ($Channel)" }
@@ -547,7 +548,7 @@ $Info = @(
     [pscustomobject]@{ Alan = 'Farklı üye';        Değer = @($Rows | ForEach-Object { $_.'Üye ID' } | Select-Object -Unique).Count }
     [pscustomobject]@{ Alan = 'Farklı BTag';       Değer = @($Rows | ForEach-Object { $_.BTag } | Select-Object -Unique).Count }
     [pscustomobject]@{ Alan = 'Diğer mesaj';       Değer = $Others.Count }
-    [pscustomobject]@{ Alan = 'API çağrısı';       Değer = $script:ApiCalls }
+    [pscustomobject]@{ Alan = 'API çağrısı';       Değer = $apiCalls }
     [pscustomobject]@{ Alan = 'Not';               Değer = 'Bildirimler sayfasında kırmızı satır = thread yanıtı yok. Yanıt Süresi = bildirim ile ilk yanıt arasındaki dakika.' }
 )
 
