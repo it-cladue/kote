@@ -44,6 +44,7 @@ param(
     # ================== BURAYI DOLDUR ==================
     [string] $Token   = "xoxb-BURAYA-TOKEN",      # Bot User OAuth Token
     [string] $Channel = "C0000000000",            # Kanal ID (kanal adına sağ tık > Kanal ayrıntıları > en altta)
+    [string] $BotName = "Gala CRM Botu",          # Sadece bu app'in yazdıkları alınır (boş = herkes)
     # ===================================================
     [string] $Start,                              # yyyy-MM-dd (dahil) - boşsa sınırsız
     [string] $End,                                # yyyy-MM-dd (dahil) - boşsa bugüne kadar
@@ -348,14 +349,33 @@ Write-Host "Kanal mesajları çekiliyor..." -ForegroundColor Cyan
 $history = Get-SlackMessages -Method 'conversations.history' -Params $histParams
 Write-Host "  $($history.Count) kayıt geldi."
 
+function Test-FromBot {
+    # Mesaj istenen app'ten mi? (bot adı / username / profil adı / kullanıcı adı)
+    param($M)
+    if (-not $BotName) { return $true }
+    $names = @()
+    if ($M.username) { $names += [string]$M.username }
+    if ($M.bot_profile -and $M.bot_profile.name) { $names += [string]$M.bot_profile.name }
+    if ($M.user -and $Users.ContainsKey([string]$M.user)) { $names += [string]$Users[[string]$M.user].Name; $names += [string]$Users[[string]$M.user].Handle }
+    foreach ($x in $names) { if ($x -and $x.Trim() -ieq $BotName.Trim()) { return $true } }
+    return $false
+}
+
 $seen = @{}
 $parents = New-Object System.Collections.Generic.List[object]
+$filteredOut = 0
 foreach ($m in $history) {
     if (-not $m.ts -or $seen.ContainsKey([string]$m.ts)) { continue }
     $seen[[string]$m.ts] = 1
     if ($m.subtype -eq 'thread_broadcast' -and $m.thread_ts -and $m.thread_ts -ne $m.ts) { continue }
     if (-not $IncludeSystem -and $m.subtype -and $SystemSubtypes -contains $m.subtype) { continue }
+    if (-not (Test-FromBot -M $m)) { $filteredOut++; continue }
     $parents.Add($m)
+}
+if ($BotName) { Write-Host "  '$BotName' filtresi: $($parents.Count) mesaj alındı, $filteredOut mesaj başkasına ait (atlandı)." }
+if ($BotName -and $parents.Count -eq 0 -and $history.Count -gt 0) {
+    $gorulen = @($history | ForEach-Object { if ($_.username) { $_.username } elseif ($_.bot_profile) { $_.bot_profile.name } elseif ($_.user -and $Users.ContainsKey([string]$_.user)) { $Users[[string]$_.user].Name } } | Where-Object { $_ } | Sort-Object -Unique)
+    Write-Warning "'$BotName' adında gönderen bulunamadı. Kanalda görülen gönderenler: $($gorulen -join ', ')  ->  `$BotName değerini bunlardan biriyle değiştir."
 }
 $parents = @($parents | Sort-Object { [double]::Parse($_.ts, [Globalization.CultureInfo]::InvariantCulture) })
 
@@ -511,6 +531,7 @@ $answered = @($Rows | Where-Object { $_.'Yanıt Durumu' -eq 'Yanıtlandı' }).Co
 $Info = @(
     [pscustomobject]@{ Alan = 'Workspace';         Değer = [string]$auth.team }
     [pscustomobject]@{ Alan = 'Kanal';             Değer = "#$ChannelName ($Channel)" }
+    [pscustomobject]@{ Alan = 'Gönderen filtresi'; Değer = $(if ($BotName) { "$BotName ($filteredOut başka mesaj atlandı)" } else { 'yok' }) }
     [pscustomobject]@{ Alan = 'Çekim zamanı';      Değer = (Get-Date).ToString('dd.MM.yyyy HH:mm') }
     [pscustomobject]@{ Alan = 'Saat dilimi';       Değer = $Tz.Id }
     [pscustomobject]@{ Alan = 'İstenen aralık';    Değer = "$(if ($Start) { $Start } else { 'başlangıç' }) -> $(if ($End) { $End } else { 'bugün' })" }
