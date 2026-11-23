@@ -33,8 +33,10 @@ from PIL import Image, UnidentifiedImageError
 
 from . import db
 from . import donusum_isleri
+from .guvenli_log import text as _guvenli_metin
 
 LOG = logging.getLogger("kanit.telegram")
+# Geriye dönük sabit; etkin eşik .env'deki MAX_DENEME ile _max_deneme() üzerinden okunur.
 MAX_DENEME = 3
 MAX_RETRY = 5
 _RETRY_SECONDS = (5, 30, 120, 600)
@@ -43,6 +45,88 @@ _GECERLI_FORMATLAR = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp", "GIF": "gif"}
 _GUVENLI = re.compile(r"[^A-Za-z0-9_.-]+")
 _TOKEN_URL = re.compile(r"(bot)(?:\d+:[A-Za-z0-9_-]+)", re.I)
 _GYAZO_URL = re.compile(r"^https?://(?:[a-z0-9-]+\.)?gyazo\.com/[^\s]+$", re.I)
+# Telegram kullanıcı kimliği: yalnız rakam, 5-15 hane (yönetici komutlarının hedefi).
+_TG_ID = re.compile(r"[1-9][0-9]{4,14}")
+# Telegram getFile tavanı 20 MB; MAX_GORSEL_BYTES bunu aşamaz.
+_INDIRME_TAVANI = 20 * 1024 * 1024
+# Tek mesaj 4096 karakter; HTML güvenli bölme için pay bırakılır.
+_MESAJ_SINIRI = 3900
+_MAX_PARCA = 5
+_DEVAM_NOTU = "… (devamı var)"
+_KISALTMA_NOTU = "… (çıktı kısaltıldı)"
+_HTML_ATOM = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)(?:\s[^<>]*)?>|&[A-Za-z0-9#]+;|.", re.S)
+_HTML_ETIKET = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)(?:\s[^<>]*)?>")
+
+
+def _env_int(name: str, default: int, lo: int, hi: int) -> int:
+    """.env/ortam tam sayısı; yoksa veya geçersizse varsayılan, sınır dışıysa kırpılır."""
+    raw = str(os.environ.get(name, "") or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(lo, min(hi, value))
+
+
+def _max_deneme() -> int:
+    """BOT_PASSWORD için izinli yanlış deneme sayısı (MAX_DENEME, varsayılan 3, 1-10)."""
+    return _env_int("MAX_DENEME", MAX_DENEME, 1, 10)
+
+
+def _outbox_max_deneme() -> int:
+    return _env_int("BOT_OUTBOX_MAX_DENEME", MAX_RETRY, 1, 20)
+
+
+def _admin_prompt_saniye() -> int:
+    return _env_int("ADMIN_PROMPT_SANIYE", 120, 30, 900)
+
+
+def _admin_max_deneme() -> int:
+    return _env_int("ADMIN_MAX_DENEME", 3, 1, 10)
+
+
+def _admin_kilit_saniye() -> int:
+    return _env_int("ADMIN_KILIT_SANIYE", 600, 60, 86400)
+
+
+def _admin_oturum_saniye() -> int:
+    return _env_int("ADMIN_OTURUM_SANIYE", 1800, 300, 86400)
+
+
+def _engelli_uyari_saniye() -> int:
+    return _env_int("BOT_ENGELLI_UYARI_SANIYE", 600, 60, 86400)
+
+
+def _parola_istem_saniye() -> int:
+    return _env_int("BOT_PAROLA_ISTEM_SANIYE", 20, 1, 3600)
+
+
+def _saklama_gun() -> int:
+    return _env_int("BOT_GUNLUK_SAKLAMA_GUN", 30, 1, 3650)
+
+
+def _pending_saklama_saat() -> int:
+    return _env_int("BOT_PENDING_SAKLAMA_SAAT", 24, 1, 720)
+
+
+def _log_max_bytes() -> int:
+    return _env_int("BOT_LOG_MAX_MB", 5, 1, 100) * 1024 * 1024
+
+
+def _yetkisiz_gorsel_politikasi() -> str:
+    """'engelle' (varsayılan, eski davranış) veya 'parola' (parola istemine yönlendir)."""
+    value = str(os.environ.get("BOT_YETKISIZ_GORSEL_POLITIKA", "") or "").strip().lower()
+    return "parola" if value == "parola" else "engelle"
+
+
+def _esit(expected: Any, given: Any) -> bool:
+    """Sabit zamanlı karşılaştırma; ASCII dışı karakterlerde hmac.compare_digest str ile çöker."""
+    try:
+        return hmac.compare_digest(str(expected or "").encode("utf-8"), str(given or "").encode("utf-8"))
+    except (TypeError, ValueError):
+        return False
 
 # db.py ortak şemasına dokunmadan bot teslimatları ve indirilmiş medya için
 # kendi küçük, yeniden başlatmaya dayanıklı tablolarımız. API çağrıları bu
@@ -72,7 +156,29 @@ CREATE TABLE IF NOT EXISTS tg_donusum_cache (
 
 
 class TelegramHatasi(RuntimeError):
-    """Telegram API veya indirilen dosya doğrulama hatası."""
+    """Telegram API veya indirilen dosya doğrulama hatası.
+
+    ``status`` Telegram'ın JSON gövdesiyle bildirdiği error_code'dur; ``kalici``
+    4xx (429 hariç) hataları işaretler: yeniden denemek işe yaramaz. Ağ hataları ve
+    JSON gövdesi olmayan HTTP hataları geçicidir (status=None). ``retry_after`` 429 için
+    Telegram'ın istediği bekleme süresidir (saniye).
+    """
+
+    def __init__(self, message: Any = "", status: Optional[int] = None, retry_after: Optional[int] = None):
+        super().__init__(message)
+        self.status = int(status) if isinstance(status, int) and not isinstance(status, bool) else None
+        try:
+            self.retry_after = max(1, int(retry_after)) if retry_after is not None else None
+        except (TypeError, ValueError):
+            self.retry_after = None
+
+    @property
+    def kalici(self) -> bool:
+        return self.status is not None and 400 <= self.status < 500 and self.status != 429
+
+
+class GorselReddedildi(TelegramHatasi):
+    """Kalıcı içerik/boyut reddi: yeniden indirme işe yaramaz, kullanıcıya bildirilir."""
 
 
 def _simdi() -> str:
@@ -80,11 +186,91 @@ def _simdi() -> str:
 
 
 def _redact(value: Any) -> str:
-    """İstek istisnalarındaki token ve olası parolaları log öncesi maskeler."""
+    """İstek istisnalarındaki token ve olası parolaları log öncesi maskeler.
+
+    'bot<id>:<token>' URL biçimine ek olarak guvenli_log.text çıplak token,
+    'password=' alanları ve ortamdaki gerçek BOT_PASSWORD/ADMIN_PASSWORD/TELEGRAM_TOKEN
+    değerlerini de maskeler.
+    """
     text = str(value or "")
     text = _TOKEN_URL.sub(r"\1***", text)
     text = re.sub(r"((?:token|password|sifre)\s*[=:]\s*)\S+", r"\1***", text, flags=re.I)
-    return text
+    return _guvenli_metin(text)
+
+
+def _etiket_izle(open_tags: list, closing: bool, name: str, raw: str) -> None:
+    """HTML parçalamada açık etiket yığınını günceller."""
+    name = name.lower()
+    if closing:
+        for index in range(len(open_tags) - 1, -1, -1):
+            if open_tags[index][0] == name:
+                del open_tags[index]
+                break
+    else:
+        open_tags.append((name, raw))
+
+
+def _html_parcala(text: str, limit: int = _MESAJ_SINIRI, max_parts: int = _MAX_PARCA) -> list[str]:
+    """Uzun HTML metni etiket/entity ortasından kesmeden, tercihen satır sınırında böler.
+
+    Her parçada açık kalan etiketler kapatılır ve sonraki parçada yeniden açılır;
+    son olmayan parçalara '… (devamı var)' notu eklenir. ``max_parts`` aşılırsa
+    kalan satırlar atılır ve son parçada kısaltma notu bulunur.
+    """
+    text = str(text or "")
+    if len(text) <= limit:
+        return [text]
+    parts: list[str] = []
+    buf: list[str] = []
+    open_tags: list[tuple[str, str]] = []
+    state = {"len": 0, "base": 0}
+
+    def closing() -> str:
+        return "".join(f"</{name}>" for name, _ in reversed(open_tags))
+
+    def reserve() -> int:
+        return len(closing()) + len(_DEVAM_NOTU) + 1
+
+    def add(piece: str) -> None:
+        buf.append(piece)
+        state["len"] += len(piece)
+
+    def flush() -> None:
+        parts.append("".join(buf).rstrip("\n") + closing() + "\n" + _DEVAM_NOTU)
+        buf.clear()
+        state["len"] = 0
+        for _, raw in open_tags:
+            add(raw)
+        state["base"] = state["len"]
+
+    def has_content() -> bool:
+        return state["len"] > state["base"]
+
+    for line in text.splitlines(keepends=True):
+        if has_content() and state["len"] + len(line) + reserve() > limit:
+            flush()
+        if state["len"] + len(line) + reserve() <= limit:
+            add(line)
+            for tag in _HTML_ETIKET.finditer(line):
+                _etiket_izle(open_tags, bool(tag.group(1)), tag.group(2), tag.group(0))
+            continue
+        # Tek satır bile sınırı aşıyor: etiket/entity atomları bazında böl.
+        for atom in _HTML_ATOM.finditer(line):
+            raw = atom.group(0)
+            if has_content() and state["len"] + len(raw) + reserve() > limit:
+                flush()
+            add(raw)
+            if atom.group(2):
+                _etiket_izle(open_tags, bool(atom.group(1)), atom.group(2), raw)
+    if has_content():
+        parts.append("".join(buf) + closing())
+    if len(parts) > max_parts:
+        parts = parts[:max_parts]
+        last = parts[-1]
+        if last.endswith(_DEVAM_NOTU):
+            last = last[:-len(_DEVAM_NOTU)] + _KISALTMA_NOTU
+        parts[-1] = last
+    return parts or [text[:limit]]
 
 
 def _safe_piece(value: Any, limit: int = 32) -> str:
@@ -119,14 +305,35 @@ class TelegramAPI:
     def call(self, method: str, payload: Optional[dict] = None, timeout: Optional[int] = None) -> Any:
         try:
             response = self.session.post(self._method_url(method), json=payload or {}, timeout=timeout or self.timeout)
-            if hasattr(response, "raise_for_status"):
-                response.raise_for_status()
-            data = response.json()
-        except (requests.RequestException, ValueError, OSError) as exc:
+        except (requests.RequestException, OSError) as exc:
             raise TelegramHatasi(_redact(exc)) from exc
+        status = getattr(response, "status_code", None)
+        status = int(status) if isinstance(status, int) and not isinstance(status, bool) else None
+        # Gövde HTTP hatasından ÖNCE okunur: 4xx yanıtlarda Telegram'ın açıklaması,
+        # error_code'u ve 429 için parameters.retry_after kaybolmasın.
+        data: Any = None
+        try:
+            data = response.json()
+        except (requests.RequestException, ValueError, OSError, AttributeError):
+            data = None
+        if isinstance(data, dict) and not data.get("ok"):
+            code = data.get("error_code")
+            code = int(code) if isinstance(code, int) and not isinstance(code, bool) else status
+            parameters = data.get("parameters") if isinstance(data.get("parameters"), dict) else {}
+            retry_after = parameters.get("retry_after") if code == 429 else None
+            description = data.get("description") or f"Telegram API hatası {code or ''}".strip()
+            raise TelegramHatasi(_redact(description), status=code, retry_after=retry_after)
+        if status is not None and status >= 400:
+            # JSON gövdesi olmayan HTTP hatası (ara vekil, bakım sayfası vb.) Telegram'ın
+            # kendi kararı değildir; geçici sayılır, sınırlı sayıda yeniden denenir.
+            try:
+                if hasattr(response, "raise_for_status"):
+                    response.raise_for_status()
+            except (requests.RequestException, OSError) as exc:
+                raise TelegramHatasi(_redact(exc)) from exc
+            raise TelegramHatasi(f"Telegram HTTP {status}")
         if not isinstance(data, dict) or not data.get("ok"):
-            description = data.get("description", "Telegram API yanıtı geçersiz") if isinstance(data, dict) else "Telegram API yanıtı geçersiz"
-            raise TelegramHatasi(_redact(description))
+            raise TelegramHatasi("Telegram API yanıtı geçersiz")
         return data.get("result")
 
     def get_updates(self, offset: int, timeout: int = 25):
@@ -144,8 +351,12 @@ class TelegramAPI:
             if hasattr(response, "raise_for_status"):
                 response.raise_for_status()
             content_length = getattr(response, "headers", {}).get("Content-Length")
-            if content_length and int(content_length) > max_bytes:
-                raise TelegramHatasi("Dosya izinli boyut sınırını aşıyor")
+            try:
+                declared = int(content_length) if content_length else 0
+            except (TypeError, ValueError):
+                declared = 0
+            if declared > max_bytes:
+                raise GorselReddedildi("Dosya izinli boyut sınırını aşıyor")
             chunks = []
             total = 0
             iterator = response.iter_content(chunk_size=64 * 1024) if hasattr(response, "iter_content") else [response.content]
@@ -154,7 +365,7 @@ class TelegramAPI:
                     continue
                 total += len(chunk)
                 if total > max_bytes:
-                    raise TelegramHatasi("Dosya izinli boyut sınırını aşıyor")
+                    raise GorselReddedildi("Dosya izinli boyut sınırını aşıyor")
                 chunks.append(chunk)
             return b"".join(chunks)
         except TelegramHatasi:
@@ -272,33 +483,69 @@ class KanitBot:
         # kullanılır; API çağrısına asla bu sırada izin verilmez.
         self._outbox_context: Optional[dict] = None
         self._post_commit: Optional[list] = None
+        # Şema/ALTER işi süreç başına bir kez yapılır (eşzamanlı yazma kilidi azalır).
+        self._schema_ready = False
+        # Bellek içi hız sınırı ve yönetici parola deneme sayaçları; yeniden
+        # başlatmada sıfırlanmaları kabul edilir, DB sütunu gerekmez.
+        self._uyari_zamani: dict[str, float] = {}
+        self._admin_hatali: dict[str, dict] = {}
+        self._son_temizlik: Optional[float] = None
+        # Telegram 429 retry_after: bu ana kadar hiçbir gönderim yapılmaz (monotonic).
+        self._outbox_duraklat_bitis: float = 0.0
 
     # ---- bağlantı, log ve kalıcı inbox -------------------------------------------------
     def _conn(self):
         conn = db.baglan(self.ayar["DB"])
-        conn.executescript(BOT_SEMA)
-        # Eski kurulumlardaki outbox'a yalnız ek sütun eklenir; db.py ortak
-        # şemasına dokunulmaz. Dönüşüm işleri de parent/site aynı API'yi çağırabilir.
-        columns = {row["name"] for row in conn.execute("PRAGMA table_info(tg_giden)")}
-        for name, kind in (("replace_message_id", "INTEGER"), ("job_key", "TEXT")):
-            if name not in columns:
-                conn.execute(f"ALTER TABLE tg_giden ADD COLUMN {name} {kind}")
-        donusum_isleri.ensure_schema(conn)
-        # Katalog ajanı henüz ortak dosyayı teslim etmemiş eski deploylarda bot
-        # dört legacy modu korur; dosya geldiğinde public API otomatik kullanılır.
+        if self._schema_ready:
+            return conn
         try:
-            from . import katalog
-            katalog.ensure_schema(conn)
-        except (ImportError, AttributeError):
-            pass
+            conn.executescript(BOT_SEMA)
+            # Eski kurulumlardaki outbox'a yalnız ek sütun eklenir; db.py ortak
+            # şemasına dokunulmaz. Dönüşüm işleri de parent/site aynı API'yi çağırabilir.
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(tg_giden)")}
+            for name, kind in (("replace_message_id", "INTEGER"), ("job_key", "TEXT")):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE tg_giden ADD COLUMN {name} {kind}")
+            donusum_isleri.ensure_schema(conn)
+            # Katalog ajanı henüz ortak dosyayı teslim etmemiş eski deploylarda bot
+            # dört legacy modu korur; dosya geldiğinde public API otomatik kullanılır.
+            try:
+                from . import katalog
+                katalog.ensure_schema(conn)
+            except (ImportError, AttributeError):
+                pass
+        except BaseException:
+            conn.close()
+            raise
+        self._schema_ready = True
         return conn
+
+    def _log_path(self) -> Path:
+        return Path(self.ayar.get("LOG_DOSYA") or Path(self.ayar["BOT_KLASOR"]) / "bot_log.txt")
+
+    def _rotate_log(self, path: Path) -> None:
+        """bot_log.txt BOT_LOG_MAX_MB'ı aşınca bot_log.txt.1 … .3 olarak döndürülür."""
+        try:
+            if not path.is_file() or path.stat().st_size < _log_max_bytes():
+                return
+            oldest = Path(f"{path}.3")
+            if oldest.exists():
+                oldest.unlink()
+            for index in (2, 1):
+                older = Path(f"{path}.{index}")
+                if older.exists():
+                    os.replace(older, f"{path}.{index + 1}")
+            os.replace(path, f"{path}.1")
+        except OSError:
+            pass
 
     def _log(self, level: int, message: Any) -> None:
         line = f"[{_simdi()}] {_redact(message)}"
         LOG.log(level, line)
-        path = Path(self.ayar.get("LOG_DOSYA") or Path(self.ayar["BOT_KLASOR"]) / "bot_log.txt")
+        path = self._log_path()
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
+            self._rotate_log(path)
             with path.open("a", encoding="utf-8") as f:
                 f.write(line + "\n")
         except OSError:
@@ -352,15 +599,25 @@ class KanitBot:
         finally:
             conn.close()
 
-    def _has_outbox_retry(self) -> bool:
-        """Yeniden denenecek yardımcı iş varken uzun polling'i kısa tutar."""
+    def _has_outbox_retry(self, within_seconds: int = 25) -> bool:
+        """Bu poll penceresinde zamanı gelecek bir teslimat tekrarı varken long-poll kısa tutulur.
+
+        Yalnız 'tekrar' satırları (deneme üst sınırının altındakiler) sayılır; 'olu'
+        satırları ve çok ileriye planlanmış tekrarlar polling'i kısaltmaz.
+        """
+        due = (datetime.now() + timedelta(seconds=max(0, int(within_seconds)))).strftime("%Y-%m-%d %H:%M:%S")
         conn = self._conn()
         try:
             return bool(conn.execute(
-                "SELECT 1 FROM tg_giden WHERE bot_id=? AND durum='tekrar' LIMIT 1", (self.bot_id,)
+                "SELECT 1 FROM tg_giden WHERE bot_id=? AND durum='tekrar' AND deneme<? AND guncelleme<=? LIMIT 1",
+                (self.bot_id, _outbox_max_deneme(), due),
             ).fetchone())
         finally:
             conn.close()
+
+    def _outbox_duraklama(self) -> float:
+        """429 sonrası kalan duraklama süresi (sn); 0 ise gönderim serbest."""
+        return max(0.0, self._outbox_duraklat_bitis - time.monotonic())
 
     def poll_once(self, timeout: int = 25) -> int:
         if not self.api:
@@ -370,8 +627,14 @@ class KanitBot:
             offset = self._offset(conn)
         finally:
             conn.close()
-        # Bekleyen teslimat tekrarları 25 sn long-poll arkasında kalmasın.
-        timeout = min(int(timeout), 2) if self._has_outbox_retry() else int(timeout)
+        # Bekleyen teslimat tekrarları 25 sn long-poll arkasında kalmasın; 429
+        # duraklaması bitince de kuyruk hemen akmaya devam etsin.
+        timeout = int(timeout)
+        pause = self._outbox_duraklama()
+        if pause > 0:
+            timeout = max(1, min(timeout, int(pause) + 1))
+        elif self._has_outbox_retry(timeout):
+            timeout = min(timeout, 2)
         updates = self.api.get_updates(offset, timeout)
         if not isinstance(updates, list):
             raise TelegramHatasi("getUpdates sonucu liste değil")
@@ -391,6 +654,7 @@ class KanitBot:
             conn.close()
         done = 0
         for row in rows:
+            update = None
             try:
                 update = json.loads(row["veri"])
                 self.handle_update(update, inbox_update_id=int(row["update_id"]))
@@ -403,13 +667,20 @@ class KanitBot:
                     delay = _RETRY_SECONDS[min(attempt - 1, len(_RETRY_SECONDS) - 1)]
                     retry_at = (datetime.now() + timedelta(seconds=delay)).strftime("%Y-%m-%d %H:%M:%S")
                     state = "tekrar"
+                veri = None  # None: ham update yeniden deneme için saklanır
+                if self._parola_mesaji_mi(update):
+                    # Parola (ya da parola denemesi) içeren metin yedeklere ve
+                    # 'tekrar'/'olu' satırlarına düz metin olarak yazılmaz.
+                    state, veri = "olu", "{}"
+                    message = ("Parola içerebilecek mesaj güvenlik nedeniyle yeniden denenmez; "
+                               "kullanıcı parolayı tekrar yazmalı. Hata: " + message)[:1000]
                 conn2 = self._conn()
                 try:
                     with db.transaction(conn2):
                         conn2.execute(
-                            "UPDATE tg_gelen SET durum=?,deneme=?,hata=?,guncelleme=? WHERE bot_id=? AND update_id=? "
-                            "AND durum!='tamam'",
-                            (state, attempt, message, retry_at, self.bot_id, row["update_id"]),
+                            "UPDATE tg_gelen SET durum=?,deneme=?,hata=?,guncelleme=?,veri=COALESCE(?,veri) "
+                            "WHERE bot_id=? AND update_id=? AND durum!='tamam'",
+                            (state, attempt, message, retry_at, veri, self.bot_id, row["update_id"]),
                         )
                         conn2.execute("UPDATE tg_durum SET heartbeat=?,hata=? WHERE bot_id=?", (_simdi(), message, self.bot_id))
                 finally:
@@ -461,7 +732,9 @@ class KanitBot:
         finally:
             conn.close()
 
-    def _finish_outbox(self, row, delivered_message_id: Optional[int] = None, error: Optional[Exception] = None) -> None:
+    def _finish_outbox(self, row, delivered_message_id: Optional[int] = None, error: Optional[Exception] = None,
+                       retry_in: Optional[int] = None) -> str:
+        """Teslimat sonucunu yazar; dönüş değeri yeni durumdur ('tamam', 'tekrar' veya 'olu')."""
         conn = self._conn()
         try:
             with db.transaction(conn):
@@ -486,19 +759,42 @@ class KanitBot:
                         # bot. Site jobs share the worker API but never get a
                         # Telegram delivery state from an unrelated bot.
                         donusum_isleri.mark_notice_delivered(conn, str(row["job_key"]), bot_id=self.bot_id)
-                    return
+                    return "tamam"
+                if retry_in is not None:
+                    # 429: deneme sayılmaz; satır Telegram'ın istediği süre sonra yeniden alınır.
+                    retry_at = (datetime.now() + timedelta(seconds=int(retry_in))).strftime("%Y-%m-%d %H:%M:%S")
+                    conn.execute(
+                        "UPDATE tg_giden SET durum='tekrar',hata=?,guncelleme=? WHERE id=? AND durum!='tamam'",
+                        (_redact(error)[:1000], retry_at, row["id"]),
+                    )
+                    return "tekrar"
                 attempt = int(row["deneme"] or 0) + 1
-                delay = _RETRY_SECONDS[min(attempt - 1, len(_RETRY_SECONDS) - 1)]
-                retry_at = (datetime.now() + timedelta(seconds=delay)).strftime("%Y-%m-%d %H:%M:%S")
+                permanent = bool(getattr(error, "kalici", False))
+                state, retry_at = "olu", _simdi()
+                if not permanent and attempt < _outbox_max_deneme():
+                    delay = _RETRY_SECONDS[min(attempt - 1, len(_RETRY_SECONDS) - 1)]
+                    retry_at = (datetime.now() + timedelta(seconds=delay)).strftime("%Y-%m-%d %H:%M:%S")
+                    state = "tekrar"
                 conn.execute(
-                    "UPDATE tg_giden SET durum='tekrar',deneme=?,hata=?,guncelleme=? WHERE id=? AND durum!='tamam'",
-                    (attempt, _redact(error)[:1000], retry_at, row["id"]),
+                    "UPDATE tg_giden SET durum=?,deneme=?,hata=?,guncelleme=? WHERE id=? AND durum!='tamam'",
+                    (state, attempt, _redact(error)[:1000], retry_at, row["id"]),
                 )
+                if state == "olu" and row["tur"] == "send" and row["job_key"]:
+                    # Teslim edilemeyecek dönüşüm bildirimi her döngüde yeniden seçilmesin.
+                    donusum_isleri.mark_notice_delivered(conn, str(row["job_key"]), bot_id=self.bot_id)
+                return state
         finally:
             conn.close()
 
     def process_outbox(self, limit: int = 100) -> int:
-        """Teslimat kuyruğunu DB kilidi tutmadan gönderir; başarısız mesajlar geri denenir."""
+        """Teslimat kuyruğunu DB kilidi tutmadan gönderir; geçici hatalar sınırlı sayıda geri denenir.
+
+        Kalıcı Telegram hataları (400 chat not found, 403 bot engellendi, HTML
+        ayrıştırma hatası...) ilk denemede 'olu' olur. 429'da Telegram'ın retry_after
+        süresi boyunca tüm gönderimler duraklatılır.
+        """
+        if self._outbox_duraklama() > 0:
+            return 0
         conn = self._conn()
         try:
             rows = conn.execute(
@@ -510,6 +806,8 @@ class KanitBot:
             conn.close()
         sent = 0
         for row in rows:
+            if self._outbox_duraklama() > 0:
+                break
             if not self._outbox_guard_current(row):
                 self._finish_outbox(row)  # stale render: gönderme, fakat tekrar da etme
                 continue
@@ -529,8 +827,18 @@ class KanitBot:
                 else:
                     raise TelegramHatasi("Bilinmeyen giden mesaj türü")
             except Exception as exc:
-                self._finish_outbox(row, error=exc)
-                self._log(logging.WARNING, f"Mesaj teslim edilemedi: {exc}")
+                retry_after = getattr(exc, "retry_after", None)
+                if retry_after:
+                    wait = max(1, min(int(retry_after), 300))
+                    self._outbox_duraklat_bitis = time.monotonic() + wait
+                    self._finish_outbox(row, error=exc, retry_in=wait)
+                    self._log(logging.WARNING, f"Telegram hız sınırı (429): gönderimler {wait} sn duraklatıldı: {exc}")
+                    break
+                state = self._finish_outbox(row, error=exc)
+                if state == "olu":
+                    self._log(logging.WARNING, f"Mesaj teslim edilemedi; vazgeçildi ({row['tur']}, deneme {int(row['deneme'] or 0) + 1}): {exc}")
+                else:
+                    self._log(logging.WARNING, f"Mesaj teslim edilemedi; yeniden denenecek ({row['tur']}): {exc}")
             else:
                 self._finish_outbox(row, result)
                 sent += 1
@@ -612,30 +920,144 @@ class KanitBot:
         except (AttributeError, TypeError, ValueError):
             return False
 
-    def _admin_command(self, conn, chat_id: str, user: dict, text: str, session: Optional[dict]) -> tuple[bool, Optional[dict]]:
+    def _admin_yetkili(self, user_id: str, session: Optional[dict]) -> bool:
+        """Etkin yönetici oturumu yalnız ADMIN_IDS'te hâlâ bulunan kişi için geçerlidir."""
+        return self._is_allowed_admin(str(user_id)) and self._admin_active(session)
+
+    def _admin_touch(self, conn, user_id: str, session: Optional[dict]) -> None:
+        """Her yönetici komutu hareketsizlik süresini (ADMIN_OTURUM_SANIYE) yeniden başlatır."""
+        if session and self._admin_active(session):
+            session["admin_until"] = int(time.time()) + _admin_oturum_saniye()
+            self._save_session(conn, str(user_id), session)
+
+    def _uyari_izinli(self, user_id: str, anahtar: str, saniye: int) -> bool:
+        """Kullanıcı+anahtar başına kayan pencere: aynı uyarı ``saniye`` içinde bir kez gönderilir."""
+        now = time.monotonic()
+        key = f"{user_id}:{anahtar}"
+        if len(self._uyari_zamani) > 20000:
+            self._uyari_zamani = {k: v for k, v in self._uyari_zamani.items() if now - v < 86400}
+            if len(self._uyari_zamani) > 20000:
+                self._uyari_zamani.clear()
+        last = self._uyari_zamani.get(key)
+        if last is not None and now - last < max(1, int(saniye)):
+            return False
+        self._uyari_zamani[key] = now
+        return True
+
+    def _admin_kilit_dakika(self, user_id: str) -> int:
+        """Yönetici parola kilidinin kalan süresi (dakika); 0 ise kilit yok."""
+        info = self._admin_hatali.get(user_id)
+        if not info:
+            return 0
+        now = time.monotonic()
+        remaining = float(info.get("kilit") or 0.0) - now
+        if remaining > 0:
+            return max(1, int(remaining // 60) + 1)
+        # Kilit süresi dolmuş ya da uzun süredir yanlış deneme yok: sayaç sıfırlanır.
+        if info.get("kilit") or now - float(info.get("son") or now) > _admin_kilit_saniye():
+            self._admin_hatali.pop(user_id, None)
+        return 0
+
+    def _admin_hata_kaydet(self, user_id: str) -> int:
+        info = self._admin_hatali.setdefault(user_id, {"sayi": 0, "kilit": 0.0, "son": time.monotonic()})
+        info["sayi"] += 1
+        info["son"] = time.monotonic()
+        if info["sayi"] >= _admin_max_deneme():
+            info["kilit"] = time.monotonic() + _admin_kilit_saniye()
+        return int(info["sayi"])
+
+    def _parola_mesaji_mi(self, update: Any) -> bool:
+        """İşlenemeyen update'in metni parola ya da parola denemesi olabilir mi?
+
+        BOT_PASSWORD/ADMIN_PASSWORD ile eşleşen metin, onaysız kullanıcının düz
+        metni (akış gereği parola denemesidir) ve açık yönetici parola isteminde
+        yazılan metin parola sayılır; bunlar tg_gelen.veri'de saklanmaz.
+        """
+        message = update.get("message") if isinstance(update, dict) else None
+        if not isinstance(message, dict):
+            return False
+        text = str(message.get("text") or message.get("caption") or "").strip()
+        if not text or text.startswith("/"):
+            return False
+        for key in ("BOT_PASSWORD", "ADMIN_PASSWORD"):
+            secret = os.environ.get(key, "")
+            if secret and _esit(secret, text):
+                return True
+        user = message.get("from") or {}
+        uid = str(user.get("id") or "")
+        if not uid:
+            return False
+        try:
+            conn = self._conn()
+        except Exception:
+            return False
+        try:
+            row = conn.execute("SELECT * FROM tg_kullanicilar WHERE id=?", (uid,)).fetchone()
+            profile = dict(row) if row else None
+            if not self._authorized(conn, profile, uid):
+                return True
+            session = self._get_session(conn, uid)
+            return bool(session and session.get("admin_prompt"))
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def _admin_command(self, conn, chat_id: str, user: dict, text: str, session: Optional[dict],
+                       message_id: Optional[int] = None) -> tuple[bool, Optional[dict]]:
         """(işlendi_mi, güncel_oturum) — temel yönetici komutları."""
         uid = str(user["id"])
         cmd, _, arg = text.partition(" ")
         cmd, arg = cmd.lower(), arg.strip()
         if session and session.get("admin_prompt") and text and not text.startswith("/"):
-            session.pop("admin_prompt", None)
+            deadline = session.pop("admin_prompt", None)
+            self._save_session(conn, uid, session)
+            # Parola mesajı doğru/yanlış/geç fark etmeksizin sohbetten silinmeye çalışılır;
+            # silme başarısız olursa (eski mesaj, yetki) sessizce yutulur.
+            if message_id:
+                self._delete_typed_message(chat_id, int(message_id), sensitive=True)
+            try:
+                prompt_ok = float(deadline) > time.time()
+            except (TypeError, ValueError):
+                prompt_ok = False
+            if not prompt_ok:
+                self._say(chat_id, "Yönetici parola isteğinin süresi doldu; /admin yazıp yeniden isteyin.")
+                return True, session
+            locked = self._admin_kilit_dakika(uid)
+            if locked:
+                self._say(chat_id, f"Çok fazla hatalı yönetici denemesi. Lütfen {locked} dakika sonra yeniden deneyin.")
+                return True, session
             expected = os.environ.get("ADMIN_PASSWORD", "")
-            if self._is_allowed_admin(uid) and expected and hmac.compare_digest(expected, text):
-                session["admin_until"] = int(time.time()) + 3600
+            if self._is_allowed_admin(uid) and expected and _esit(expected, text):
+                minutes = _admin_oturum_saniye() // 60
+                session["admin_until"] = int(time.time()) + _admin_oturum_saniye()
                 self._save_session(conn, uid, session)
-                self._say(chat_id, "<b>Yönetici girişi başarılı.</b> Oturum 60 dakika geçerlidir.")
+                self._admin_hatali.pop(uid, None)
+                db.denetim_yaz(conn, uid, "telegram_onay", yeni={"tur": "admin"},
+                               aciklama="Telegram yönetici parolasıyla giriş yapıldı.")
+                self._say(chat_id, f"<b>Yönetici girişi başarılı.</b> Oturum {minutes} dakika hareketsizlikten sonra kapanır.")
             else:
-                self._save_session(conn, uid, session)
-                self._say(chat_id, "Yönetici girişi başarısız.")
+                count = self._admin_hata_kaydet(uid)
+                db.denetim_yaz(conn, uid, "telegram_onay", yeni={"tur": "admin", "sonuc": "basarisiz", "deneme": count},
+                               sonuc="hata", aciklama="Telegram yönetici parolası yanlış girildi.")
+                if count >= _admin_max_deneme():
+                    self._say(chat_id, f"Yönetici girişi başarısız. Çok fazla hatalı deneme; {_admin_kilit_saniye() // 60} dakika beklemeniz gerekir.")
+                else:
+                    self._say(chat_id, f"Yönetici girişi başarısız. {_admin_max_deneme() - count} deneme hakkınız kaldı.")
             return True, session
         if cmd == "/admin":
             if not self._is_allowed_admin(uid) or not os.environ.get("ADMIN_PASSWORD"):
-                self._say(chat_id, "Bu Telegram ID için yönetici erişimi tanımlı değil.")
+                if self._uyari_izinli(uid, "admin", 60):
+                    self._say(chat_id, "Bu Telegram ID için yönetici erişimi tanımlı değil.")
+                return True, session
+            locked = self._admin_kilit_dakika(uid)
+            if locked:
+                self._say(chat_id, f"Çok fazla hatalı yönetici denemesi. Lütfen {locked} dakika sonra yeniden deneyin.")
                 return True, session
             session = session or {"step": "idle"}
-            session["admin_prompt"] = int(time.time()) + 300
+            session["admin_prompt"] = int(time.time()) + _admin_prompt_saniye()
             self._save_session(conn, uid, session)
-            self._say(chat_id, "Yönetici parolasını yazın.")
+            self._say(chat_id, f"Yönetici parolasını yazın. İstek {max(1, _admin_prompt_saniye() // 60)} dakika geçerlidir; parola mesajınız sohbetten silinir.")
             return True, session
         if cmd == "/admin_cikis":
             if session:
@@ -651,18 +1073,23 @@ class KanitBot:
         except ImportError:
             process_admin_command = None
         if process_admin_command and process_admin_command(self, conn, chat_id, user, text, session):
+            self._admin_touch(conn, uid, session)
             return True, session
-        admin_commands = {"/durum", "/bakim", "/bakim_ac", "/bakim_kapat", "/kategori_liste", "/engel", "/engel_kaldir", "/oturumlar"}
+        # /engel_kaldir admin_commands tarafından yürütülür (onay korunur); eski
+        # yerleşik kopyası ölü koddu ve kaldırıldı.
+        admin_commands = {"/durum", "/bakim", "/bakim_ac", "/bakim_kapat", "/kategori_liste", "/engel", "/oturumlar"}
         if cmd not in admin_commands:
             return False, session
-        if not self._admin_active(session):
+        if not self._admin_yetkili(uid, session):
             self._say(chat_id, "Bu komut için önce /admin ile giriş yapın.")
             return True, session
+        self._admin_touch(conn, uid, session)
         if cmd == "/durum":
             users = conn.execute("SELECT COUNT(*) FROM tg_kullanicilar").fetchone()[0]
             inbox = conn.execute("SELECT COUNT(*) FROM tg_gelen WHERE bot_id=? AND durum IN ('bekliyor','tekrar')", (self.bot_id,)).fetchone()[0]
             dead = conn.execute("SELECT COUNT(*) FROM tg_gelen WHERE bot_id=? AND durum='olu'", (self.bot_id,)).fetchone()[0]
-            self._say(chat_id, f"<b>DURUM</b>\nBakım: {'açık' if self._maintenance(conn) else 'kapalı'}\nKullanıcı: {users}\nBekleyen: {inbox}\nÖlü mektup: {dead}")
+            undelivered = conn.execute("SELECT COUNT(*) FROM tg_giden WHERE bot_id=? AND durum='olu'", (self.bot_id,)).fetchone()[0]
+            self._say(chat_id, f"<b>DURUM</b>\nBakım: {'açık' if self._maintenance(conn) else 'kapalı'}\nKullanıcı: {users}\nBekleyen: {inbox}\nÖlü mektup: {dead}\nTeslim edilemeyen mesaj: {undelivered}")
         elif cmd in {"/bakim", "/bakim_ac", "/bakim_kapat"}:
             val = arg.lower() if cmd == "/bakim" else ("ac" if cmd.endswith("_ac") else "kapat")
             if val in {"ac", "aç", "on", "1"}:
@@ -685,27 +1112,15 @@ class KanitBot:
             target, _, reason = arg.partition(" ")
             if not target:
                 self._say(chat_id, "Kullanım: /engel TELEGRAM_ID [sebep]")
+            elif not _TG_ID.fullmatch(target):
+                self._say(chat_id, "Telegram ID yalnız rakamlardan oluşmalı (5-15 hane). Örnek: /engel 123456789 sebep")
+            elif target == uid:
+                self._say(chat_id, "Kendi hesabınızı engelleyemezsiniz.")
             else:
-                conn.execute(
-                    "INSERT INTO tg_kullanicilar(id,engelli,onayli,engel_sebep,last_seen,deneme) VALUES(?,1,0,?,?,3) "
-                    "ON CONFLICT(id) DO UPDATE SET engelli=1,onayli=0,engel_sebep=excluded.engel_sebep,deneme=3",
-                    (target[:64], reason[:300] or "Yönetici engeli", _simdi()),
-                )
-                conn.execute("DELETE FROM tg_oturumlar WHERE user_id=?", (target[:64],))
-                conn.execute("DELETE FROM tg_girisler WHERE bot_id=? AND user_id=?", (self.bot_id, target[:64]))
-                db.denetim_yaz(conn, uid, "bot_engelle", yeni=target[:64])
-                db.degisti(conn)
+                # Tek yol: panel ve /engelle ile aynı servis (islem_sonuclari + denetim tutarlı).
+                from . import bot_yonetim
+                bot_yonetim.engelle(self.ayar, conn, target, "", reason.strip()[:300] or "Yönetici engeli", uid)
                 self._say(chat_id, f"{_h(target)} engellendi.")
-        elif cmd == "/engel_kaldir":
-            if not arg:
-                self._say(chat_id, "Kullanım: /engel_kaldir TELEGRAM_ID")
-            else:
-                conn.execute("UPDATE tg_kullanicilar SET engelli=0,onayli=0,engel_sebep=NULL,deneme=0 WHERE id=?", (arg[:64],))
-                conn.execute("DELETE FROM tg_oturumlar WHERE user_id=?", (arg[:64],))
-                conn.execute("DELETE FROM tg_girisler WHERE bot_id=? AND user_id=?", (self.bot_id, arg[:64]))
-                db.denetim_yaz(conn, uid, "bot_engel_kaldir", yeni=arg[:64])
-                db.degisti(conn)
-                self._say(chat_id, f"{_h(arg)} engeli kaldırıldı; yeniden parola gerekir.")
         elif cmd == "/oturumlar":
             rows = conn.execute("SELECT user_id,veri FROM tg_oturumlar WHERE bot_id=? ORDER BY guncelleme DESC LIMIT 30", (self.bot_id,)).fetchall()
             vals = []
@@ -719,7 +1134,11 @@ class KanitBot:
 
     # ---- Telegram ile yanıt (kalıcı outbox; transaction sırasında ağ yok) ---------------
     def _say(self, chat_id: str, text: str, keyboard: Optional[list] = None) -> Optional[int]:
-        self._queue_outbox(self._outbox_context["conn"], "send", str(chat_id), text, keyboard)
+        """Uzun çıktıyı HTML güvenli parçalara böler; klavye son parçaya eklenir."""
+        conn = self._outbox_context["conn"]
+        parts = _html_parcala(str(text or ""))
+        for index, part in enumerate(parts):
+            self._queue_outbox(conn, "send", str(chat_id), part, keyboard if index == len(parts) - 1 else None)
         return None
 
     def _edit(self, chat_id: str, message_id: int, text: str, keyboard: Optional[list] = None) -> bool:
@@ -950,17 +1369,36 @@ class KanitBot:
             return {"file_id": str(doc["file_id"]), "file_unique_id": str(doc.get("file_unique_id") or ""), "file_size": doc.get("file_size"), "name": str(doc.get("file_name") or "image")}
         return None
 
+    def _max_image_bytes(self) -> int:
+        """Ayardaki görsel sınırı; Telegram getFile tavanı (20 MB) hiçbir durumda aşılmaz."""
+        try:
+            configured = int(self.ayar.get("MAX_GORSEL_BYTES", 10 * 1024 * 1024))
+        except (TypeError, ValueError):
+            configured = 10 * 1024 * 1024
+        return max(1024, min(configured, _INDIRME_TAVANI))
+
     def _download_image(self, image: dict, chat_id: str, message_id: int) -> tuple[str, str]:
-        """Ağ çağrısı; sadece _prepare_update içinden, DB transaction dışında çağrılır."""
-        max_bytes = int(self.ayar.get("MAX_GORSEL_BYTES", 10 * 1024 * 1024))
+        """Ağ çağrısı; sadece _prepare_update içinden, DB transaction dışında çağrılır.
+
+        Boyut, tür, piksel ve Pillow doğrulama hataları ``GorselReddedildi`` (kalıcı)
+        olarak fırlar; yalnız ağ/zaman aşımı hataları geçici ``TelegramHatasi`` kalır.
+        """
+        max_bytes = self._max_image_bytes()
+        limit_text = f"{max_bytes // (1024 * 1024)} MiB"
         advertised = image.get("file_size")
-        if advertised is not None and int(advertised) > max_bytes:
-            raise TelegramHatasi("Görsel 10 MiB sınırını aşıyor")
+        try:
+            if advertised is not None and int(advertised) > max_bytes:
+                raise GorselReddedildi(f"Görsel {limit_text} sınırını aşıyor")
+        except (TypeError, ValueError):
+            pass
         if not self.api:
             raise TelegramHatasi("TELEGRAM_TOKEN ayarlanmamış")
         info = self.api.get_file(image["file_id"])
-        if info.get("file_size") is not None and int(info["file_size"]) > max_bytes:
-            raise TelegramHatasi("Görsel 10 MiB sınırını aşıyor")
+        try:
+            if info.get("file_size") is not None and int(info["file_size"]) > max_bytes:
+                raise GorselReddedildi(f"Görsel {limit_text} sınırını aşıyor")
+        except (TypeError, ValueError):
+            pass
         raw = self.api.download(str(info["file_path"]), max_bytes)
         max_pixels = int(self.ayar.get("MAX_IMAGE_PIXELS", 25_000_000))
         try:
@@ -971,14 +1409,14 @@ class KanitBot:
                 with Image.open(BytesIO(raw)) as im:
                     fmt = (im.format or "").upper()
                     if fmt not in _GECERLI_FORMATLAR:
-                        raise TelegramHatasi("Görsel türüne izin verilmiyor")
+                        raise GorselReddedildi("Görsel türüne izin verilmiyor")
                     if int(im.width) * int(im.height) > max_pixels:
-                        raise TelegramHatasi("Görsel piksel sınırını aşıyor")
+                        raise GorselReddedildi("Görsel piksel sınırını aşıyor")
                     im.verify()
         except TelegramHatasi:
             raise
-        except (UnidentifiedImageError, OSError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
-            raise TelegramHatasi("İndirilen dosya doğrulanmış bir görsel değil") from exc
+        except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+            raise GorselReddedildi("İndirilen dosya doğrulanmış bir görsel değil") from exc
         ext = _GECERLI_FORMATLAR[fmt]
         stable = "_".join((_safe_piece(self.bot_id, 32), _safe_piece(chat_id, 32), _safe_piece(message_id, 32), _safe_piece(image.get("file_unique_id") or image["file_id"], 32)))
         relative = f"pending/{stable}.{ext}"
@@ -1005,14 +1443,17 @@ class KanitBot:
         # Yetkisiz görsel hiç indirilmez; handler aynı update'te engel politikasını uygular.
         conn = self._conn()
         try:
-            profile_row = conn.execute("SELECT * FROM tg_kullanicilar WHERE id=?", (str(user["id"]),)).fetchone()
+            uid = str(user["id"])
+            profile_row = conn.execute("SELECT * FROM tg_kullanicilar WHERE id=?", (uid,)).fetchone()
             profile = dict(profile_row) if profile_row else None
-            allowed = self._authorized(conn, profile, str(user["id"]))
+            allowed = self._authorized(conn, profile, uid)
             cached = conn.execute("SELECT pending_path,extension FROM tg_indirilen WHERE bot_id=? AND update_id=?", (self.bot_id, int(update_id))).fetchone()
+            # Bakım modunda (yönetici dışı) görsel indirilmez; sahipsiz pending oluşmaz.
+            maintenance = allowed and self._maintenance(conn) and not self._admin_yetkili(uid, self._get_session(conn, uid))
         finally:
             conn.close()
         # Eski/aktarılmış genel onay tek başına indirme yetkisi değildir.
-        if not allowed:
+        if not allowed or maintenance:
             return update
         if cached:
             pending = (self.media_root / cached["pending_path"]).resolve()
@@ -1020,7 +1461,13 @@ class KanitBot:
                 image.update({"_pending_path": cached["pending_path"], "_extension": cached["extension"]})
                 message["_cached_image"] = image
                 return update
-        pending, ext = self._download_image(image, str(chat["id"]), int(message["message_id"]))
+        try:
+            pending, ext = self._download_image(image, str(chat["id"]), int(message["message_id"]))
+        except GorselReddedildi as exc:
+            # Kalıcı red: yeniden indirme yok; handler kullanıcıya tek açıklama gönderir
+            # ve update normal 'tamam' yolunu izler.
+            message["_image_error"] = str(exc)
+            return update
         conn = self._conn()
         try:
             with db.transaction(conn):
@@ -1072,12 +1519,15 @@ class KanitBot:
             # Varsayılan yereldir; kullanıcı yine de açıkça saklama seçimini yapar.
             "save_mode": "local", "username": str(user.get("username") or user.get("first_name") or ""),
         }
+        # Yönetici oturumu akış başlatınca sessizce düşmesin.
+        if old_session and old_session.get("admin_until"):
+            session["admin_until"] = old_session["admin_until"]
         self._save_session(conn, str(user["id"]), session)
         self._show(conn, str(user["id"]), session, chat_id, self._screen(session), self._storage_keyboard())
 
     # ---- metin ve callback işleme -------------------------------------------------------
     def _block(self, conn, user_id: str, reason: str) -> None:
-        conn.execute("UPDATE tg_kullanicilar SET engelli=1,onayli=0,deneme=?,engel_sebep=? WHERE id=?", (MAX_DENEME, reason[:300], user_id))
+        conn.execute("UPDATE tg_kullanicilar SET engelli=1,onayli=0,deneme=?,engel_sebep=? WHERE id=?", (_max_deneme(), reason[:300], user_id))
         conn.execute("DELETE FROM tg_girisler WHERE bot_id=? AND user_id=?", (self.bot_id, str(user_id)))
         session = self._get_session(conn, user_id)
         self._cancel_conversion(conn, session)
@@ -1090,6 +1540,8 @@ class KanitBot:
         self._cancel_conversion(conn, old_session)
         self._remove_pending(old_session)
         session = {"step": "lead_confirm", "chat_id": str(chat_id), "source_type": "yazili", "source_message_id": int(message_id), "lead_id": text[:500]}
+        if old_session and old_session.get("admin_until"):
+            session["admin_until"] = old_session["admin_until"]
         self._save_session(conn, user_id, session)
         self._show(conn, user_id, session, chat_id, self._screen(session), [[self._button("Onayla", "lead:ok"), self._button("Değiştir", "lead:change")], [self._button("Çık", "lead:exit")]])
 
@@ -1352,6 +1804,113 @@ class KanitBot:
                 self._log(logging.WARNING, f"Pending medya kurtarılamadı: {exc}")
         return recovered
 
+    # ---- periyodik temizlik -------------------------------------------------------------
+    def _pending_abs(self, value: Any) -> Optional[str]:
+        try:
+            path = Path(str(value or ""))
+            path = path if path.is_absolute() else (self.media_root / path)
+            return str(path.resolve())
+        except (OSError, ValueError):
+            return None
+
+    def _eski_gunlukleri_sil(self) -> tuple[int, int]:
+        """BOT_GUNLUK_SAKLAMA_GUN'den eski 'tamam'/'olu' tg_gelen ve tg_giden satırlarını siler (VACUUM yok)."""
+        sinir = (datetime.now() - timedelta(days=_saklama_gun())).strftime("%Y-%m-%d %H:%M:%S")
+        conn = self._conn()
+        try:
+            with db.transaction(conn):
+                gelen = conn.execute(
+                    "DELETE FROM tg_gelen WHERE bot_id=? AND durum IN ('tamam','olu') AND guncelleme<?", (self.bot_id, sinir)
+                ).rowcount
+                giden = conn.execute(
+                    "DELETE FROM tg_giden WHERE bot_id=? AND durum IN ('tamam','olu') AND guncelleme<?", (self.bot_id, sinir)
+                ).rowcount
+            return int(gelen or 0), int(giden or 0)
+        finally:
+            conn.close()
+
+    def _sahipsiz_pending_temizle(self) -> tuple[int, int]:
+        """24 saatten (BOT_PENDING_SAKLAMA_SAAT) eski, hiçbir kayıtla eşleşmeyen pending dosyalarını siler.
+
+        Korunanlar: açık oturumların pending_path'i, bitmemiş dönüşüm işlerinin
+        yolları, kayda bağlı tg_indirilen satırları (çökme kurtarması için) ve henüz
+        işlenmemiş inbox update'lerinin indirmeleri. Ardından dosyası kalmamış
+        tg_indirilen satırları temizlenir.
+        """
+        cutoff = time.time() - _pending_saklama_saat() * 3600
+        protected: set[str] = set()
+        conn = self._conn()
+        try:
+            for row in conn.execute("SELECT veri FROM tg_oturumlar").fetchall():
+                try:
+                    value = json.loads(row["veri"])
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(value, dict) and value.get("pending_path"):
+                    protected.add(self._pending_abs(value["pending_path"]) or "")
+            for row in conn.execute(
+                "SELECT local_path,source_path FROM donusum_isleri WHERE durum NOT IN ('tamam','hata','belirsiz','iptal')"
+            ).fetchall():
+                for value in (row["local_path"], row["source_path"]):
+                    if value:
+                        protected.add(self._pending_abs(value) or "")
+            for row in conn.execute(
+                "SELECT i.pending_path FROM tg_indirilen i JOIN kayitlar k ON k.telegram_bot_id=i.bot_id "
+                "AND k.chat_id=i.chat_id AND k.message_id=i.message_id WHERE k.gorsel_dosya IS NOT NULL"
+            ).fetchall():
+                protected.add(self._pending_abs(row["pending_path"]) or "")
+            for row in conn.execute(
+                "SELECT i.pending_path FROM tg_indirilen i JOIN tg_gelen g ON g.bot_id=i.bot_id AND g.update_id=i.update_id "
+                "WHERE g.durum IN ('bekliyor','tekrar')"
+            ).fetchall():
+                protected.add(self._pending_abs(row["pending_path"]) or "")
+        finally:
+            conn.close()
+        protected.discard("")
+        removed = 0
+        pending_dir = self.media_root / "pending"
+        try:
+            entries = list(pending_dir.iterdir())
+        except OSError:
+            entries = []
+        for path in entries:
+            try:
+                if not path.is_file() or str(path.resolve()) in protected or path.stat().st_mtime > cutoff:
+                    continue
+                path.unlink()
+                removed += 1
+            except OSError:
+                continue
+        conn = self._conn()
+        try:
+            with db.transaction(conn):
+                rows = conn.execute("SELECT update_id,pending_path FROM tg_indirilen WHERE bot_id=?", (self.bot_id,)).fetchall()
+                gone = [row["update_id"] for row in rows if not Path(self._pending_abs(row["pending_path"]) or "").is_file()]
+                for update_id in gone:
+                    conn.execute("DELETE FROM tg_indirilen WHERE bot_id=? AND update_id=?", (self.bot_id, int(update_id)))
+        finally:
+            conn.close()
+        return removed, len(gone)
+
+    def _gunluk_temizlik(self, force: bool = False) -> dict:
+        """Başlangıçta ve günde bir: eski günlük satırları ve sahipsiz pending dosyaları (hata yutar)."""
+        now = time.monotonic()
+        if not force and self._son_temizlik is not None and now - self._son_temizlik < 86400:
+            return {}
+        self._son_temizlik = now
+        result: dict[str, int] = {}
+        try:
+            result["tg_gelen"], result["tg_giden"] = self._eski_gunlukleri_sil()
+        except Exception as exc:
+            self._log(logging.WARNING, f"Günlük tablo temizliği yapılamadı: {exc}")
+        try:
+            result["pending"], result["tg_indirilen"] = self._sahipsiz_pending_temizle()
+        except Exception as exc:
+            self._log(logging.WARNING, f"Pending temizliği yapılamadı: {exc}")
+        if any(result.values()):
+            self._log(logging.INFO, "Temizlik: " + ", ".join(f"{k}={v}" for k, v in result.items()))
+        return result
+
     def _resume_ui(self,conn,uid,session,chat_id,note='',fresh=True):
         """Durumu değiştirmeden doğru düğmeleri görünür son mesaj olarak yeniler."""
         # Önceki sürümden kalan yarım fotoğraf yeni seçim sorusunu atlamaz.
@@ -1386,14 +1945,17 @@ class KanitBot:
         self._answer_callback(str(callback.get("id") or ""), chat_id)
         profile = self._touch_user(conn, user)
         if profile.get("engelli"):
-            self._say(chat_id, "Erişiminiz engellenmiştir.")
+            # Engelli kullanıcıya bilgilendirme bir kez; sonrası sessiz (callback yine yanıtlanır).
+            if self._uyari_izinli(uid, "engel", _engelli_uyari_saniye()):
+                self._say(chat_id, "Erişiminiz engellenmiştir.")
             return
         session = self._get_session(conn, uid)
         # Callback'ler de yeni botun ilk parola kaydı olmadan akışı ilerletemez.
         if not self._authorized(conn, profile, uid):
-            self._say(chat_id, "Bu botu kullanmak için önce /start yazıp parolayı gönderin.")
+            if self._uyari_izinli(uid, "parola", _parola_istem_saniye()):
+                self._say(chat_id, "Bu botu kullanmak için önce /start yazıp parolayı gönderin.")
             return
-        if self._maintenance(conn) and not self._admin_active(session):
+        if self._maintenance(conn) and not self._admin_yetkili(uid, session):
             self._say(chat_id, "Bot şu anda bakım modunda.");return
         if not session:
             self._say(chat_id,"Bu işlem tamamlanmış veya iptal edilmiş. Yeni görsel ya da Lead ID gönderebilirsiniz.");return
@@ -1583,42 +2145,67 @@ class KanitBot:
         chat_id, uid = str(chat["id"]), str(user["id"])
         profile = self._touch_user(conn, user)
         text = str(message.get("text") or "").strip()
+        authorized = self._authorized(conn, profile, uid)
         if text.split(" ", 1)[0].lower() == "/kimim":
-            self._say(chat_id, f"<b>Telegram ID:</b> <code>{_h(uid)}</code>\n<b>Ad:</b> {_h(user.get('username') or user.get('first_name') or '-')}")
+            # Yetkili kullanıcıya her zaman; engelli/onaysız kişiye hız sınırıyla yanıt.
+            if authorized or self._uyari_izinli(uid, "kimim", 60):
+                self._say(chat_id, f"<b>Telegram ID:</b> <code>{_h(uid)}</code>\n<b>Ad:</b> {_h(user.get('username') or user.get('first_name') or '-')}")
             return
         session = self._get_session(conn, uid)
         if profile.get("engelli"):
-            self._say(chat_id, "Erişiminiz engellenmiştir.")
+            # İlk mesajda bir kez bilgilendirilir; sonra BOT_ENGELLI_UYARI_SANIYE boyunca sessiz.
+            if self._uyari_izinli(uid, "engel", _engelli_uyari_saniye()):
+                self._say(chat_id, "Erişiminiz engellenmiştir.")
             return
 
         password = os.environ.get("BOT_PASSWORD", "")
         if not password:
             # Parola olmadan yönetici komutları dahil hiçbir normal akışa izin
             # verilmez; /kimim yukarıda zararsız kimlik sorgusu olarak kalır.
-            self._say(chat_id, "Bot henüz güvenli biçimde yapılandırılmadı; yöneticiyle iletişime geçin.")
+            if self._uyari_izinli(uid, "yapilandirma", 60):
+                self._say(chat_id, "Bot henüz güvenli biçimde yapılandırılmadı; yöneticiyle iletişime geçin.")
             return
-        handled, session = self._admin_command(conn, chat_id, user, text, session)
+        handled, session = self._admin_command(conn, chat_id, user, text, session, int(message.get("message_id") or 0) or None)
         if handled:
             return
-        if self._maintenance(conn) and not self._admin_active(session):
-            self._say(chat_id, "Bot şu anda bakım modunda. Lütfen daha sonra tekrar deneyin.")
+        if self._maintenance(conn) and not self._admin_yetkili(uid, session):
+            if authorized or self._uyari_izinli(uid, "bakim", _parola_istem_saniye()):
+                self._say(chat_id, "Bot şu anda bakım modunda. Lütfen daha sonra tekrar deneyin.")
             return
 
         image = self._image_from_message(message)
-        if not self._authorized(conn, profile, uid):
+        if not authorized:
             if image:
                 # Aktarımdan gelen eski genel onay sahibi yeni botta önce parola
-                # girer; gerçekten onaysız kişide eski engel politikası sürer.
+                # girer. Gerçekten onaysız kişide politika .env ile seçilir:
+                # 'engelle' (varsayılan): ilk görselde kalıcı engel;
+                # 'parola': görsel indirilmez, deneme sayılır, MAX_DENEME'de engel.
                 if profile.get("onayli"):
-                    self._say(chat_id, "Bu bot için önce parolayı yazın. Görseliniz indirilmedi; paroladan sonra yeniden gönderin.")
+                    if self._uyari_izinli(uid, "parola", _parola_istem_saniye()):
+                        self._say(chat_id, "Bu bot için önce parolayı yazın. Görseliniz indirilmedi; paroladan sonra yeniden gönderin.")
+                elif _yetkisiz_gorsel_politikasi() == "parola":
+                    trial = int(profile.get("deneme") or 0) + 1
+                    if trial >= _max_deneme():
+                        self._block(conn, uid, "yetkisiz_gorsel_gonderimi")
+                        self._say(chat_id, "Bu bota görsel gönderme yetkiniz yok; erişiminiz engellendi.")
+                    else:
+                        conn.execute("UPDATE tg_kullanicilar SET deneme=? WHERE id=?", (trial, uid))
+                        if self._uyari_izinli(uid, "parola", _parola_istem_saniye()):
+                            self._say(chat_id, "Bu bota görsel göndermek için önce parolayı yazın; görseliniz indirilmedi.")
                 else:
                     self._block(conn, uid, "yetkisiz_gorsel_gonderimi")
                     self._say(chat_id, "Bu bota görsel gönderme yetkiniz yok; erişiminiz engellendi.")
                 return
             if text.startswith("/"):
-                self._say(chat_id, "Hoş geldiniz. Devam etmek için parolayı yazın.")
+                if self._uyari_izinli(uid, "parola", _parola_istem_saniye()):
+                    self._say(chat_id, "Hoş geldiniz. Devam etmek için parolayı yazın.")
                 return
-            if hmac.compare_digest(password, text):
+            if not text:
+                # Sticker, ses, konum, kişi, belge: parola denemesi sayılmaz.
+                if self._uyari_izinli(uid, "parola", _parola_istem_saniye()):
+                    self._say(chat_id, "Devam etmek için parolayı metin olarak yazın.")
+                return
+            if _esit(password, text):
                 conn.execute("UPDATE tg_kullanicilar SET onayli=1,engelli=0,engel_sebep=NULL,deneme=0,onay_tarihi=? WHERE id=?", (_simdi(), uid))
                 conn.execute("INSERT OR IGNORE INTO tg_girisler(bot_id,user_id,zaman) VALUES(?,?,?)", (self.bot_id, uid, _simdi()))
                 self._delete_typed_message(chat_id, int(message["message_id"]), sensitive=True)
@@ -1631,12 +2218,18 @@ class KanitBot:
                     self._say(chat_id, "<b>Hoş geldiniz.</b> Görsel gönderin veya Lead ID yazın.")
                 return
             trial = int(profile.get("deneme") or 0) + 1
-            if trial >= MAX_DENEME:
-                self._block(conn, uid, "3_yanlis_parola")
+            limit = _max_deneme()
+            if trial >= limit:
+                self._block(conn, uid, f"{limit}_yanlis_parola")
                 self._say(chat_id, "Erişiminiz engellendi.")
             else:
                 conn.execute("UPDATE tg_kullanicilar SET deneme=? WHERE id=?", (trial, uid))
-                self._say(chat_id, f"Parola yanlış. {MAX_DENEME - trial} deneme hakkınız kaldı.")
+                self._say(chat_id, f"Parola yanlış. {limit - trial} deneme hakkınız kaldı.")
+            return
+        if message.get("_image_error"):
+            # Kalıcı görsel reddi: tek açıklama, yeniden indirme/deneme yok.
+            self._say(chat_id, f"Görsel okunamadı: {_h(message['_image_error'])}. Lütfen fotoğrafı JPEG, PNG, WEBP veya GIF biçiminde, "
+                               f"{self._max_image_bytes() // (1024 * 1024)} MiB altında yeniden gönderin.")
             return
 
         if text:
@@ -1807,31 +2400,43 @@ class KanitBot:
     def run_forever(self, poll_timeout: int = 25, once: bool = False) -> bool:
         """Long-poll döngüsünü çalıştırır; yapılandırma eksikse dış çağrı yapmadan döner."""
         if not os.environ.get("BOT_PASSWORD"):
-            self._log(logging.ERROR, "BOT_PASSWORD ayarlanmamış; bot güvenli nedenle başlatılmadı.")
+            self._log(logging.ERROR, "Yapılandırma hatası: BOT_PASSWORD ayarlanmamış; bot güvenli nedenle başlatılmadı (çıkış kodu 2). .env dosyasına BOT_PASSWORD ekleyip servisi yeniden başlatın.")
             return False
         if not self.token or not self.api:
-            self._log(logging.ERROR, "TELEGRAM_TOKEN ayarlanmamış; bot başlatılmadı.")
+            self._log(logging.ERROR, "Yapılandırma hatası: TELEGRAM_TOKEN ayarlanmamış; bot başlatılmadı (çıkış kodu 2). .env dosyasına TELEGRAM_TOKEN ekleyip servisi yeniden başlatın.")
             return False
         lock = BotLock(Path(self.ayar["BOT_KLASOR"]) / "locks" / f"telegram-{_safe_piece(self.bot_id, 64)}.lock")
         if not lock.acquire():
-            self._log(logging.ERROR, "Bu bot için başka bir süreç zaten çalışıyor.")
+            self._log(logging.ERROR, "Bu bot için başka bir süreç zaten çalışıyor; ikinci kopya başlatılmadı (çıkış kodu 2). Çift kurulum/servis olup olmadığını kontrol edin.")
             return False
         try:
             # Webhook varsa asla sessizce deleteWebhook çağrısı yapmayız. getMe yalnızca
             # nabız/kimlik görünümü içindir; webhook sahipliği olduğu gibi korunur.
-            try:
-                me = self.api.call("getMe", {}, timeout=20)
-                self._heartbeat(username=str((me or {}).get("username") or ""))
-                webhook = self.api.call("getWebhookInfo", {}, timeout=20) or {}
-                if isinstance(webhook, dict) and webhook.get("url"):
-                    message = "Bot webhook ile yapılandırılmış; webhook silinmedi ve long polling başlatılmadı."
-                    self._heartbeat(message)
-                    self._log(logging.ERROR, message)
-                    return False
-            except TelegramHatasi as exc:
-                self._heartbeat(str(exc))
-                self._log(logging.ERROR, f"Telegram bağlantı hatası: {exc}")
-                return False
+            # Geçici ağ hatasında süreç hemen çıkmaz (systemd hızlı yeniden başlatma
+            # döngüsü yerine bekleyip yeniden dener); kalıcı hatada (geçersiz token) çıkar.
+            attempt = 0
+            while True:
+                try:
+                    me = self.api.call("getMe", {}, timeout=20)
+                    self._heartbeat(username=str((me or {}).get("username") or ""))
+                    webhook = self.api.call("getWebhookInfo", {}, timeout=20) or {}
+                    if isinstance(webhook, dict) and webhook.get("url"):
+                        message = "Yapılandırma hatası: bot webhook ile yapılandırılmış; webhook silinmedi ve long polling başlatılmadı (çıkış kodu 2). Telegram'da webhook'u kaldırın ya da bu servisi durdurun."
+                        self._heartbeat(message)
+                        self._log(logging.ERROR, message)
+                        return False
+                    break
+                except TelegramHatasi as exc:
+                    self._heartbeat(str(exc))
+                    if exc.kalici or once or self._stopped:
+                        self._log(logging.ERROR, f"Telegram bağlantı hatası; bot başlatılmadı (çıkış kodu 2). TELEGRAM_TOKEN değerini ve ağ erişimini kontrol edin: {exc}")
+                        return False
+                    attempt += 1
+                    wait = min(300, 15 * attempt)
+                    self._log(logging.WARNING, f"Telegram'a ulaşılamadı (deneme {attempt}); {wait} sn sonra yeniden denenecek: {exc}")
+                    time.sleep(wait)
+                    if self._stopped:
+                        return True
             while not self._stopped:
                 try:
                     # Site yönetimi duraklattığında ne polling ne stored-event
@@ -1845,6 +2450,7 @@ class KanitBot:
                     # Eski kalıcı işler, ağdaki uzun getUpdates çağrısından önce
                     # işlenir: Telegram erişilemezse bile restart sonrası aç kalmaz.
                     self._recover_pending_media()
+                    self._gunluk_temizlik()
                     self.process_conversion_jobs()
                     self.process_pending()
                     self.process_outbox()
