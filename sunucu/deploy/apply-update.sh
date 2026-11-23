@@ -312,12 +312,22 @@ restore_units() {
     "$SYSTEMCTL" daemon-reload >/dev/null 2>&1 || true
 }
 
+# pip root olarak çalışır; kurulan dosyalar servis hesabınca okunabilmelidir. Önce dener, gerekirse izinleri düzeltir.
+venv_okunabilir_yap() {
+    local probe='import PIL.Image, flask, waitress, openpyxl, requests, dotenv'
+    if runuser -u "$SERVICE_USER" -- "$VENV_PY" -c "$probe" >/dev/null 2>&1; then return 0; fi
+    chmod -R u+rwX,go+rX "$DEST/.venv/lib" "$DEST/.venv/bin" 2>/dev/null || true
+    runuser -u "$SERVICE_USER" -- "$VENV_PY" -c "$probe" >/dev/null 2>&1
+}
+
 restore_requirements() {
     if [[ -f "$BACKUP_DIR/requirements.before" ]]; then
         echo 'Eski bağımlılık sürümleri geri kuruluyor (pip).' >&2
-        if ! "${PIP_CMD[@]}" install --require-virtualenv --no-input --disable-pip-version-check -r "$BACKUP_DIR/requirements.before" >>"$BACKUP_DIR/pip-rollback.log" 2>&1; then
+        # Betik umask 077 ile çalışır; pip'in yazdığı dosyalar kanit hesabınca okunabilmeli (umask 022).
+        if ! ( umask 022 && "${PIP_CMD[@]}" install --require-virtualenv --no-input --disable-pip-version-check -r "$BACKUP_DIR/requirements.before" ) >>"$BACKUP_DIR/pip-rollback.log" 2>&1; then
             echo "UYARI: Eski bağımlılık sürümleri geri kurulamadı; günlük: $BACKUP_DIR/pip-rollback.log (elle: $VENV_PY -m pip install -r $BACKUP_DIR/requirements.before)" >&2
         fi
+        venv_okunabilir_yap || echo "UYARI: venv dosyaları $SERVICE_USER tarafından okunamıyor; elle: chmod -R u+rwX,go+rX $DEST/.venv" >&2
         install -m 644 -o root -g root "$BACKUP_DIR/requirements.before" "$DEST/requirements.txt" || true
     fi
 }
@@ -446,11 +456,15 @@ fi
 # Başarısızsa eski sürümler geri kurulur ve eski app dokunulmamış kalır.
 if (( REQ_UPGRADE )); then
     REQ_INSTALLED=1
-    if ! "${PIP_CMD[@]}" install --require-virtualenv --no-input --disable-pip-version-check -r "$SOURCE_ROOT/requirements.txt" >"$BACKUP_DIR/pip-install.log" 2>&1; then
+    # umask 077 altında pip'in yazdığı dosyalar yalnız root okuyabilirdi (servis açılamazdı); kurulum umask 022 ile.
+    if ! ( umask 022 && "${PIP_CMD[@]}" install --require-virtualenv --no-input --disable-pip-version-check -r "$SOURCE_ROOT/requirements.txt" ) >"$BACKUP_DIR/pip-install.log" 2>&1; then
         rollback_and_restore 37 "pip ile bağımlılık sürüm yükseltmesi başarısız (günlük: $BACKUP_DIR/pip-install.log); uygulama kodu değiştirilmedi."
     fi
     if ! "${PIP_CMD[@]}" check >>"$BACKUP_DIR/pip-install.log" 2>&1; then
         rollback_and_restore 37 "Yükseltme sonrası pip check başarısız (günlük: $BACKUP_DIR/pip-install.log)."
+    fi
+    if ! venv_okunabilir_yap; then
+        rollback_and_restore 38 "Yükseltilen paketler $SERVICE_USER hesabınca içe aktarılamadı (izin/kurulum sorunu); eski sürümler geri kuruldu."
     fi
     chmod 600 "$BACKUP_DIR/pip-install.log" || true
 fi
