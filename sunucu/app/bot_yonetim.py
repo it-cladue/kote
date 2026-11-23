@@ -273,17 +273,29 @@ def _redact(text: str) -> str:
     return text
 
 
-def son_log(ayar, n=200, sadece_hata=False):
-    yol = Path(ayar.get("LOG_DOSYA") or Path(ayar["BOT_KLASOR"]) / "bot_log.txt")
-    if not yol.is_file():
+def _log_kuyrugu(yol: Path, bayt: int = 400_000) -> list:
+    try:
+        with yol.open("rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - bayt))
+            return f.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
         return []
-    with yol.open("rb") as f:
-        f.seek(0, 2)
-        f.seek(max(0, f.tell() - 400_000))
-        lines = f.read().decode("utf-8", errors="replace").splitlines()
+
+
+def son_log(ayar, n=200, sadece_hata=False):
+    """Son log satırları; bot döndürme sonrası dosya kısaysa bot_log.txt.1 kuyruğu da okunur."""
+    yol = Path(ayar.get("LOG_DOSYA") or Path(ayar["BOT_KLASOR"]) / "bot_log.txt")
+    n = max(1, min(int(n), 500))
+    lines = _log_kuyrugu(yol) if yol.is_file() else []
+    onceki = Path(f"{yol}.1")
+    if len(lines) < n and onceki.is_file():
+        lines = _log_kuyrugu(onceki) + lines
+    if not lines:
+        return []
     if sadece_hata:
         lines = [s for s in lines if any(x in s.lower() for x in (" hata", "error", "!"))]
-    return [_redact(s) for s in lines[-max(1, min(int(n), 500)):]]
+    return [_redact(s) for s in lines[-n:]]
 
 
 def _katalog_proje_kodlari(conn, ayar):
@@ -357,7 +369,10 @@ def yerel_bot_sureci():
 
 def admin_sifresi_dogru(ayar, sifre):
     expected = os.environ.get("ADMIN_PASSWORD")
-    return bool(expected and sifre) and hmac.compare_digest(str(expected), str(sifre))
+    if not expected or not sifre:
+        return False
+    # bytes karşılaştırması: hmac.compare_digest ASCII dışı str değerlerde TypeError verir.
+    return hmac.compare_digest(str(expected).encode("utf-8"), str(sifre).encode("utf-8"))
 
 
 def istatistik(conn):

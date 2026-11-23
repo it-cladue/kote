@@ -58,6 +58,12 @@ CREATE INDEX IF NOT EXISTS ix_donusum_bekleyen
 CREATE INDEX IF NOT EXISTS ix_donusum_kayit ON donusum_isleri(record_id,durum);
 """
 
+# Eski/yarım satırlarda onarım gereken koşullar (ensure_schema UPDATE'inin WHERE'i).
+_REPAIR_WHERE = (
+    "source_path IS NULL OR source_path='' OR next_try IS NULL OR phase IS NULL OR record_applied IS NULL "
+    "OR uygulama_durumu IS NULL OR uygulama_durumu='' OR durum IS NULL OR olusturma IS NULL OR guncelleme IS NULL"
+)
+
 
 def _now() -> str:
     return db.simdi()
@@ -95,15 +101,20 @@ def ensure_schema(conn) -> None:
             conn.execute(f"ALTER TABLE donusum_isleri ADD COLUMN {name} {kind}")
     # NULL yeni-kolon değerleri eski yarım işleri görünmez bırakmasın. Bu
     # güncellemeler bulunduğumuz transaction'a katılır; burada commit edilmez.
-    now = _now()
-    conn.execute(
-        "UPDATE donusum_isleri SET source_path=CASE WHEN source_path IS NULL OR source_path='' THEN local_path ELSE source_path END, "
-        "next_try=COALESCE(next_try,?), phase=COALESCE(phase,'upload'), record_applied=COALESCE(record_applied,0), "
-        "uygulama_durumu=COALESCE(NULLIF(uygulama_durumu,''),'bekliyor'), "
-        "durum=COALESCE(durum,'bekliyor'), olusturma=COALESCE(olusturma,?), "
-        "guncelleme=COALESCE(guncelleme,?)",
-        (now, now, now),
-    )
+    # ensure_schema her bağlantı açılışında çağrıldığı için UPDATE yalnız
+    # gerçekten onarılacak satır varken ve yalnız o satırlar için çalışır;
+    # aksi hâlde salt okuma kalır ve yazma kilidi alınmaz.
+    needs_repair = conn.execute("SELECT 1 FROM donusum_isleri WHERE " + _REPAIR_WHERE + " LIMIT 1").fetchone()
+    if needs_repair:
+        now = _now()
+        conn.execute(
+            "UPDATE donusum_isleri SET source_path=CASE WHEN source_path IS NULL OR source_path='' THEN local_path ELSE source_path END, "
+            "next_try=COALESCE(next_try,?), phase=COALESCE(phase,'upload'), record_applied=COALESCE(record_applied,0), "
+            "uygulama_durumu=COALESCE(NULLIF(uygulama_durumu,''),'bekliyor'), "
+            "durum=COALESCE(durum,'bekliyor'), olusturma=COALESCE(olusturma,?), "
+            "guncelleme=COALESCE(guncelleme,?) WHERE " + _REPAIR_WHERE,
+            (now, now, now),
+        )
     for statement in (piece.strip() for piece in _INDEX_SCHEMA.split(";") if piece.strip()):
         conn.execute(statement)
 
