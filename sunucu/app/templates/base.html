@@ -71,12 +71,12 @@
 </div>
 <div id="degisiklik-serit" class="degisiklik-serit gizli" role="status">Yeni kayıt veya değişiklik var. <button type="button" class="serit-dugme" id="degisiklik-yenile">Sonuçları yenile</button></div>
 {% endif %}
-<script>
+<script nonce="{{ csp_nonce }}">
 window.PANEL_KULLANICI = {{ (k.kullanici_adi if k else "")|tojson }};
 window.PROJE_RENKLERI = {{ proje_renkleri|default({})|tojson }};
 </script>
 <script src="{{ url_for('static', filename='panel.js',v='2.2.3') }}"></script>
-{% if k %}<script>Panel.menu();Panel.bildirimler();</script>{% endif %}
+{% if k %}<script nonce="{{ csp_nonce }}">Panel.menu();Panel.bildirimler();</script>{% endif %}
 {% block script %}{% endblock %}
 </body>
 </html>

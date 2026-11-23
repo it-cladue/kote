@@ -181,6 +181,6 @@
 {% endif %}
 {% endblock %}
 
-{% block script %}<script>
+{% block script %}<script nonce="{{ csp_nonce }}">
 (() => { const mode=document.getElementById('text-mode'), header=document.getElementById('header-row'), delimiter=document.getElementById('delimiter');if(!mode)return;function sync(){const ids=mode.value==='ids';if(header){header.disabled=ids;if(ids)header.value='0';}if(delimiter)delimiter.disabled=ids;}mode.addEventListener('change',sync);sync();})();
 </script>{% endblock %}

@@ -12,7 +12,7 @@ def recipients(conn,project,exclude=''):
 
 
 def add(conn,kid,author,text,recipient='',parent_id=None):
-    text=(text or '').strip();recipient=(recipient or '').strip()
+    text=db.metin_temizle(text).strip();recipient=(recipient or '').strip()  # NUL/kontrol karakteri yorum metnine girmez
     if not text or len(text)>5000:raise ValueError('Yorum 1–5000 karakter olmalı.')
     record=conn.execute('SELECT * FROM kayitlar WHERE id=?',(kid,)).fetchone()
     sender=conn.execute('SELECT * FROM panel_kullanicilari WHERE kullanici_adi=? AND aktif=1',(author,)).fetchone()
