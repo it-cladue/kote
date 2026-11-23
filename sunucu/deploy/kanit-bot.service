@@ -2,6 +2,10 @@
 Description=Kanit Paneli Telegram Bot
 After=network-online.target
 Wants=network-online.target
+# Kalıcı yapılandırma hatasında (exit 2) 10 sn'de bir sonsuz döngü yerine 5 dakikada en çok 10 başlatma;
+# sınır dolunca birim "failed" olur: systemctl reset-failed kanit-bot && systemctl start kanit-bot
+StartLimitIntervalSec=300
+StartLimitBurst=10
 
 [Service]
 Type=simple
@@ -9,14 +13,41 @@ User=kanit
 Group=kanit
 WorkingDirectory=/opt/kanit-paneli
 EnvironmentFile=/opt/kanit-paneli/.env
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 ExecStart=/opt/kanit-paneli/.venv/bin/python -m app.bot
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=40
+SyslogIdentifier=kanit-bot
+UMask=0077
+LimitNOFILE=4096
+
+# Sertleştirme (kanit-web.service ile aynı küme; açıklama orada).
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
+ProtectHome=true
 ReadWritePaths=/opt/kanit-paneli/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=multi-user.target

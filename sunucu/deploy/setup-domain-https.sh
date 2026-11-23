@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Kanıt Paneli — alan adı ile HTTPS (Plesk'in nginx'i üzerinden, Plesk ekranı kullanılmadan).
+# Kanıt Paneli — alan adı ile HTTPS, Let's Encrypt/Certbot yolu (Plesk'in nginx'i üzerinden, Plesk ekranı kullanılmadan).
+# NOT: Ana yol Cloudflare turuncu bulut + Origin CA'dır (deploy/setup-cloudflare-https.sh). Bu betik yalnız
+# Cloudflare proxy'si KULLANILMAYACAKSA (gri bulut / başka DNS) alternatiftir; ikisi aynı dosyayı yazar, biri kurulu
+# iken diğeri çalışmaz.
 #
 #   bash deploy/setup-domain-https.sh panel.alanadi.com eposta@ornek.com [--dry-run]
 #   bash deploy/setup-domain-https.sh --kaldir
@@ -30,10 +33,13 @@ NGINX_SERVICE="${KANIT_NGINX_SERVICE:-nginx.service}"
 UNIT_DIR="${KANIT_UNIT_DIR:-/etc/systemd/system}"
 PANEL_URL="${KANIT_PANEL_URL:-http://127.0.0.1:18080}"
 CURL_EXTRA="${KANIT_CURL_EXTRA:-}"
+HTTP_PORT="${KANIT_HTTP_PORT:-80}"
+HTTPS_PORT="${KANIT_HTTPS_PORT:-443}"
 CERT_NAME='kanit-domain'
 CERT_DIR="$SSL_BASE/config/live/$CERT_NAME"
 IP_PROXY_SERVICE='kanit-ip-proxy.service'
 TIMER_NAME='kanit-sertifika'
+TLS_CIPHERS='ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305'
 
 if [[ -z "${KANIT_TEST:-}" ]]; then
     PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -49,7 +55,7 @@ for arg in "$@"; do
         --dry-run) DRY_RUN=1 ;;
         --kaldir) KALDIR=1 ;;
         -h|--help)
-            sed -n '2,18p' "$0"; exit 0 ;;
+            sed -n '2,21p' "$0"; exit 0 ;;
         --*) echo "HATA: Bilinmeyen seçenek: $arg (--help)" >&2; exit 2 ;;
         *)
             if [[ -z "$DOMAIN" ]]; then DOMAIN="$arg"
@@ -67,6 +73,15 @@ for bin in nginx curl openssl getent install mktemp cat rm date; do
 done
 NGINX_BIN="$(command -v nginx)"
 
+# nginx >= 1.25.1 ise "http2 on;" yönergesi, daha eskisinde "listen ... ssl http2;" kullanılır.
+nginx_http2_yonergesi_var() {
+    local surum maj min pat
+    surum="$("$NGINX_BIN" -v 2>&1 | sed -nE 's#.*nginx/([0-9]+\.[0-9]+\.[0-9]+).*#\1#p')"
+    [[ -n "$surum" ]] || return 1
+    IFS=. read -r maj min pat <<<"$surum"
+    (( maj > 1 || (maj == 1 && (min > 25 || (min == 25 && pat >= 1))) ))
+}
+
 # ---------------------------------------------------------------- kaldırma
 if (( KALDIR )); then
     [[ -f "$CONF" ]] || fatal "Kaldırılacak dosya yok: $CONF"
@@ -82,7 +97,7 @@ if (( KALDIR )); then
 fi
 
 # ---------------------------------------------------------------- girdi
-[[ -n "$DOMAIN" && -n "$EMAIL" ]] || { sed -n '2,5p' "$0"; fatal 'Alan adı ve e-posta gerekli.'; }
+[[ -n "$DOMAIN" && -n "$EMAIL" ]] || { sed -n '2,8p' "$0"; fatal 'Alan adı ve e-posta gerekli.'; }
 DOMAIN="$(LC_ALL=C tr '[:upper:]' '[:lower:]' <<<"$DOMAIN")"
 EMAIL="$(LC_ALL=C tr '[:upper:]' '[:lower:]' <<<"$EMAIL")"
 [[ "$DOMAIN" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$ ]] || fatal "Alan adı geçersiz görünüyor: $DOMAIN (örnek: panel.alanadi.com)"
@@ -111,7 +126,7 @@ fi
 # Plesk'in IP için varsayılan sunucusu olmalı; yoksa yalnız uyarı (panel bloğu Plesk bloklarından sonra yüklenir).
 IP_RE="${IP//./\\.}"
 for p in 80 443; do
-    if ! "$NGINX_BIN" -T 2>/dev/null | grep -Eq "(^|[[:space:];{])listen[[:space:]]+$IP_RE:$p[^;]*default_server"; then
+    if ! "$NGINX_BIN" -T 2>/dev/null | grep -Eq "(^|[[:space:];{])listen[[:space:]]+${IP_RE}:${p}[^;]*default_server"; then
         bilgi "UYARI: Plesk nginx'te $IP:$p için default_server tanımı görülmedi; IP ile doğrudan açılan istekler Plesk'in ilk bloğuna düşmeye devam eder."
     fi
 done
@@ -180,7 +195,7 @@ http_blogu() {
     cat <<NGINX
 # Kanıt Paneli — $DOMAIN (bu dosya deploy/setup-domain-https.sh tarafından yazıldı; Plesk üretmez, Plesk ezmez)
 server {
-    listen $IP:80;
+    listen $IP:$HTTP_PORT;
     server_name $DOMAIN;
     # Let's Encrypt doğrulaması: IP sertifikasıyla aynı kök dizin.
     location ^~ /.well-known/acme-challenge/ {
@@ -194,23 +209,8 @@ server {
 NGINX
 }
 
-https_blogu() {
+proxy_basliklari() {
     cat <<NGINX
-server {
-    listen $IP:443 ssl;
-    server_name $DOMAIN;
-    ssl_certificate $CERT_DIR/fullchain.pem;
-    ssl_certificate_key $CERT_DIR/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:KANIT_DOMAIN_TLS:10m;
-    ssl_session_timeout 1h;
-    ssl_session_tickets off;
-    server_tokens off;
-    client_max_body_size 12m;
-    client_body_timeout 60s;
-    keepalive_timeout 30s;
-    # Her istek panelin kendi giriş ve yetki kontrolünden geçer.
-    location / {
         proxy_pass $PANEL_URL;
         proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
@@ -222,6 +222,45 @@ server {
         proxy_set_header Connection "";
         proxy_read_timeout 120s;
         proxy_send_timeout 120s;
+NGINX
+}
+
+https_blogu() {
+    local listen_blok
+    if nginx_http2_yonergesi_var; then
+        listen_blok="    listen $IP:$HTTPS_PORT ssl;
+    http2 on;"
+    else
+        listen_blok="    listen $IP:$HTTPS_PORT ssl http2;"
+    fi
+    cat <<NGINX
+# Bu dosya Plesk nginx.conf'un http{} bağlamına dahil edilir; zone tanımı burada geçerlidir.
+limit_req_zone \$binary_remote_addr zone=kanit_giris:1m rate=10r/m;
+server {
+$listen_blok
+    server_name $DOMAIN;
+    ssl_certificate $CERT_DIR/fullchain.pem;
+    ssl_certificate_key $CERT_DIR/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_ciphers $TLS_CIPHERS;
+    ssl_ecdh_curve X25519:prime256v1:secp384r1;
+    ssl_session_cache shared:KANIT_DOMAIN_TLS:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+    server_tokens off;
+    client_max_body_size 64m;
+    client_body_timeout 60s;
+    keepalive_timeout 30s;
+    # Giriş: dakikada 10 deneme, 10 ani istek toleransı; fazlası 429 (uygulamanın kendi kilidine ek).
+    location = /giris {
+        limit_req zone=kanit_giris burst=10 nodelay;
+        limit_req_status 429;
+$(proxy_basliklari)
+    }
+    # Her istek panelin kendi giriş ve yetki kontrolünden geçer.
+    location / {
+$(proxy_basliklari)
     }
 }
 NGINX
@@ -235,8 +274,8 @@ chmod 644 "$CONF"
 nginx_test_ve_yukle
 # Yeniden yükleme birkaç saniye sürebilir; yönlendirme görülene kadar kısa aralıklarla denenir.
 YONLENDIRME=''
-for deneme in 1 2 3 4 5 6 7 8 9 10; do
-    YONLENDIRME="$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 --resolve "$DOMAIN:80:$IP" "http://$DOMAIN/" || true)"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    YONLENDIRME="$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 --resolve "$DOMAIN:$HTTP_PORT:$IP" "http://$DOMAIN:$HTTP_PORT/" || true)"
     [[ "$YONLENDIRME" == '301' ]] && break
     sleep 1
 done
@@ -269,7 +308,7 @@ ADIM='3/4 HTTPS bloğu ve sağlık kontrolü'
 nginx_test_ve_yukle
 # shellcheck disable=SC2086
 if ! SONUC="$(curl -fsS --noproxy '*' $CURL_EXTRA --retry 10 --retry-connrefused --retry-delay 1 --connect-timeout 5 --max-time 10 \
-    --resolve "$DOMAIN:443:$IP" "https://$DOMAIN/saglik" 2>&1)"; then
+    --resolve "$DOMAIN:$HTTPS_PORT:$IP" "https://$DOMAIN:$HTTPS_PORT/saglik" 2>&1)"; then
     fatal "https://$DOMAIN/saglik erişilemedi: $SONUC"
 fi
 [[ "$SONUC" == 'OK' ]] || fatal "https://$DOMAIN/saglik beklenen OK yanıtını vermedi: $SONUC"

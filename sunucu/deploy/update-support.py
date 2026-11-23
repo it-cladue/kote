@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Kanit Paneli 2.1 güncelleme yardımcıları.
+"""Kanit Paneli güncelleme yardımcıları.
 
 Bu dosya yalnızca yerel doğrulama ve SQLite backup API işlemleri yapar. Ortam
 anahtarlarının değerlerini hiçbir zaman stdout/stderr'e yazmaz. ``sqlite-backup``
 komutu kaynak veritabanını SQLite URI ``mode=ro`` ile açar; hedefi ise çağıranın
-sağladığı geçici konumda oluşturur.
+sağladığı geçici konumda oluşturur. ``requirements-diff`` iki requirements.txt
+dosyasını karşılaştırır ve yalnız sabitlenmiş sürüm yükseltmelerini kabul eder
+(yeni paket adı, kaldırılan paket, sürüm düşürme veya serbest sürüm reddedilir).
 """
 from __future__ import annotations
 
@@ -107,7 +109,11 @@ def command_env_check(args: argparse.Namespace) -> None:
     if args.group is not None and info.st_gid != args.group:
         raise CheckError(".env beklenen grup sahibine ait değil.")
     values = parse_dotenv(path)
-    for key, expected in _EXPECTED_ENV.items():
+    expected_env = dict(_EXPECTED_ENV)
+    if getattr(args, "panel_veri", None):
+        # Yalnız test/prova ortamı için: beklenen veri dizini farklı bir kökte olabilir.
+        expected_env["PANEL_VERI"] = args.panel_veri
+    for key, expected in expected_env.items():
         if values.get(key) != expected:
             raise CheckError(f".env içindeki {key} güncelleme uyumluluğu için beklenen yapılandırmada değil.")
     # Değer/özet/hash yazılmaz; yalnız başarı işareti yazılır.
@@ -244,6 +250,86 @@ def command_schema_check(args: argparse.Namespace) -> None:
     print("SQLITE_SEMA_UYUMLU")
 
 
+_REQ_LINE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*==\s*([0-9][0-9A-Za-z.]*)$")
+
+
+def _normalize_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def parse_requirements(path: Path) -> dict[str, tuple[str, str]]:
+    """``paket==sürüm`` satırlarını {normalize_ad: (görünen_ad, sürüm)} olarak döndür.
+
+    Boş satır ve ``#`` yorumları atlanır. Başka her sözdizimi (aralık, URL, ek
+    seçenek, -r dahil etme) reddedilir; güncelleme betiği bilinçli olarak yalnız
+    tam sabitlenmiş beyanlarla çalışır.
+    """
+    _regular_file(path, "requirements.txt")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise CheckError("requirements.txt UTF-8 metin dosyası olmalı.") from exc
+    result: dict[str, tuple[str, str]] = {}
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        stripped = line.split("#", 1)[0].strip()
+        if not stripped:
+            continue
+        match = _REQ_LINE.match(stripped)
+        if not match:
+            raise CheckError(f"requirements.txt satır {line_no}: yalnız 'paket==sürüm' biçimi kabul edilir.")
+        name, version = match.group(1), match.group(2)
+        key = _normalize_name(name)
+        if key in result:
+            raise CheckError(f"requirements.txt satır {line_no}: {name} birden çok kez sabitlenmiş.")
+        result[key] = (name, version)
+    if not result:
+        raise CheckError("requirements.txt hiç paket sabitlemiyor.")
+    return result
+
+
+def _version_key(version: str, name: str) -> tuple[int, ...]:
+    parts = version.split(".")
+    try:
+        return tuple(int(part) for part in parts)
+    except ValueError as exc:
+        raise CheckError(
+            f"{name} için sürüm '{version}' sayısal (örn. 13.0.0) değil; otomatik yükseltme kabul edilmez."
+        ) from exc
+
+
+def compare_requirements(old: dict[str, tuple[str, str]], new: dict[str, tuple[str, str]]) -> list[tuple[str, str, str]]:
+    """Yalnız sürüm yükseltmelerini (ad, eski, yeni) listesi olarak döndür.
+
+    Yeni paket adı, kaldırılan paket veya sürüm düşürme CheckError verir.
+    """
+    added = sorted(new[key][0] for key in new.keys() - old.keys())
+    if added:
+        raise CheckError("requirements.txt yeni paket ekliyor: " + ", ".join(added) + ". Bu betik yeni paket kurmaz.")
+    removed = sorted(old[key][0] for key in old.keys() - new.keys())
+    if removed:
+        raise CheckError("requirements.txt paket kaldırıyor: " + ", ".join(removed) + ". Beyan değişikliği elle incelenmeli.")
+    changes: list[tuple[str, str, str]] = []
+    for key in sorted(new):
+        name, new_version = new[key]
+        old_version = old[key][1]
+        if new_version == old_version:
+            continue
+        if _version_key(new_version, name) <= _version_key(old_version, name):
+            raise CheckError(f"{name} için sürüm düşürme ({old_version} -> {new_version}) kabul edilmez.")
+        changes.append((name, old_version, new_version))
+    return changes
+
+
+def command_requirements_diff(args: argparse.Namespace) -> None:
+    changes = compare_requirements(parse_requirements(Path(args.old)), parse_requirements(Path(args.new)))
+    if not changes:
+        print("GEREKSINIMLER_AYNI")
+        return
+    for name, old_version, new_version in changes:
+        print(f"SURUM_YUKSELTME {name} {old_version}->{new_version}")
+    print("GEREKSINIMLER_YUKSELTME")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Kanit güncelleme yardımcıları")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -252,6 +338,7 @@ def build_parser() -> argparse.ArgumentParser:
     env_check.add_argument("--env", required=True)
     env_check.add_argument("--owner", type=int)
     env_check.add_argument("--group", type=int)
+    env_check.add_argument("--panel-veri", help="Beklenen PANEL_VERI (varsayılan /opt/kanit-paneli/data; yalnız prova ortamı için)")
     env_check.set_defaults(func=command_env_check)
 
     source_check = sub.add_parser("source-check", help="Kaynak app ve Python derlemesini denetle")
@@ -267,6 +354,11 @@ def build_parser() -> argparse.ArgumentParser:
     schema.add_argument("--database", required=True)
     schema.add_argument("--table", action="append", default=[])
     schema.set_defaults(func=command_schema_check)
+
+    req_diff = sub.add_parser("requirements-diff", help="İki requirements.txt arasındaki sürüm yükseltmelerini listele; başka değişikliği reddet")
+    req_diff.add_argument("--old", required=True)
+    req_diff.add_argument("--new", required=True)
+    req_diff.set_defaults(func=command_requirements_diff)
     return parser
 
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Kanit Paneli gunluk yedek (SQLite + .env; haftalik gorsel aynasi)
+After=kanit-web.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kanit-yedek.sh
+Nice=10
+IOSchedulingClass=idle
+PrivateTmp=true
+SyslogIdentifier=kanit-yedek
