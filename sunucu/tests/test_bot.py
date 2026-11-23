@@ -267,7 +267,8 @@ def test_parola_yok_bakim_callback_ve_yetkisiz_gorsel(setup, monkeypatch):
         db.ayar_yaz(conn, "bakim_modu", "0")
     finally:
         conn.close()
-    # Onaysız başka bir kullanıcının görseli 3 deneme politikasından bağımsız doğrudan engeldir.
+    # Eski politika (.env BOT_YETKISIZ_GORSEL_POLITIKA=engelle): onaysız kullanıcının ilk görseli doğrudan engeldir.
+    monkeypatch.setenv("BOT_YETKISIZ_GORSEL_POLITIKA", "engelle")
     feed(bot, message(13, 13, photo=True, user=2))
     conn = db.baglan(ayar["DB"])
     try:

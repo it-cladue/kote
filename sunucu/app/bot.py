@@ -116,9 +116,10 @@ def _log_max_bytes() -> int:
 
 
 def _yetkisiz_gorsel_politikasi() -> str:
-    """'engelle' (varsayılan, eski davranış) veya 'parola' (parola istemine yönlendir)."""
+    """'parola' (varsayılan): onaysız kişinin görseli indirilmez, parola istenir, MAX_DENEME'de engel.
+    'engelle': eski davranış, ilk görselde kalıcı engel (BOT_YETKISIZ_GORSEL_POLITIKA=engelle)."""
     value = str(os.environ.get("BOT_YETKISIZ_GORSEL_POLITIKA", "") or "").strip().lower()
-    return "parola" if value == "parola" else "engelle"
+    return "engelle" if value == "engelle" else "parola"
 
 
 def _esit(expected: Any, given: Any) -> bool:
@@ -2178,8 +2179,8 @@ class KanitBot:
             if image:
                 # Aktarımdan gelen eski genel onay sahibi yeni botta önce parola
                 # girer. Gerçekten onaysız kişide politika .env ile seçilir:
-                # 'engelle' (varsayılan): ilk görselde kalıcı engel;
-                # 'parola': görsel indirilmez, deneme sayılır, MAX_DENEME'de engel.
+                # 'parola' (varsayılan): görsel indirilmez, deneme sayılır, MAX_DENEME'de engel;
+                # 'engelle': eski davranış, ilk görselde kalıcı engel.
                 if profile.get("onayli"):
                     if self._uyari_izinli(uid, "parola", _parola_istem_saniye()):
                         self._say(chat_id, "Bu bot için önce parolayı yazın. Görseliniz indirilmedi; paroladan sonra yeniden gönderin.")

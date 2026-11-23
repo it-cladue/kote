@@ -592,10 +592,14 @@ def test_fotografla_gelen_onaysiz_kullanici_parola_politikasinda_engellenmez(set
         feed(bot, message(20 + i, 20 + i, photo=True, user=8))
     user = q(ayar, "SELECT deneme,engelli FROM tg_kullanicilar WHERE id='8'")[0]
     assert (user["deneme"], user["engelli"]) == (3, 1)
-    # Varsayılan politika eski davranıştır: ilk görselde engel.
+    # Varsayılan politika 'parola'dır: ilk görselde engel YOK, deneme sayılır.
     monkeypatch.delenv("BOT_YETKISIZ_GORSEL_POLITIKA")
     feed(bot, message(30, 30, photo=True, user=9))
-    assert q(ayar, "SELECT engelli FROM tg_kullanicilar WHERE id='9'")[0]["engelli"] == 1
+    assert q(ayar, "SELECT deneme,engelli FROM tg_kullanicilar WHERE id='9'")[0] == {"deneme": 1, "engelli": 0}
+    # Eski davranış yalnız açıkça istenirse: BOT_YETKISIZ_GORSEL_POLITIKA=engelle → ilk görselde engel.
+    monkeypatch.setenv("BOT_YETKISIZ_GORSEL_POLITIKA", "engelle")
+    feed(bot, message(31, 31, photo=True, user=12))
+    assert q(ayar, "SELECT engelli FROM tg_kullanicilar WHERE id='12'")[0]["engelli"] == 1
 
 
 # ---- 12. /engel hedef doğrulaması ve tek yol ---------------------------------------------------
