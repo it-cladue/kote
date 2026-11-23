@@ -8,6 +8,17 @@ load_dotenv(ROOT / '.env', override=False)
 DATA = Path(os.getenv('PANEL_VERI', str(ROOT / 'data'))).resolve()
 DATA.mkdir(parents=True, exist_ok=True)
 
+def _tam_sayi(ad, varsayilan, en_az=0):
+    """Ortamdan tam sayı okur; boş ya da geçersiz değerde varsayılanı kullanır (sunucu çökmez)."""
+    ham = str(os.getenv(ad, '') or '').strip()
+    if not ham:
+        return varsayilan
+    try:
+        deger = int(float(ham))
+    except (TypeError, ValueError, OverflowError):
+        return varsayilan
+    return max(en_az, deger)
+
 def settings():
     media = Path(os.getenv('GORSEL_KLASOR', str(DATA / 'gorseller'))).resolve()
     archive = Path(os.getenv('ARSIV_KLASOR', str(DATA / 'telegram_gorseller'))).resolve()
@@ -22,6 +33,10 @@ def settings():
         'PROJELER': ['PP', 'PA', 'OF', 'HI', 'VI', 'GA', 'BETA'], 'SAYFA_BOYU': 48,
         'PROJE_RENK': {'PP': '#A6A6A6', 'PA': '#4472C4', 'OF': '#FFFF00', 'HI': '#FF0000', 'VI': '#7030A0', 'GA': '#00B050', 'BETA': '#FFA500'},
         'GYAZO_PROXY': os.getenv('GYAZO_PROXY', '1'), 'MAX_GORSEL_BYTES': 10 * 1024 * 1024,
+        # Görsel önbelleği sınırları: tmp/gyazo için MB ve gün, tmp/thumbs için MB. 0 = sınır yok.
+        'GYAZO_ONBELLEK_MB': _tam_sayi('GYAZO_ONBELLEK_MB', 500),
+        'GYAZO_ONBELLEK_GUN': _tam_sayi('GYAZO_ONBELLEK_GUN', 30),
+        'KUCUK_ONBELLEK_MB': _tam_sayi('KUCUK_ONBELLEK_MB', 300),
     }
 
 AYAR = settings()

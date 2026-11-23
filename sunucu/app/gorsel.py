@@ -28,6 +28,16 @@ GYAZO_MAX_BYTES = 20 * 1024 * 1024
 GYAZO_ZAMAN_ASIMI = 15
 GYAZO_OLUMSUZ_SN = 600
 GYAZO_BICIMLER = {"JPEG": ".jpg", "PNG": ".png"}
+# Önbellek sınırları (AYAR'da yoksa bu varsayılanlar) ve temizlik davranışı.
+ONBELLEK_VARSAYILAN = {"GYAZO_ONBELLEK_MB": 500, "GYAZO_ONBELLEK_GUN": 30, "KUCUK_ONBELLEK_MB": 300}
+ONBELLEK_TEMIZLIK_ARALIGI_SN = 600   # gerçek tarama en fazla 10 dakikada bir (ve süreç başında bir kez)
+ONBELLEK_HEDEF_ORAN = 0.9            # sınır aşılınca bu orana inilir
+ONBELLEK_TAZE_SN = 60                # son 60 sn içinde yazılan dosya silinmez (yarış koruması)
+ONBELLEK_DOKUNMA_SN = 3600           # okunan dosyanın mtime'ı (LRU) en fazla saatte bir güncellenir
+GECICI_DOSYA_YAS_SN = 3600           # yarım kalan .part/.tmp dosyaları bir saat sonra silinir
+_ONBELLEK_GORSEL_RX = re.compile(r"^[0-9a-f]{32}\.(jpg|png)$")
+_ONBELLEK_YOK_RX = re.compile(r"^[0-9a-f]{32}\.yok$")
+_ONBELLEK_GECICI_RX = re.compile(r"^(gyazo|thumb)-.*\.(tmp|part)$")
 
 
 def _baslik(adi):
@@ -54,6 +64,118 @@ def _guvenli_altinda(yol, kokler):
         except (OSError, ValueError, RuntimeError):
             continue
     return None
+
+
+def _onbellek_siniri(ayar, anahtar, carpan):
+    """AYAR'daki MB/gün değerini bayta/saniyeye çevirir; geçersizde varsayılan, 0 = sınır yok."""
+    varsayilan = ONBELLEK_VARSAYILAN[anahtar]
+    try:
+        deger = int(float(str((ayar or {}).get(anahtar, varsayilan)).strip()))
+    except (TypeError, ValueError, OverflowError):
+        deger = varsayilan
+    return max(0, deger) * carpan
+
+
+def _dokun(yol, mtime=None):
+    """Okunan önbellek dosyasının mtime'ını LRU için günceller (saatte en fazla bir kez); hata yutar."""
+    try:
+        if mtime is None:
+            mtime = os.path.getmtime(yol)
+        if time.time() - mtime > ONBELLEK_DOKUNMA_SN:
+            os.utime(yol, None)
+    except OSError:
+        pass
+
+
+def _onbellek_dosyalari(dizin):
+    """Dizindeki düzenli dosyalar: ``[(yol, ad, boyut, mtime)]``. Sembolik bağ ve alt dizinler atlanır."""
+    sonuc = []
+    try:
+        with os.scandir(dizin) as it:
+            for e in it:
+                try:
+                    if e.is_symlink() or not e.is_file(follow_symlinks=False):
+                        continue
+                    st = e.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                sonuc.append((e.path, e.name, st.st_size, st.st_mtime))
+    except OSError:
+        return []
+    return sonuc
+
+
+def _onbellek_dizini_guvenli(dizin, onbellek_koku, korunan_kokler):
+    """Temizlenecek dizin gerçekten önbellek kökünün ALTINDA ve kullanıcı görsel köklerinin DIŞINDA mı?
+
+    ``tmp`` kökünün kendisi başka diske sembolik bağla taşınmış olabilir (ikisi
+    birlikte çözülür); ama ``tmp/gyazo`` tek başına başka yere bağlıysa ya da
+    bir görsel kökü (gorseller, telegram_gorseller, ...) içine düşüyorsa temizlik yapılmaz.
+    """
+    try:
+        gercek = os.path.realpath(dizin)
+        kok = os.path.realpath(onbellek_koku)
+        if gercek == kok or os.path.commonpath((gercek, kok)) != kok:
+            return False
+        for k in korunan_kokler or ():
+            kr = os.path.realpath(k)
+            if os.path.commonpath((gercek, kr)) == kr:
+                return False
+    except (OSError, ValueError):
+        return False
+    return os.path.isdir(gercek)
+
+
+def _onbellek_sil(yol, boyut, rapor):
+    """Tek dosyayı siler; yarışta kaybolan dosya (FileNotFoundError) ve izin hataları yutulur."""
+    try:
+        os.unlink(yol)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    rapor["silinen"] += 1
+    rapor["silinen_bayt"] += boyut
+    return True
+
+
+def _onbellek_buda(dizin, sinir_bayt, yas_sn, simdi=None):
+    """Tek bir önbellek dizinini budar; yalnız bu modülün ürettiği dosya adlarına dokunur.
+
+    Sıra: bir saatten eski yarım kalan geçici dosyalar, süresi geçen ``.yok``
+    işaretleri, yaş sınırını aşan görseller; sonra toplam boyut sınırı
+    aşılıyorsa en eski (mtime) dosyadan başlayarak sınırın %90'ına inene kadar.
+    Son 60 saniyede yazılan dosyalar ve tanınmayan adlar asla silinmez.
+    """
+    simdi = time.time() if simdi is None else simdi
+    rapor = {"dosya": 0, "bayt": 0, "silinen": 0, "silinen_bayt": 0, "kalan_dosya": 0, "kalan_bayt": 0}
+    gorseller = []
+    for yol, ad, boyut, mtime in _onbellek_dosyalari(dizin):
+        rapor["dosya"] += 1
+        rapor["bayt"] += boyut
+        yas = simdi - mtime
+        if _ONBELLEK_GECICI_RX.match(ad):
+            if yas > GECICI_DOSYA_YAS_SN:
+                _onbellek_sil(yol, boyut, rapor)
+        elif _ONBELLEK_YOK_RX.match(ad):
+            if yas > GYAZO_OLUMSUZ_SN:
+                _onbellek_sil(yol, boyut, rapor)
+        elif _ONBELLEK_GORSEL_RX.match(ad):
+            if yas_sn > 0 and yas > yas_sn:
+                _onbellek_sil(yol, boyut, rapor)
+            else:
+                gorseller.append((mtime, boyut, yol))
+    toplam = sum(g[1] for g in gorseller)
+    if sinir_bayt > 0 and toplam > sinir_bayt:
+        hedef = int(sinir_bayt * ONBELLEK_HEDEF_ORAN)
+        for mtime, boyut, yol in sorted(gorseller):
+            if toplam <= hedef or simdi - mtime < ONBELLEK_TAZE_SN:
+                break
+            if _onbellek_sil(yol, boyut, rapor):
+                toplam -= boyut
+    rapor["kalan_dosya"] = rapor["dosya"] - rapor["silinen"]
+    rapor["kalan_bayt"] = rapor["bayt"] - rapor["silinen_bayt"]
+    return rapor
 
 
 def _isim_yolu(s):
@@ -150,6 +272,13 @@ class GorselCozucu:
         self._http = None
         self._gyazo_kilit = threading.Lock()
         self._gyazo_semafor = threading.BoundedSemaphore(4)
+        # Önbellek sınırları (bayt / saniye); 0 = sınır yok. Temizlik kilidi tek iş parçacığında çalışır.
+        self.gyazo_sinir_bayt = _onbellek_siniri(ayar, "GYAZO_ONBELLEK_MB", 1024 * 1024)
+        self.gyazo_yas_sn = _onbellek_siniri(ayar, "GYAZO_ONBELLEK_GUN", 86400)
+        self.kucuk_sinir_bayt = _onbellek_siniri(ayar, "KUCUK_ONBELLEK_MB", 1024 * 1024)
+        self._temizlik_kilit = threading.Lock()
+        self._temizlik_zaman = 0.0  # 0: süreç başında ilk kullanımda bir kez çalışır
+        self._son_temizlik = None
         self._indeks = {}
         self._dosya_haritasi = {}
         self._yol_kimlik = {}
@@ -315,9 +444,22 @@ class GorselCozucu:
     def _gyazo_onbellek(self, kimlik):
         for uz in (".jpg", ".png"):
             yol = os.path.join(self.gyazo_klasor, kimlik + uz)
-            if os.path.isfile(yol) and os.path.getsize(yol) > 0:
+            try:
+                st = os.stat(yol)
+            except OSError:
+                continue
+            if st.st_size > 0:
+                _dokun(yol, st.st_mtime)  # LRU: okunan dosya en eski sayılmasın
                 return yol
         return None
+
+    def _gyazo_onbellek_dosyasi(self, yol):
+        """Yol Gyazo önbellek klasörünün altında mı? (içerik kimliğe bağlı, değişmez)"""
+        try:
+            kok = os.path.realpath(self.gyazo_klasor)
+            return os.path.commonpath((os.path.realpath(yol), kok)) == kok
+        except (OSError, ValueError):
+            return False
 
     def _gyazo_olumsuz(self, kimlik):
         isaret = os.path.join(self.gyazo_klasor, kimlik + ".yok")
@@ -382,6 +524,7 @@ class GorselCozucu:
         kimlik = self.gyazo_kimlik(kayit)
         if not kimlik:
             return None
+        self._temizlik_gerekirse()
         yol = self._gyazo_onbellek(kimlik)
         if yol:
             return yol
@@ -422,14 +565,21 @@ class GorselCozucu:
                 self._gyazo_olumsuz_yaz(kimlik)
                 return None
             hedef = os.path.join(self.gyazo_klasor, kimlik + uz)
-            fd, gecici = tempfile.mkstemp(prefix="gyazo-", suffix=".tmp", dir=self.gyazo_klasor)
+            try:
+                os.makedirs(self.gyazo_klasor, exist_ok=True)
+                fd, gecici = tempfile.mkstemp(prefix="gyazo-", suffix=".part", dir=self.gyazo_klasor)
+            except OSError:
+                return None
             try:
                 with os.fdopen(fd, "wb") as f:
                     f.write(veri)
                 os.replace(gecici, hedef)
             except OSError:
-                if os.path.exists(gecici):
+                # Yarım kalan .part dosyası hemen; süreç çökerse periyodik temizlikle silinir.
+                try:
                     os.unlink(gecici)
+                except OSError:
+                    pass
                 return None
             try:
                 os.unlink(os.path.join(self.gyazo_klasor, kimlik + ".yok"))
@@ -438,6 +588,65 @@ class GorselCozucu:
             return hedef
         finally:
             self._gyazo_semafor.release()
+
+    # --------------------------------------------------------------- Önbellek
+    def _onbellek_dizinleri(self):
+        return (("gyazo", self.gyazo_klasor, self.gyazo_sinir_bayt, self.gyazo_yas_sn),
+                ("thumbs", self.thumbs, self.kucuk_sinir_bayt, 0))
+
+    def _temizlik_gerekirse(self):
+        """Ucuz denetim: gerçek tarama en fazla 10 dakikada bir (ve süreç başında bir kez)."""
+        if time.time() - self._temizlik_zaman >= ONBELLEK_TEMIZLIK_ARALIGI_SN:
+            self.onbellek_temizle()
+
+    def onbellek_temizle(self, zorla=False):
+        """Gyazo ve küçük resim önbelleklerini boyut/yaş sınırlarının altına çeker.
+
+        Dönüş: ``{"gyazo": rapor, "thumbs": rapor}`` ya da ``None`` (süre dolmadı
+        veya başka bir iş parçacığı temizliyor; ``zorla=True`` bekler ve çalışır).
+        Hiçbir istisna dışarı sızmaz. Yalnız önbellek kökü altındaki iki klasöre,
+        orada da yalnız bu modülün ürettiği adlara dokunur; sembolik bağla başka
+        yere giden klasör ve kullanıcı görsel kökleri (gorseller, telegram_gorseller)
+        atlanır.
+        """
+        if not self._temizlik_kilit.acquire(blocking=bool(zorla)):
+            return None
+        try:
+            simdi = time.time()
+            if not zorla and simdi - self._temizlik_zaman < ONBELLEK_TEMIZLIK_ARALIGI_SN:
+                return None
+            self._temizlik_zaman = simdi
+            rapor = {}
+            for ad, dizin, sinir, yas in self._onbellek_dizinleri():
+                try:
+                    if not _onbellek_dizini_guvenli(dizin, self.onbellek, self.kokler):
+                        rapor[ad] = {"atlandi": "klasör önbellek kökü dışında ya da görsel köküyle çakışıyor"}
+                        continue
+                    rapor[ad] = _onbellek_buda(dizin, sinir, yas, simdi)
+                except Exception as e:  # temizlik hiçbir isteği düşürmez
+                    rapor[ad] = {"hata": type(e).__name__}
+            self._son_temizlik = {"zaman": simdi, "rapor": rapor}
+            return rapor
+        finally:
+            self._temizlik_kilit.release()
+
+    def onbellek_durumu(self):
+        """Önbellek klasörlerinin dosya sayısı, toplam boyutu ve sınırları (durum sayfası için)."""
+        durum = {}
+        toplam = 0
+        for ad, dizin, sinir, yas in self._onbellek_dizinleri():
+            dosyalar = _onbellek_dosyalari(dizin)
+            bayt = sum(d[2] for d in dosyalar)
+            toplam += bayt
+            durum[ad] = {"dizin": dizin, "dosya": len(dosyalar), "bayt": bayt, "mb": round(bayt / 1048576, 2),
+                         "sinir_mb": sinir // 1048576, "yas_gun": yas // 86400,
+                         "doluluk_yuzde": round(100.0 * bayt / sinir, 1) if sinir else None}
+        son = self._son_temizlik
+        durum["toplam_bayt"] = toplam
+        durum["toplam_mb"] = round(toplam / 1048576, 2)
+        durum["son_temizlik"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(son["zaman"])) if son else None
+        durum["son_temizlik_raporu"] = son["rapor"] if son else None
+        return durum
 
     def gorsel_yolu(self, kayit):
         """Ana (veya ``_gorsel2``) görselin yolu ve kaynağı: yerel, gyazo veya yok."""
@@ -488,12 +697,17 @@ class GorselCozucu:
             os.makedirs(self.thumbs, exist_ok=True)
         except OSError:
             return None
+        self._temizlik_gerekirse()
         try:
-            if os.path.exists(hedef) and os.path.getmtime(hedef) >= os.path.getmtime(yol):
+            eski_mtime = os.path.getmtime(hedef) if os.path.exists(hedef) else None
+            # Gyazo önbelleğindeki kaynak kimliğe bağlıdır ve değişmez; mtime'ı LRU için
+            # güncellendiğinden bayatlık ölçütü sayılmaz (gereksiz yeniden üretim olmaz).
+            if eski_mtime is not None and (self._gyazo_onbellek_dosyasi(yol) or eski_mtime >= os.path.getmtime(yol)):
                 with warnings.catch_warnings():
                     warnings.simplefilter("error", Image.DecompressionBombWarning)
                     with Image.open(hedef) as eski:
                         eski.verify()
+                _dokun(hedef, eski_mtime)
                 return hedef
             with warnings.catch_warnings():
                 warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -517,6 +731,13 @@ class GorselCozucu:
             return hedef
         except Exception:
             return None
+
+
+def onbellek_durumu(ayar=None, onbellek=None):
+    """``AYAR`` (veya verilen ayar) için önbellek özeti; panel/CLI ``gorsel.onbellek_durumu()`` diye çağırır."""
+    if ayar is None:
+        from .settings import AYAR as ayar
+    return GorselCozucu(ayar, onbellek or ayar["ONBELLEK"]).onbellek_durumu()
 
 
 def yer_tutucu_svg(baslik="Görsel açılamadı", aciklama="", genislik=400, yukseklik=300):
