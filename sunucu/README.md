@@ -114,7 +114,7 @@ Panel şifre kuralı **en az 8 karakter**dir. Sunucu komutları **`kanit` hesab�
 ```bash
 cd /opt/kanit-paneli
 read -rs KANIT_PW; export KANIT_PW          # parolayı yazıp Enter'a basın (ekranda görünmez)
-runuser -u kanit --preserve-env=KANIT_PW -- .venv/bin/python -m app.cli sifre-sifirla admin --password-env KANIT_PW --kalici
+runuser -u kanit -w KANIT_PW -- .venv/bin/python -m app.cli sifre-sifirla admin --password-env KANIT_PW --kalici
 unset KANIT_PW
 ```
 
@@ -123,7 +123,7 @@ unset KANIT_PW
 ```bash
 cd /opt/kanit-paneli
 read -rs KANIT_PW; export KANIT_PW
-runuser -u kanit --preserve-env=KANIT_PW -- .venv/bin/python -m app.cli admin-ekle admin --password-env KANIT_PW
+runuser -u kanit -w KANIT_PW -- .venv/bin/python -m app.cli admin-ekle admin --password-env KANIT_PW
 unset KANIT_PW
 ```
 
