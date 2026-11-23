@@ -45,4 +45,4 @@
 {% for kategori in kategoriler %}<details class="katalog-kayit {{ 'soluk' if not kategori.aktif }}"><summary><b>{{ kategori.label }}</b><code>{{ kategori.code }}</code><small>{% if kategori.aktif %}<span class="durum-etiket aktif">Aktif</span>{% else %}<span class="durum-etiket pasif">Pasif</span>{% endif %}</small></summary>{{ kategori_form(kategori) }}</details>{% else %}<p>Henüz kategori yok.</p>{% endfor %}</section>
 </div></div>
 {% endblock %}
-{% block script %}<script src="{{ url_for('static',filename='katalog.js',v='2.2.3') }}"></script>{% endblock %}
+{% block script %}<script src="{{ url_for('static',filename='katalog.js',v='2.3.0') }}"></script>{% endblock %}

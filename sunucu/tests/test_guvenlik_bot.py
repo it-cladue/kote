@@ -343,7 +343,7 @@ def test_admin_parola_istemi_suresi_ve_mesaj_silme(setup):
     assert any(m == "deleteMessage" and p.get("message_id") == 4 for m, p in fake.calls[start:])
     s = session(ayar, bot)
     assert s["admin_until"] > time.time() + 1700
-    audit = q(ayar, "SELECT islem,sonuc,yeni FROM denetim WHERE kullanici='1' AND islem='telegram_onay' ORDER BY id DESC LIMIT 1")[0]
+    audit = q(ayar, "SELECT islem,sonuc,yeni FROM denetim WHERE kullanici='1' AND islem='telegram_admin_giris' ORDER BY id DESC LIMIT 1")[0]
     assert audit["sonuc"] == "ok" and "admin" in audit["yeni"]
     assert not any("yonetici" in p.get("text", "") for m, p in fake.calls if m == "sendMessage")
 
@@ -358,7 +358,7 @@ def test_admin_yanlis_deneme_sayaci_ve_kilit(setup, monkeypatch):
     texts = sends(fake)
     assert any("2 deneme hakkınız kaldı" in t for t in texts)
     assert any("beklemeniz gerekir" in t for t in texts)
-    assert q(ayar, "SELECT COUNT(*) n FROM denetim WHERE kullanici='1' AND islem='telegram_onay' AND sonuc='hata'")[0]["n"] == 3
+    assert q(ayar, "SELECT COUNT(*) n FROM denetim WHERE kullanici='1' AND islem='telegram_admin_giris_hata' AND sonuc='hata'")[0]["n"] == 3
     start = len(fake.calls)
     feed(bot, message(30, 30, "/admin"))
     assert any("Çok fazla hatalı" in t for t in sends(fake, start))

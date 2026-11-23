@@ -1034,12 +1034,12 @@ class KanitBot:
                 session["admin_until"] = int(time.time()) + _admin_oturum_saniye()
                 self._save_session(conn, uid, session)
                 self._admin_hatali.pop(uid, None)
-                db.denetim_yaz(conn, uid, "telegram_onay", yeni={"tur": "admin"},
+                db.denetim_yaz(conn, uid, "telegram_admin_giris", yeni={"tur": "admin"},
                                aciklama="Telegram yönetici parolasıyla giriş yapıldı.")
                 self._say(chat_id, f"<b>Yönetici girişi başarılı.</b> Oturum {minutes} dakika hareketsizlikten sonra kapanır.")
             else:
                 count = self._admin_hata_kaydet(uid)
-                db.denetim_yaz(conn, uid, "telegram_onay", yeni={"tur": "admin", "sonuc": "basarisiz", "deneme": count},
+                db.denetim_yaz(conn, uid, "telegram_admin_giris_hata", yeni={"tur": "admin", "sonuc": "basarisiz", "deneme": count},
                                sonuc="hata", aciklama="Telegram yönetici parolası yanlış girildi.")
                 if count >= _admin_max_deneme():
                     self._say(chat_id, f"Yönetici girişi başarısız. Çok fazla hatalı deneme; {_admin_kilit_saniye() // 60} dakika beklemeniz gerekir.")

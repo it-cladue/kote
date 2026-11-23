@@ -87,6 +87,12 @@ def main():
             print('Kayıt:',c.execute('SELECT COUNT(*) FROM kayitlar').fetchone()[0]);print('DB:',AYAR['DB'])
             print('Görseller:',AYAR['GORSEL_KLASOR']);print('Arşiv:',AYAR['ARSIV_KLASOR'])
             print('Gelen kutusu:',[dict(r) for r in c.execute('SELECT bot_id,durum,COUNT(*) adet FROM tg_gelen GROUP BY bot_id,durum')])
+            try:
+                from . import gorsel
+                d=gorsel.onbellek_durumu(AYAR)
+                print('Görsel önbelleği:',f"{d.get('toplam_mb',0)} MB toplam;"," ".join(f"{ad}: {v.get('dosya',0)} dosya / {v.get('mb',0)} MB (sınır {v.get('sinir_mb',0) or 'yok'} MB)" for ad,v in d.items() if isinstance(v,dict) and 'dosya' in v))
+            except Exception as hata:
+                print('Görsel önbelleği: okunamadı:',hata)
         elif args.command=='veritabani-kur': print('Veritabanı hazır:',AYAR['DB'])
     finally:c.close()
 
