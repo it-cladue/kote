@@ -99,4 +99,4 @@
 </div>
 </div>
 {% endblock %}
-{% block script %}<script>Panel.kayitSayfasi({{ f.durum|tojson }});</script>{% endblock %}
+{% block script %}<script nonce="{{ csp_nonce }}">Panel.kayitSayfasi({{ f.durum|tojson }});</script>{% endblock %}

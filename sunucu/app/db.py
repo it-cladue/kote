@@ -1,5 +1,6 @@
 """İki süreç/çok oturum: WAL, kısa transaction, idempotent additive geçiş."""
 import os
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -107,6 +108,19 @@ _MIGRATION_LOCK = threading.RLock()
 
 def simdi():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+_KONTROL_KARAKTERLERI = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+
+
+def metin_temizle(metin, en_cok=None):
+    """Serbest metin alanları (yorum, mesaj bildirimi, silme sebebi, görünen ad) için tek yardımcı:
+    NUL ve kontrol karakterleri silinir (satır sonu ve sekme kalır), satır sonları \n'e indirgenir, isteğe bağlı uzunluk kesilir."""
+    if metin is None:
+        return ''
+    text = str(metin).replace('\r\n', '\n').replace('\r', '\n')
+    text = _KONTROL_KARAKTERLERI.sub('', text)
+    return text[:en_cok] if en_cok else text
 
 
 @contextmanager
@@ -221,4 +235,4 @@ def mesaj_bildir(conn, kayit_id, alici, tur, kim, metin, olay):
     if not record or not user or not yetki.izin(yetki.coz(user['yetki']), record['proje'], 'oku'):
         return
     conn.execute('INSERT OR IGNORE INTO mesaj_bildirimleri(kullanici_adi,kayit_id,proje,olay,tur,kim,metin,zaman) VALUES(?,?,?,?,?,?,?,?)',
-                 (alici, kayit_id, record['proje'], olay, tur, kim, str(metin)[:300], simdi()))
+                 (alici, kayit_id, record['proje'], olay, tur, kim, metin_temizle(metin, 300), simdi()))

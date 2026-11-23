@@ -29,4 +29,4 @@
 </div>
 {% if sayfa_sayisi|default(1)>1 %}<nav class="sayfalama" aria-label="Bildirim sayfaları">{% if sayfa > 1 %}<a class="btn" href="{{ url_degistir(s=sayfa-1) }}">‹ Önceki</a>{% endif %}<span>{{ sayfa }} / {{ sayfa_sayisi }}</span>{% if sayfa < sayfa_sayisi %}<a class="btn" href="{{ url_degistir(s=sayfa+1) }}">Sonraki ›</a>{% endif %}</nav>{% endif %}
 {% endblock %}
-{% block script %}<script>Panel.bildirimSayfasi();</script>{% endblock %}
+{% block script %}<script nonce="{{ csp_nonce }}">Panel.bildirimSayfasi();</script>{% endblock %}

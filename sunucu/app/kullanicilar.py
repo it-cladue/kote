@@ -1,5 +1,6 @@
 """SQL hesapları: hash'li parola, kalıcı kilit, kanonik rol ve oturum sürümü."""
 import re
+import secrets
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -104,17 +105,78 @@ def guncelle(ayar, ad, expected_version=None, islem_yapan=None, **alanlar):
     return bul(ayar, ad)
 
 
-def dogrula(ayar, ad, sifre):
+# Var olmayan/pasif/kilitli kullanıcı için de aynı hash maliyeti ödenir; yanıt süresi ve mesaj kullanıcı adının varlığını
+# ya da kilidi açık etmez (kilit yalnız İşlem Geçmişi'nde ve Kullanıcılar sayfasında görünür).
+_SAHTE_HASH = generate_password_hash(secrets.token_hex(16))
+GENEL_HATA = 'Kullanıcı adı veya parola hatalı.'
+KILIT_DAKIKA = 15
+KILIT_DENEME = 5
+
+# Yeni parola belirlenirken reddedilen çok yaygın parolalar (küçük harfle karşılaştırılır). Mevcut girişleri etkilemez.
+YAYGIN_PAROLALAR = frozenset("""
+123456 1234567 12345678 123456789 1234567890 12345 123123 123321 111111 000000 654321 987654321 password password1 password123
+passw0rd parola parola1 parola123 sifre sifre123 sifre1234 qwerty qwerty123 qwertyuiop asdfgh asdf1234 zxcvbnm abc123 abcd1234
+admin admin1 admin123 admin1234 administrator root toor letmein welcome welcome1 iloveyou monkey dragon football baseball master
+sunshine princess superman trustno1 telecc telecc1 telecc123 telecc1234 kanit kanit123 kanit1234 panel123 panel1234 deneme123 test123
+test1234 1q2w3e4r 1qaz2wsx 123qwe 159753 112233 a123456 qwe123 pass123 pass1234 passwort changeme default guest12345
+""".split())
+
+
+def parola_politikasi(ad, yeni, eski=None):
+    """Yeni parola kuralları; hata metni ya da None. Yalnız parola BELİRLENİRKEN uygulanır, giriş akışını etkilemez."""
+    yeni = yeni or ''
+    ad = (ad or '').strip().lower()
+    if len(yeni) < 8:
+        return 'Parola en az 8 karakter olmalı.'
+    if len(yeni) > 200:
+        return 'Parola en çok 200 karakter olabilir.'
+    if eski is not None and yeni == eski:
+        return 'Yeni parola eskisiyle aynı olamaz.'
+    if len(ad) >= 3 and ad in yeni.lower():
+        return 'Parola kullanıcı adını içeremez.'
+    duz = yeni.lower().strip()
+    if duz in YAYGIN_PAROLALAR or duz.rstrip('!.?*') in YAYGIN_PAROLALAR:
+        return 'Bu parola çok yaygın; tahmin edilmesi kolay. Harf, rakam ve işaret karışımı daha uzun bir parola seçin.'
+    return None
+
+
+def parola_dogru(ayar, ad, sifre):
+    """Oturumu açık kullanıcının mevcut parolasını doğrular; kilit sayacına DOKUNMAZ (/sifre sayfası için).
+    Olmayan/pasif hesapta da hash maliyeti ödenir."""
+    user = bul(ayar, ad)
+    if not user or not user['aktif']:
+        check_password_hash(_SAHTE_HASH, sifre or '')
+        return False
+    return check_password_hash(user['sifre_hash'], sifre or '')
+
+
+def kilitli_mi(user):
+    return bool(user and user['kilit_bitis'] and user['kilit_bitis'] > db.simdi())
+
+
+def dogrula(ayar, ad, sifre, ip=None):
+    """(kullanıcı, hata) döndürür. Kilitli, pasif veya olmayan hesapta da aynı genel mesaj ve aynı hash maliyeti.
+    Kilit: 5 hatalı deneme → 15 dakika; süresi dolan kilidin sayacı sıfırdan başlar (süresiz kilit DoS'u yok)."""
     ad = (ad or '').strip().lower()
     with connection(ayar) as conn, db.transaction(conn):
         user = conn.execute('SELECT * FROM panel_kullanicilari WHERE kullanici_adi=?', (ad,)).fetchone()
-        if user and user['kilit_bitis'] and user['kilit_bitis'] > db.simdi():
-            return None, 'Çok fazla hatalı deneme; 15 dakika sonra tekrar deneyin.'
-        if user and user['aktif'] and check_password_hash(user['sifre_hash'], sifre or ''):
+        if not user:
+            check_password_hash(_SAHTE_HASH, sifre or '')
+            return None, GENEL_HATA
+        if kilitli_mi(user):
+            # Kilitliyken doğru parola da kabul edilmez; sayaç ve kilit süresi değişmez (kilit kendiliğinden biter).
+            check_password_hash(_SAHTE_HASH, sifre or '')
+            return None, GENEL_HATA
+        if user['aktif'] and check_password_hash(user['sifre_hash'], sifre or ''):
             conn.execute('UPDATE panel_kullanicilari SET hatali_giris=0,kilit_bitis=NULL,son_giris=? WHERE id=?', (db.simdi(), user['id']))
             return dict(user), None
-        if user:
-            attempts = user['hatali_giris'] + 1
-            until = (datetime.now() + timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S') if attempts >= 5 else None
-            conn.execute('UPDATE panel_kullanicilari SET hatali_giris=?,kilit_bitis=? WHERE id=?', (attempts, until, user['id']))
-        return None, 'Kullanıcı adı veya parola hatalı.'
+        if not user['aktif']:
+            check_password_hash(_SAHTE_HASH, sifre or '')
+        # Süresi dolmuş kilidin (kilit_bitis dolu ama geçmişte) sayacı sıfırlanır; aksi hâlde tek hatalı deneme kilidi süresiz uzatır.
+        attempts = (0 if user['kilit_bitis'] else user['hatali_giris']) + 1
+        until = (datetime.now() + timedelta(minutes=KILIT_DAKIKA)).strftime('%Y-%m-%d %H:%M:%S') if attempts >= KILIT_DENEME else None
+        conn.execute('UPDATE panel_kullanicilari SET hatali_giris=?,kilit_bitis=? WHERE id=?', (attempts, until, user['id']))
+        if until:
+            db.denetim_yaz(conn, ad, 'giris_kilit', ip=ip, sonuc='uyari', hedef_turu='hesap', hedef_id=ad,
+                           aciklama='%d hatalı deneme; %d dakika kilit' % (KILIT_DENEME, KILIT_DAKIKA))
+        return None, GENEL_HATA

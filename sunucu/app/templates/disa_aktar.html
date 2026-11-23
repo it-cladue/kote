@@ -41,7 +41,7 @@
 </div>
 {% endblock %}
 
-{% block script %}<script>(function(){var cb=document.getElementById('cikti-tarihsiz'),t1=document.getElementById('cikti-tarih1'),t2=document.getElementById('cikti-tarih2'),hata=document.getElementById('cikti-tarih-hata'),form=document.getElementById('cikti-form');if(!cb||!t1||!t2||!form)return;
+{% block script %}<script nonce="{{ csp_nonce }}">(function(){var cb=document.getElementById('cikti-tarihsiz'),t1=document.getElementById('cikti-tarih1'),t2=document.getElementById('cikti-tarih2'),hata=document.getElementById('cikti-tarih-hata'),form=document.getElementById('cikti-form');if(!cb||!t1||!t2||!form)return;
 function sync(){t1.disabled=cb.checked;t2.disabled=cb.checked;if(cb.checked)kontrol();}
 function kontrol(){var ters=!cb.checked&&t1.value&&t2.value&&t1.value>t2.value;t2.setCustomValidity(ters?'Başlangıç tarihi bitiş tarihinden sonra olamaz.':'');if(hata){hata.textContent=ters?'Başlangıç tarihi bitiş tarihinden sonra olamaz; tarihleri düzeltin.':'';hata.classList.toggle('gizli',!ters);}return !ters;}
 cb.addEventListener('change',sync);t1.addEventListener('input',kontrol);t2.addEventListener('input',kontrol);t1.addEventListener('change',kontrol);t2.addEventListener('change',kontrol);
