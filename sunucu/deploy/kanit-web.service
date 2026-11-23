@@ -1,6 +1,7 @@
 [Unit]
 Description=Kanit Paneli Web
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -8,13 +9,42 @@ User=kanit
 Group=kanit
 WorkingDirectory=/opt/kanit-paneli
 EnvironmentFile=/opt/kanit-paneli/.env
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 ExecStart=/opt/kanit-paneli/.venv/bin/python -m app.panel
 Restart=on-failure
 RestartSec=5
+SyslogIdentifier=kanit-web
+UMask=0077
+LimitNOFILE=4096
+
+# Sertleştirme (systemd-analyze security ile ölçülür; deploy/tests/test_guvenlik_deploy.py eşik koyar).
+# Servis açılmazsa journalctl -u kanit-web içinde "Operation not permitted" / SIGSYS aranır;
+# önce MemoryDenyWriteExecute, sonra SystemCallFilter satırları kaldırılıp yeniden denenir.
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
+ProtectHome=true
 ReadWritePaths=/opt/kanit-paneli/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=multi-user.target

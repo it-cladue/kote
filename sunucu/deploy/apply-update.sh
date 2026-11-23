@@ -1,25 +1,37 @@
 #!/usr/bin/env bash
-# Kanıt Paneli 2.1 -> 2.2 güvenli uygulama-kodu güncellemesi.
-# Bu betik ZIP açmaz, paket indirmez, pip/apt ile kurulum yapmaz ve Plesk/Nginx/HTTPS
-# yapılandırmasına dokunmaz. Kaynak kök, bu deploy dizininin bir üstüdür.
+# Kanıt Paneli güvenli uygulama-kodu güncellemesi (2.1 -> 2.2 -> 2.3 ...).
+# Bu betik ZIP açmaz, paket indirmez, apt kurulumu yapmaz ve Plesk/Nginx/HTTPS yapılandırmasına dokunmaz.
+# pip yalnız requirements.txt'te SABİT SÜRÜM YÜKSELTMESİ varsa (örn. Pillow==12.3.0 -> 13.0.0) ve yalnız
+# /opt/kanit-paneli/.venv içinde çalıştırılır; yeni paket adı eklenmişse betik durur. Birim dosyaları
+# (deploy/kanit-web.service, kanit-bot.service) /etc/systemd/system'dekinden farklıysa yedeklenip güncellenir.
+# Kaynak kök, bu deploy dizininin bir üstüdür.
 set -Eeuo pipefail
 IFS=$'\n\t'
-PATH=/usr/sbin:/usr/bin:/sbin:/bin
-export PATH
+if [[ -z "${KANIT_TEST:-}" ]]; then
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin
+    export PATH
+fi
 
-readonly DEST=/opt/kanit-paneli
-readonly DATA_DIR=/opt/kanit-paneli/data
-readonly ENV_FILE=/opt/kanit-paneli/.env
-readonly DB_FILE=/opt/kanit-paneli/data/panel.db
-readonly VENV_PY=/opt/kanit-paneli/.venv/bin/python
+# Test/prova ortamı için ezilebilir değerler (canlı sunucuda değiştirmeyin).
+readonly DEST="${KANIT_DEST:-/opt/kanit-paneli}"
+readonly DATA_DIR="$DEST/data"
+readonly ENV_FILE="$DEST/.env"
+readonly DB_FILE="$DEST/data/panel.db"
+readonly VENV_PY="${KANIT_VENV_PY:-$DEST/.venv/bin/python}"
 readonly WEB_SERVICE=kanit-web.service
 readonly BOT_SERVICE=kanit-bot.service
-readonly BACKUP_ROOT=/var/backups/kanit-paneli
-readonly HEALTH_URL=http://127.0.0.1:18080/saglik
+readonly BACKUP_ROOT="${KANIT_BACKUP_ROOT:-/var/backups/kanit-paneli}"
+readonly UNIT_DIR="${KANIT_UNIT_DIR:-/etc/systemd/system}"
+readonly HEALTH_URL="${KANIT_HEALTH_URL:-http://127.0.0.1:18080/saglik}"
+readonly SYSTEMCTL="${KANIT_SYSTEMCTL:-systemctl}"
+readonly SERVICE_USER="${KANIT_USER:-kanit}"
 readonly PREFLIGHT_SECRET='kanit-update-preflight-only-0123456789abcdef0123456789abcdef'
+# pip komutu (test ortamında sahte pip verilebilir; boşluklarla ayrılmış).
+PIP_CMD_STR="${KANIT_PIP:-$VENV_PY -m pip}"
+IFS=' ' read -r -a PIP_CMD <<<"$PIP_CMD_STR"
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SOURCE_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+SOURCE_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd -P)"
 HELPER="$SCRIPT_DIR/update-support.py"
 DRY_RUN=0
 
@@ -28,15 +40,16 @@ usage() {
 Kullanım: sudo bash deploy/apply-update.sh [--dry-run]
 
 Kaynak, bu betiğin bulunduğu deploy dizininin üst köküdür. Hedef sabittir:
-/opt/kanit-paneli. --dry-run yalnız okuyarak ön koşulları, uyumluluğu ve servis
-aktifliğini raporlar; yedek, dosya, veritabanı veya servis değişikliği yapmaz.
+/opt/kanit-paneli. --dry-run yalnız okuyarak ön koşulları, uyumluluğu, servis
+aktifliğini, bağımlılık ve birim dosyası farklarını raporlar; yedek, dosya,
+veritabanı veya servis değişikliği yapmaz.
 USAGE
 }
 
 case "${1:-}" in
     '') ;;
     --dry-run) DRY_RUN=1 ;;
-    -h|--help) usage; exit 0 ;;
+    -h|--help|--yardim) usage; exit 0 ;;
     *) echo "HATA: Bilinmeyen seçenek. --help kullanın." >&2; exit 2 ;;
 esac
 
@@ -51,7 +64,7 @@ pause_update() {
     local code="$1"
     shift
     echo "DURAKLATILDI [$code]: $*" >&2
-    echo "Otomatik pip/apt kurulumu ve yapılandırma değişikliği yapılmadı." >&2
+    echo "Otomatik apt kurulumu ve yapılandırma değişikliği yapılmadı." >&2
     exit "$code"
 }
 
@@ -60,7 +73,7 @@ need_command() {
 }
 
 service_is_active() {
-    systemctl is-active --quiet "$1"
+    "$SYSTEMCTL" is-active --quiet "$1"
 }
 
 status_label() {
@@ -71,70 +84,121 @@ if [[ ${EUID} -ne 0 ]]; then
     fatal 10 "Bu betik root olarak çalıştırılmalı (sudo bash deploy/apply-update.sh)."
 fi
 
-for bin in python3 runuser systemctl curl sha256sum stat cmp cp mv find chown chmod install mktemp awk sleep cat rm date env; do
+for bin in python3 runuser curl sha256sum stat cmp cp mv find chown chmod install mktemp awk sleep cat rm date env diff; do
     need_command "$bin"
 done
+command -v "$SYSTEMCTL" >/dev/null 2>&1 || fatal 11 "Gerekli komut bulunamadı: $SYSTEMCTL"
 
 [[ -f "$HELPER" && ! -L "$HELPER" && -r "$HELPER" ]] || \
     fatal 11 "update-support.py kaynak pakette okunabilir normal dosya değil. ZIP'i önce kullanıcı olarak açın."
 [[ "$SOURCE_ROOT" != "$DEST" ]] || \
-    fatal 11 "Kaynak paket /opt/kanit-paneli olamaz; açılmış 2.2 paketin deploy/apply-update.sh betiğini çalıştırın."
+    fatal 11 "Kaynak paket $DEST olamaz; açılmış yeni paketin deploy/apply-update.sh betiğini çalıştırın."
 
 # Yalnız okuyan kaynak derleme denetimi: __pycache__ oluşturmaz.
 if ! python3 "$HELPER" source-check --root "$SOURCE_ROOT" >/dev/null; then
     fatal 12 "Kaynak app/ veya requirements.txt doğrulanamadı; hiçbir canlı dosya değiştirilmedi."
 fi
 
-[[ -d "$DEST" && ! -L "$DEST" ]] || fatal 13 "Hedef /opt/kanit-paneli normal dizin değil."
+[[ -d "$DEST" && ! -L "$DEST" ]] || fatal 13 "Hedef $DEST normal dizin değil."
 [[ -d "$DEST/app" && ! -L "$DEST/app" ]] || fatal 13 "Mevcut app dizini normal dizin değil."
 [[ -f "$DEST/requirements.txt" && ! -L "$DEST/requirements.txt" && -r "$DEST/requirements.txt" ]] || \
     fatal 13 "Hedef requirements.txt okunamıyor."
 [[ -x "$VENV_PY" ]] || fatal 13 ".venv/bin/python çalıştırılabilir değil."
 [[ -d "$DATA_DIR" && ! -L "$DATA_DIR" ]] || fatal 13 "PANEL_VERI dizini beklenen normal dizin değil."
 [[ -f "$DB_FILE" && ! -L "$DB_FILE" ]] || fatal 13 "Beklenen SQLite dosyası data/panel.db bulunamadı."
-id kanit >/dev/null 2>&1 || fatal 13 "kanit servis hesabı bulunamadı."
-KANIT_GID="$(id -g kanit)"
+id "$SERVICE_USER" >/dev/null 2>&1 || fatal 13 "$SERVICE_USER servis hesabı bulunamadı."
+KANIT_GID="$(id -g "$SERVICE_USER")"
 
 # .env asla shell source edilmez. Yardımcı yalnız beklenen ağ/veri ayarlarını
 # denetler ve hiçbir değer yazdırmaz.
-if ! python3 "$HELPER" env-check --env "$ENV_FILE" --owner 0 --group "$KANIT_GID" >/dev/null; then
+if ! python3 "$HELPER" env-check --env "$ENV_FILE" --owner 0 --group "$KANIT_GID" --panel-veri "$DATA_DIR" >/dev/null; then
     fatal 14 ".env özel izin/sahiplik veya PANEL_VERI/DINLE/PORT/HTTPS/TRUST_PROXY uyumluluğunu sağlamıyor."
 fi
-if ! runuser -u kanit -- test -r "$ENV_FILE"; then
-    fatal 14 "kanit hesabı .env dosyasını okuyamıyor; servis başlatılması güvenli değil."
+if ! runuser -u "$SERVICE_USER" -- test -r "$ENV_FILE"; then
+    fatal 14 "$SERVICE_USER hesabı .env dosyasını okuyamıyor; servis başlatılması güvenli değil."
 fi
-if ! runuser -u kanit -- test -r "$DB_FILE" -a -w "$DATA_DIR"; then
-    fatal 14 "kanit hesabı SQLite kaynağını okuyamıyor veya geçici snapshot dizinine yazamıyor."
+if ! runuser -u "$SERVICE_USER" -- test -r "$DB_FILE" -a -w "$DATA_DIR"; then
+    fatal 14 "$SERVICE_USER hesabı SQLite kaynağını okuyamıyor veya geçici snapshot dizinine yazamıyor."
 fi
-if ! runuser -u kanit -- test -r "$DEST/app/__init__.py" -a -x "$DEST/app"; then
-    fatal 14 "kanit hesabı mevcut app kodunu okuyamıyor."
+if ! runuser -u "$SERVICE_USER" -- test -r "$DEST/app/__init__.py" -a -x "$DEST/app"; then
+    fatal 14 "$SERVICE_USER hesabı mevcut app kodunu okuyamıyor."
 fi
-if ! runuser -u kanit -- "$VENV_PY" -c 'import sys; assert sys.version_info >= (3, 8)' >/dev/null 2>&1; then
-    fatal 14 ".venv Python kanit hesabıyla çalışma denetiminden geçmedi."
+if ! runuser -u "$SERVICE_USER" -- "$VENV_PY" -c 'import sys; assert sys.version_info >= (3, 8)' >/dev/null 2>&1; then
+    fatal 14 ".venv Python $SERVICE_USER hesabıyla çalışma denetiminden geçmedi."
 fi
 
-# Yeni paket bağımlılık beyanını değiştirmişse bu betik bilinçli olarak pip
-# çalıştırmaz. Operatör önce kontrollü bağımlılık incelemesi yapmalıdır.
+# Bağımlılık beyanı: yalnız sabitlenmiş SÜRÜM YÜKSELTMESİ kabul edilir (update-support.py requirements-diff).
+# Yeni paket adı, kaldırılan paket, sürüm düşürme veya serbest sürüm -> betik pip çalıştırmadan durur.
+REQ_CHANGED=0
+REQ_UPGRADE=0
+REQ_DIFF_OUT=''
 if ! cmp -s "$SOURCE_ROOT/requirements.txt" "$DEST/requirements.txt"; then
-    pause_update 20 "requirements.txt değişmiş. Bu betik pip çalıştırmaz; bağımlılıkları elle doğrulayıp onaylı bakımda güncelleyin."
+    REQ_CHANGED=1
+    if ! REQ_DIFF_OUT="$(python3 "$HELPER" requirements-diff --old "$DEST/requirements.txt" --new "$SOURCE_ROOT/requirements.txt" 2>&1)"; then
+        printf '%s\n' "$REQ_DIFF_OUT" >&2
+        pause_update 20 "requirements.txt değişmiş ve bu değişiklik yalnız sürüm yükseltmesi değil. Bu betik yeni paket kurmaz; bağımlılıkları elle doğrulayıp onaylı bakımda güncelleyin."
+    fi
+    if grep -q '^GEREKSINIMLER_YUKSELTME$' <<<"$REQ_DIFF_OUT"; then REQ_UPGRADE=1; fi
 fi
+
+# Birim dosyaları: deploy/*.service ile kurulu olanlar farklıysa güncellenecek.
+UNITS_TO_SYNC=()
+for unit in "$WEB_SERVICE" "$BOT_SERVICE"; do
+    if [[ -f "$SOURCE_ROOT/deploy/$unit" ]] && ! cmp -s "$SOURCE_ROOT/deploy/$unit" "$UNIT_DIR/$unit"; then
+        UNITS_TO_SYNC+=("$unit")
+    fi
+done
+
+UNITS_LIST="$(IFS=' '; printf '%s' "${UNITS_TO_SYNC[*]}")"
 
 WEB_WAS_ACTIVE=0
 BOT_WAS_ACTIVE=0
 if service_is_active "$WEB_SERVICE"; then WEB_WAS_ACTIVE=1; fi
 if service_is_active "$BOT_SERVICE"; then BOT_WAS_ACTIVE=1; fi
 
-printf '%s\n' 'Kanit Paneli 2.2 güncelleme planı'
+printf '%s\n' 'Kanit Paneli güncelleme planı'
 printf '%s\n' "Kaynak kod: $SOURCE_ROOT"
 printf '%s\n' "Hedef: $DEST (yalnız app dizini atomik değiştirilecek)"
 printf '%s\n' "Web servisi: $(status_label "$WEB_WAS_ACTIVE"); bot servisi: $(status_label "$BOT_WAS_ACTIVE")"
-printf '%s\n' 'Korunacak: .env, data/panel.db, .venv, görseller, telegram_gorseller, sertifika, config ve service dosyaları.'
-printf '%s\n' 'Dokunulmayacak: Plesk nginx/apache2, kanit-ip-https, HTTPS yapılandırması, güvenlik duvarı, cron/zamanlama ve sertifika yenilemesi.'
-printf '%s\n' 'Bağımlılık beyanı aynı; pip kurulumu yapılmayacak, yalnız salt denetim pip check çalışacak.'
+printf '%s\n' 'Korunacak: .env, data/panel.db, .venv, görseller, telegram_gorseller, sertifika ve config dosyaları.'
+printf '%s\n' 'Dokunulmayacak: Plesk nginx/apache2, kanit-ip-proxy, HTTPS yapılandırması, güvenlik duvarı, zamanlayıcılar.'
+if (( REQ_UPGRADE )); then
+    printf '%s\n' 'Bağımlılık: requirements.txt sürüm yükseltmesi içeriyor; uygulama değişiminden ÖNCE .venv içinde pip install çalışacak:'
+    grep '^SURUM_YUKSELTME' <<<"$REQ_DIFF_OUT" | sed 's/^SURUM_YUKSELTME /   /'
+elif (( REQ_CHANGED )); then
+    printf '%s\n' 'Bağımlılık: requirements.txt yalnız biçimsel değişmiş (sürümler aynı); pip kurulumu yapılmayacak, dosya güncellenecek.'
+else
+    printf '%s\n' 'Bağımlılık beyanı aynı; pip kurulumu yapılmayacak, yalnız salt denetim pip check çalışacak.'
+fi
+if (( ${#UNITS_TO_SYNC[@]} )); then
+    printf '%s\n' "Servis birim dosyaları güncellenecek (yedek alınır, daemon-reload): $UNITS_LIST"
+else
+    printf '%s\n' 'Servis birim dosyaları güncel; dokunulmayacak.'
+fi
 
 if (( DRY_RUN )); then
     if (( ! WEB_WAS_ACTIVE )); then
         printf '%s\n' 'UYARI: Web servisi pasif; gerçek işlem sağlık denetimi yapamayacağı için başlamaz.'
+    fi
+    for unit in "${UNITS_TO_SYNC[@]}"; do
+        printf 'Birim farkı (%s):\n' "$unit"
+        if [[ -f "$UNIT_DIR/$unit" ]]; then
+            diff -u "$UNIT_DIR/$unit" "$SOURCE_ROOT/deploy/$unit" | sed 's/^/   /' || true
+        else
+            printf '   (kurulu birim yok; yeni dosya kopyalanacak)\n'
+        fi
+    done
+    if (( REQ_UPGRADE )); then
+        TMP_PIP_DRY="$(mktemp /tmp/kanit-update-pipdry.XXXXXX)"
+        chmod 600 "$TMP_PIP_DRY"
+        # pip --dry-run çözümler, indirir ama kurmaz; venv değişmez.
+        if "${PIP_CMD[@]}" install --dry-run --require-virtualenv --no-input --disable-pip-version-check -r "$SOURCE_ROOT/requirements.txt" >"$TMP_PIP_DRY" 2>&1; then
+            printf '%s\n' 'pip çözümleme denemesi (--dry-run): TAMAM; sürümler PyPI/önbellekten çözülebiliyor.'
+        else
+            printf '%s\n' 'UYARI: pip çözümleme denemesi (--dry-run) başarısız; gerçek güncelleme pip adımında duracak ve eski sürümleri geri kuracaktır. Son satırlar:'
+            tail -n 5 "$TMP_PIP_DRY" | sed 's/^/   /'
+        fi
+        rm -f -- "${TMP_PIP_DRY:?}"
     fi
     printf '%s\n' 'DRY-RUN_TAMAM: Yalnız okuma yapıldı; hiçbir dosya, veritabanı veya servis değiştirilmedi.'
     exit 0
@@ -148,31 +212,36 @@ fi
 
 TMP_IMPORT_LOG="$(mktemp /tmp/kanit-update-import.XXXXXX)"
 TMP_PIP_LOG="$(mktemp /tmp/kanit-update-pip.XXXXXX)"
+PREFLIGHT_DATA="$(mktemp -d /tmp/kanit-update-preflight.XXXXXX)"
 chmod 600 "$TMP_IMPORT_LOG" "$TMP_PIP_LOG"
-cleanup_preflight_logs() {
-    rm -f -- "${TMP_IMPORT_LOG:-}" "${TMP_PIP_LOG:-}" 2>/dev/null || true
+chmod 700 "$PREFLIGHT_DATA"
+cleanup_preflight() {
+    rm -f -- "${TMP_IMPORT_LOG:?}" "${TMP_PIP_LOG:?}" 2>/dev/null || true
+    if [[ -n "${PREFLIGHT_DATA:-}" && -d "$PREFLIGHT_DATA" ]]; then rm -rf -- "${PREFLIGHT_DATA:?}" 2>/dev/null || true; fi
 }
 
 # pip check salt denetimdir; paket indirmez/değiştirmez. Hata çıktısı, olası
 # sır içermesine karşı terminale değil özel geçici günlüğe yönlendirilir.
-if ! "$VENV_PY" -m pip check >"$TMP_PIP_LOG" 2>&1; then
-    cleanup_preflight_logs
+if ! "${PIP_CMD[@]}" check >"$TMP_PIP_LOG" 2>&1; then
+    cleanup_preflight
     pause_update 21 "venv bağımlılık denetimi (pip check) başarısız. Pip otomatik çalıştırılmadı."
 fi
 
 # Kaynak paketi /root altında olabileceğinden bu salt-okunur import denetimi
 # root bağlamında yapılır. Gerçek .env okunmaz; kanonik, sır içermeyen test
-# ortamı ve geçici bir SESSION_SECRET kullanılır.
+# ortamı ve geçici bir SESSION_SECRET kullanılır. PANEL_VERI olarak canlı data
+# dizini DEĞİL geçici bir dizin verilir: settings/gorsel import anında dizin
+# oluşturur, canlı data altında root sahipli dizin kalmasın.
 if ! env -i \
     "HOME=$DEST" "PATH=$DEST/.venv/bin:/usr/bin:/bin" "PYTHONPATH=$SOURCE_ROOT" PYTHONDONTWRITEBYTECODE=1 \
-    "PANEL_VERI=$DATA_DIR" DINLE=127.0.0.1 PORT=18080 HTTPS=1 TRUST_PROXY=1 \
+    "PANEL_VERI=$PREFLIGHT_DATA" DINLE=127.0.0.1 PORT=18080 HTTPS=1 TRUST_PROXY=1 \
     "SESSION_SECRET=$PREFLIGHT_SECRET" \
     "$VENV_PY" -c 'import flask, waitress, openpyxl, PIL, requests, dotenv; import app.settings, app.db, app.panel, app.bot; print("IMPORT_OK")' \
     >"$TMP_IMPORT_LOG" 2>&1; then
-    cleanup_preflight_logs
+    cleanup_preflight
     pause_update 22 "Kaynak temel bağımlılık/import denetiminden geçmedi; canlı dosya değiştirilmedi."
 fi
-cleanup_preflight_logs
+cleanup_preflight
 
 # Bundan sonraki her hata için kod geri alınır ve güncelleme öncesi aktif olan
 # servisler tekrar başlatılır. SQLite asla otomatik geri yüklenmez.
@@ -186,6 +255,8 @@ MIGRATION_LOG=""
 HEALTH_BODY=""
 UPDATE_CHANGED=0
 SERVICES_STOPPED=0
+REQ_INSTALLED=0
+UNITS_CHANGED=0
 
 # DB ve olası WAL/SHM yan dosyalarının sahipliğini yalnız karşılaştırmak üzere
 # kaydeder; içeriklerine dokunmaz.
@@ -225,7 +296,29 @@ assert_env_unchanged() {
 cleanup_temporary() {
     rm -f -- "${TEMP_SNAPSHOT:-}" "${SNAPSHOT_HELPER:-}" "${HEALTH_BODY:-}" 2>/dev/null || true
     if [[ -n "${STAGE_DIR:-}" && -d "$STAGE_DIR" ]]; then
-        rm -rf -- "$STAGE_DIR" 2>/dev/null || true
+        rm -rf -- "${STAGE_DIR:?}" 2>/dev/null || true
+    fi
+}
+
+restore_units() {
+    local unit
+    for unit in "${UNITS_TO_SYNC[@]}"; do
+        if [[ -f "$BACKUP_DIR/units.before/$unit" ]]; then
+            install -m 644 -o root -g root "$BACKUP_DIR/units.before/$unit" "$UNIT_DIR/$unit" || echo "UYARI: $unit eski birimi geri konamadı." >&2
+        else
+            rm -f -- "${UNIT_DIR:?}/${unit:?}"
+        fi
+    done
+    "$SYSTEMCTL" daemon-reload >/dev/null 2>&1 || true
+}
+
+restore_requirements() {
+    if [[ -f "$BACKUP_DIR/requirements.before" ]]; then
+        echo 'Eski bağımlılık sürümleri geri kuruluyor (pip).' >&2
+        if ! "${PIP_CMD[@]}" install --require-virtualenv --no-input --disable-pip-version-check -r "$BACKUP_DIR/requirements.before" >>"$BACKUP_DIR/pip-rollback.log" 2>&1; then
+            echo "UYARI: Eski bağımlılık sürümleri geri kurulamadı; günlük: $BACKUP_DIR/pip-rollback.log (elle: $VENV_PY -m pip install -r $BACKUP_DIR/requirements.before)" >&2
+        fi
+        install -m 644 -o root -g root "$BACKUP_DIR/requirements.before" "$DEST/requirements.txt" || true
     fi
 }
 
@@ -240,29 +333,34 @@ rollback_and_restore() {
     # olan süreçleri durdururuz; başlangıçta kapalı bot asla başlatılmaz.
     if (( SERVICES_STOPPED )); then
         if (( WEB_WAS_ACTIVE )); then
-            systemctl stop "$WEB_SERVICE" >/dev/null 2>&1 || true
+            "$SYSTEMCTL" stop "$WEB_SERVICE" >/dev/null 2>&1 || true
         fi
         if (( BOT_WAS_ACTIVE )); then
-            systemctl stop "$BOT_SERVICE" >/dev/null 2>&1 || true
+            "$SYSTEMCTL" stop "$BOT_SERVICE" >/dev/null 2>&1 || true
         fi
     fi
     if (( UPDATE_CHANGED )) && [[ -d "$OLD_APP" ]]; then
         echo 'Uygulama kodu eski sürüme geri alınıyor.' >&2
         if [[ -d "$DEST/app" ]]; then
             if ! mv -T -- "$DEST/app" "$BACKUP_DIR/failed-app"; then
-                rm -rf -- "$DEST/app"
+                rm -rf -- "${DEST:?}/app"
             fi
         fi
         if ! mv -T -- "$OLD_APP" "$DEST/app"; then
             echo 'KRİTİK: Eski app dizini otomatik geri taşınamadı; root yedeğini kullanın.' >&2
         fi
     fi
+    if (( REQ_INSTALLED )); then restore_requirements; fi
+    if (( UNITS_CHANGED )); then
+        echo 'Servis birim dosyaları eski hâline alınıyor.' >&2
+        restore_units
+    fi
     if (( SERVICES_STOPPED )); then
         if (( WEB_WAS_ACTIVE )); then
-            systemctl start "$WEB_SERVICE" >/dev/null 2>&1 || echo 'UYARI: Eski web servisi otomatik başlatılamadı.' >&2
+            "$SYSTEMCTL" start "$WEB_SERVICE" >/dev/null 2>&1 || echo 'UYARI: Eski web servisi otomatik başlatılamadı.' >&2
         fi
         if (( BOT_WAS_ACTIVE )); then
-            systemctl start "$BOT_SERVICE" >/dev/null 2>&1 || echo 'UYARI: Eski bot servisi otomatik başlatılamadı.' >&2
+            "$SYSTEMCTL" start "$BOT_SERVICE" >/dev/null 2>&1 || echo 'UYARI: Eski bot servisi otomatik başlatılamadı.' >&2
         fi
     fi
     cleanup_temporary
@@ -295,10 +393,23 @@ if ! cp --preserve=mode,ownership,timestamps -- "$ENV_FILE" "$BACKUP_DIR/.env.be
    ! chown root:root "$BACKUP_DIR/.env.before" || ! chmod 600 "$BACKUP_DIR/.env.before"; then
     rollback_and_restore 31 '.env özel yedeği alınamadı.'
 fi
+if ! cp -p -- "$DEST/requirements.txt" "$BACKUP_DIR/requirements.before" || ! chmod 600 "$BACKUP_DIR/requirements.before"; then
+    rollback_and_restore 31 'requirements.txt yedeği alınamadı.'
+fi
+if (( ${#UNITS_TO_SYNC[@]} )); then
+    install -d -m 700 "$BACKUP_DIR/units.before" || rollback_and_restore 31 'Birim yedek dizini oluşturulamadı.'
+    for unit in "${UNITS_TO_SYNC[@]}"; do
+        if [[ -f "$UNIT_DIR/$unit" ]] && ! cp -p -- "$UNIT_DIR/$unit" "$BACKUP_DIR/units.before/$unit"; then
+            rollback_and_restore 31 "Mevcut $unit birim yedeği alınamadı."
+        fi
+    done
+fi
 cat >"$BACKUP_DIR/GERI_DONUS_NOTU.txt" <<EOF
 Bu dizin, $STAMP güncellemesinden önce root tarafından oluşturulmuştur.
-sourceapp eski uygulama kodudur; .env.before özel ortam yedeğidir; panel.db SQLite backup API ile tutarlı snapshot'tır.
-Hata halinde bu betik eski app kodunu ve önce aktif servisleri geri getirir; panel.db otomatik geri yüklenmez.
+sourceapp eski uygulama kodudur; .env.before özel ortam yedeğidir; panel.db SQLite backup API ile tutarlı snapshot'tır;
+requirements.before eski bağımlılık beyanıdır (pip-install.log varsa pip bu güncellemede çalışmıştır);
+units.before/ varsa /etc/systemd/system'deki eski birim dosyalarıdır.
+Hata halinde bu betik eski app kodunu, eski bağımlılık sürümlerini, eski birimleri ve önce aktif servisleri geri getirir; panel.db otomatik geri yüklenmez.
 Yeni kayıtları kaybetme riskini kabul ediyorsanız yalnız root bakımında servisleri durdurup $BACKUP_DIR/panel.db dosyasını $DB_FILE yerine elle geri yükleyin; önce mevcut DB'nin ayrıca yedeğini alın.
 EOF
 chmod 600 "$BACKUP_DIR/GERI_DONUS_NOTU.txt"
@@ -309,9 +420,9 @@ record_db_owners
 if ! install -m 644 -o root -g root "$HELPER" "$SNAPSHOT_HELPER"; then
     rollback_and_restore 32 'SQLite snapshot yardımcısı geçici olarak hazırlanamadı.'
 fi
-if ! runuser -u kanit -- /usr/bin/python3 "$SNAPSHOT_HELPER" sqlite-backup \
+if ! runuser -u "$SERVICE_USER" -- /usr/bin/python3 "$SNAPSHOT_HELPER" sqlite-backup \
     --source "$DB_FILE" --destination "$TEMP_SNAPSHOT" >/dev/null; then
-    rollback_and_restore 32 'kanit hesabıyla salt-okunur SQLite online snapshot alınamadı.'
+    rollback_and_restore 32 "$SERVICE_USER hesabıyla salt-okunur SQLite online snapshot alınamadı."
 fi
 if ! verify_db_owners; then
     rollback_and_restore 32 'Kaynak SQLite dosyasının veya yan dosyasının sahipliği beklenmedik biçimde değişti.'
@@ -320,15 +431,47 @@ if ! mv -T -- "$TEMP_SNAPSHOT" "$BACKUP_DIR/panel.db" || \
    ! chown root:root "$BACKUP_DIR/panel.db" || ! chmod 600 "$BACKUP_DIR/panel.db"; then
     rollback_and_restore 32 'SQLite snapshot özel yedek alanına taşınamadı.'
 fi
-rm -f -- "$SNAPSHOT_HELPER"
+rm -f -- "${SNAPSHOT_HELPER:?}"
 
 # Yalnız güncelleme öncesinde aktif olan servisler durdurulur.
 SERVICES_STOPPED=1
-if (( BOT_WAS_ACTIVE )) && ! systemctl stop "$BOT_SERVICE"; then
+if (( BOT_WAS_ACTIVE )) && ! "$SYSTEMCTL" stop "$BOT_SERVICE"; then
     rollback_and_restore 33 'Aktif bot servisi güvenli biçimde durdurulamadı.'
 fi
-if (( WEB_WAS_ACTIVE )) && ! systemctl stop "$WEB_SERVICE"; then
+if (( WEB_WAS_ACTIVE )) && ! "$SYSTEMCTL" stop "$WEB_SERVICE"; then
     rollback_and_restore 33 'Aktif web servisi güvenli biçimde durdurulamadı.'
+fi
+
+# Bağımlılık sürüm yükseltmesi: servisler kapalıyken, uygulama kodu değişmeden ÖNCE.
+# Başarısızsa eski sürümler geri kurulur ve eski app dokunulmamış kalır.
+if (( REQ_UPGRADE )); then
+    REQ_INSTALLED=1
+    if ! "${PIP_CMD[@]}" install --require-virtualenv --no-input --disable-pip-version-check -r "$SOURCE_ROOT/requirements.txt" >"$BACKUP_DIR/pip-install.log" 2>&1; then
+        rollback_and_restore 37 "pip ile bağımlılık sürüm yükseltmesi başarısız (günlük: $BACKUP_DIR/pip-install.log); uygulama kodu değiştirilmedi."
+    fi
+    if ! "${PIP_CMD[@]}" check >>"$BACKUP_DIR/pip-install.log" 2>&1; then
+        rollback_and_restore 37 "Yükseltme sonrası pip check başarısız (günlük: $BACKUP_DIR/pip-install.log)."
+    fi
+    chmod 600 "$BACKUP_DIR/pip-install.log" || true
+fi
+if (( REQ_CHANGED )) && ! install -m 644 -o root -g root "$SOURCE_ROOT/requirements.txt" "$DEST/requirements.txt"; then
+    rollback_and_restore 37 'Yeni requirements.txt hedefe yazılamadı.'
+fi
+
+# Birim dosyaları: yeni app başlatılmadan önce kurulur ve daemon-reload yapılır.
+if (( ${#UNITS_TO_SYNC[@]} )); then
+    UNITS_CHANGED=1
+    for unit in "${UNITS_TO_SYNC[@]}"; do
+        if ! install -m 644 -o root -g root "$SOURCE_ROOT/deploy/$unit" "$UNIT_DIR/$unit"; then
+            rollback_and_restore 38 "$unit birim dosyası yazılamadı."
+        fi
+        if command -v systemd-analyze >/dev/null 2>&1 && ! systemd-analyze verify "$UNIT_DIR/$unit" >"$BACKUP_DIR/unit-verify.log" 2>&1; then
+            rollback_and_restore 38 "$unit systemd-analyze verify denetiminden geçmedi (günlük: $BACKUP_DIR/unit-verify.log)."
+        fi
+    done
+    if ! "$SYSTEMCTL" daemon-reload; then
+        rollback_and_restore 38 'systemctl daemon-reload başarısız.'
+    fi
 fi
 
 # Yeni app hedef dosya sistemi üzerinde aşamalıdır; böylece mv -T ile atomik
@@ -364,9 +507,11 @@ fi
 
 # Gerçek .env yalnız kanit hesabınca okunur. Kod eklemeli/idempotent migration'ı
 # app.db/settings üzerinden açar; token/parola stdout'a yönlendirilmez.
+# Çalışma dizini DEST'tir: "python -c" sys.path[0] olarak cwd'yi eklediği için app paketi kesinlikle
+# yeni kurulan $DEST/app'ten gelir (kaynak paketin açıldığı dizinden değil).
 MIGRATION_LOG="$BACKUP_DIR/migration-private.log"
-if ! runuser -u kanit -- env -i \
-    "HOME=$DEST" "PATH=$DEST/.venv/bin:/usr/bin:/bin" "PYTHONPATH=$DEST" \
+if ! (cd "$DEST" && runuser -u "$SERVICE_USER" -- env -i \
+    "HOME=$DEST" "PATH=$DEST/.venv/bin:/usr/bin:/bin" "PYTHONPATH=$DEST" "PANEL_VERI=$DATA_DIR" PYTHONDONTWRITEBYTECODE=1 \
     "$VENV_PY" -c '
 from app.settings import AYAR
 from app import db, bot
@@ -396,7 +541,7 @@ try:
 finally:
     conn.close()
 print("MIGRATION_OK")
-' >"$MIGRATION_LOG" 2>&1; then
+' >"$MIGRATION_LOG" 2>&1); then
     rollback_and_restore 40 'Yeni uygulamanın additive veritabanı migration denetimi başarısız oldu.'
 fi
 if ! assert_env_unchanged; then
@@ -404,14 +549,14 @@ if ! assert_env_unchanged; then
 fi
 
 # Web önceden aktifti; sadece onu tekrar başlatıp loopback sağlık kontrolü yaparız.
-if ! systemctl start "$WEB_SERVICE"; then
+if ! "$SYSTEMCTL" start "$WEB_SERVICE"; then
     rollback_and_restore 42 'Yeni web servisi başlatılamadı.'
 fi
 HEALTH_BODY="$(mktemp /tmp/kanit-update-health.XXXXXX)"
 chmod 600 "$HEALTH_BODY"
 HEALTH_OK=0
 for ((attempt=1; attempt<=12; attempt++)); do
-    if curl --fail --silent --show-error --max-time 3 --output "$HEALTH_BODY" "$HEALTH_URL" >/dev/null 2>&1 && \
+    if curl --fail --silent --show-error --noproxy '*' --max-time 3 --output "$HEALTH_BODY" "$HEALTH_URL" >/dev/null 2>&1 && \
        [[ "$(cat -- "$HEALTH_BODY")" == 'OK' ]]; then
         HEALTH_OK=1
         break
@@ -419,12 +564,12 @@ for ((attempt=1; attempt<=12; attempt++)); do
     sleep 1
 done
 if (( ! HEALTH_OK )); then
-    rollback_and_restore 43 '127.0.0.1:18080/saglik sınırlandırılmış denemelerde başarılı olmadı.'
+    rollback_and_restore 43 "$HEALTH_URL sınırlandırılmış denemelerde başarılı olmadı."
 fi
 
 # Bot yalnızca güncelleme öncesinde aktif ise geri başlatılır; kullanıcı kapalı
 # bıraktıysa bu betik onu kesinlikle otomatik başlatmaz.
-if (( BOT_WAS_ACTIVE )) && ! systemctl start "$BOT_SERVICE"; then
+if (( BOT_WAS_ACTIVE )) && ! "$SYSTEMCTL" start "$BOT_SERVICE"; then
     rollback_and_restore 44 'Önceden aktif bot servisi yeniden başlatılamadı.'
 fi
 if ! assert_env_unchanged; then
@@ -432,11 +577,18 @@ if ! assert_env_unchanged; then
 fi
 
 # Eski kod canlı yedekte zaten sourceapp olarak tutulur; geçici kopya kaldırılır.
-rm -rf -- "$OLD_APP" "$STAGE_DIR" 2>/dev/null || true
+rm -rf -- "${OLD_APP:?}" "${STAGE_DIR:?}" 2>/dev/null || true
 cleanup_temporary
 UPDATE_CHANGED=0
 trap - ERR INT TERM
 printf '%s\n' "GÜNCELLEME_TAMAM: /saglik yalnız loopback $HEALTH_URL üzerinden doğrulandı."
 printf '%s\n' "Özel yedek: $BACKUP_DIR"
+if (( REQ_UPGRADE )); then printf '%s\n' "Bağımlılık yükseltmesi uygulandı (günlük: $BACKUP_DIR/pip-install.log; eski beyan: requirements.before)."; fi
+if (( UNITS_CHANGED )); then printf '%s\n' "Servis birim dosyaları güncellendi: $UNITS_LIST (eskileri: $BACKUP_DIR/units.before/)"; fi
+# data altında kanit dışı sahipli dosya kaldıysa sessiz bozulma olmasın diye uyar (ön kontrol artık data'ya yazmaz).
+if find "$DATA_DIR" ! -user "$SERVICE_USER" -print -quit 2>/dev/null | grep -q .; then
+    printf 'UYARI: %s altında %s dışı sahipli dosya/dizin var; düzeltin: systemctl stop kanit-web kanit-bot; chown -R %s:%s %s; systemctl start kanit-web kanit-bot\n' "$DATA_DIR" "$SERVICE_USER" "$SERVICE_USER" "$SERVICE_USER" "$DATA_DIR"
+    find "$DATA_DIR" ! -user "$SERVICE_USER" 2>/dev/null | head -n 5 | sed 's/^/   /'
+fi
 printf '%s\n' 'Dış HTTPS erişimi doğrulanmadı veya iddia edilmedi; Plesk/Nginx/HTTPS yapılandırması değiştirilmedi.'
 exit 0

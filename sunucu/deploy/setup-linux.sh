@@ -24,9 +24,10 @@ systemctl daemon-reload
 cat <<'END'
 Kurulum hazır; servisler henüz başlatılmadı.
 1) cd /opt/kanit-paneli
-2) sudo -u kanit .venv/bin/python -m app.cli admin-ekle admin
+2) runuser -u kanit -- .venv/bin/python -m app.cli admin-ekle admin
 3) Eski veriyi ice-aktar /ESKI_KLASOR, arşivi arsiv-tara ile taşı.
 4) sudo systemctl enable --now kanit-web kanit-bot
 5) journalctl -u kanit-bot -n 80 --no-pager
-Alan adı/HTTPS için README ve Nginx örneğini uygula. Aynı tokenı eski botta açık bırakma.
+6) Alan adı/HTTPS için README §1a: deploy/setup-cloudflare-https.sh (Cloudflare turuncu bulut) ya da setup-domain-https.sh.
+7) Yedek zamanlayıcısı: bash deploy/setup-backup.sh (README §11). Aynı tokenı eski botta açık bırakma.
 END

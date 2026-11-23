@@ -1,0 +1,16 @@
+# Kanıt Paneli — IP proxy nginx günlükleri (kanit-ip-proxy). Kurulum (root):
+#   install -m 644 deploy/logrotate-kanit /etc/logrotate.d/kanit-paneli && logrotate -d /etc/logrotate.d/kanit-paneli
+# bot_log.txt uygulama içinde döndürülür (BOT ekibi); günlük yedek dizinini kanit-yedek.sh temizler. Buraya eklenmez.
+/opt/kanit-ssl/proxy-logs/access.log /opt/kanit-ssl/proxy-logs/error.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0600 root root
+    sharedscripts
+    postrotate
+        if systemctl is-active --quiet kanit-ip-proxy.service; then systemctl reload kanit-ip-proxy.service; fi
+    endscript
+}
