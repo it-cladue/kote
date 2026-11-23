@@ -24,7 +24,7 @@ Birleşik 2.3.0 kodu, 60 örnek kayıtlı veritabanıyla gerçek `waitress` üze
 
 Sahte `/opt/kanit-paneli` (kanit kullanıcısı, 2.2.0 kodu ve veritabanı, `.env`, sanal ortam) üzerinde gerçek `deploy/apply-update.sh` ile 2.2.0 → 2.3.0 provası: sonuç aşağıdaki bölümde.
 
-PROVA_SONUCU_BURAYA
+İlk prova bir hata yakaladı: güncelleme betiği `umask 077` altında çalıştığı için pip'in yazdığı Pillow 13 dosyaları yalnız root tarafından okunabiliyordu; kanit hesabıyla çalışan migration denetimi `ImportError` verdi, betik geri aldı ama geri kurulan eski Pillow da aynı izinle kaldığından eski web servisi açılamadı. Düzeltme: pip kurulumu ve geri kurulumu `umask 022` ile, ardından kanit hesabıyla içe aktarma denetimi (başarısızsa izin onarımı, yine olmazsa geri alma, çıkış kodu 38). İkinci prova: `DRY-RUN_TAMAM` (Pillow 12.3.0→13.0.0 planı, pip çözümleme TAMAM, iki birim dosyası), ardından `GÜNCELLEME_TAMAM`; sürüm başlığı 2.3.0, Pillow 13.0.0 kanit tarafından okunabilir (dizin 755), birim dosyaları kuruldu, 60 kayıt / 2 panel kullanıcısı / 2 Telegram kullanıcısı korundu, yedek `/var/backups/kanit-paneli/<zaman>` altında. Yükseltilmiş sahte sunucu nginx TLS vekili (18443, X-Forwarded-Proto https) arkasında Chromium ile yeniden tarandı: `__Host-kanit_session` çerezi ve CSP başlığı var, giriş ve tüm sayfalar masaüstü/telefonda açılıyor, CSP ihlali yok.
 
 ---
 
