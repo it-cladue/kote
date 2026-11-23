@@ -1,6 +1,6 @@
-# Kanıt Paneli 2.2 — mevcut sunucuda güvenli güncelleme
+# Kanıt Paneli 2.3 — mevcut sunucuda güvenli güncelleme
 
-Bu paket Telegram botu ile web kontrol panelinin 2.2 kaynak sürümüdür. 2.2, 2.1 üzerine kullanım kolaylığı ve modern görünüm güncellemesidir; değişiklik listesi `DEGISIKLIKLER_v2.2.md` dosyasındadır. Senin mevcut Ubuntu/Plesk kurulumun için hazırlanmıştır. Kanıt ekleme yalnız Telegram’dan yapılır; site inceleme, onay, yorum/soru, bildirim, kullanıcı ve katalog yönetimi içindir. Excel canlı kayıt kaynağı değildir.
+Bu paket Telegram botu ile web kontrol panelinin 2.3 kaynak sürümüdür. 2.3, 2.2 üzerine internete açılma öncesi güvenlik ve sağlamlık turudur; değişiklik listesi `DEGISIKLIKLER_v2.3.md` (2.2 ve öncesi için `DEGISIKLIKLER_v2.2.md`) dosyasındadır. Senin mevcut Ubuntu/Plesk kurulumun için hazırlanmıştır. Kanıt ekleme yalnız Telegram’dan yapılır; site inceleme, onay, yorum/soru, bildirim, kullanıcı ve katalog yönetimi içindir. Excel canlı kayıt kaynağı değildir.
 
 ## Mevcut kurulum
 
@@ -52,7 +52,7 @@ curl -fsS http://127.0.0.1:18080/saglik
 systemctl status kanit-web kanit-bot --no-pager -l
 ```
 
-`OK` iç servis sağlığıdır (yanıt başlığı `X-Kanit-Paneli: 2.2.2`); dış HTTPS erişimini tarayıcıdaki mevcut IP adresinden kontrol et. Tarayıcı eski görünümü gösteriyorsa sayfayı Ctrl+F5 ile yenile. Daha önce kapalı olan bot yardımcı tarafından kendiliğinden başlatılmaz. Bot ayarların doluysa ve gerçekten başlatmak istiyorsan `systemctl start kanit-bot` kullan. Aynı Telegram anahtarıyla başka PowerShell, Docker veya test botu süreci çalıştırma.
+`OK` iç servis sağlığıdır (yanıt başlığı `X-Kanit-Paneli: 2.3.0`; bu başlık yalnız sunucunun kendisinden, 127.0.0.1 üzerinden yapılan isteklerde döner); dış HTTPS erişimini tarayıcıdaki mevcut IP adresinden kontrol et. Tarayıcı eski görünümü gösteriyorsa sayfayı Ctrl+F5 ile yenile. Daha önce kapalı olan bot yardımcı tarafından kendiliğinden başlatılmaz. Bot ayarların doluysa ve gerçekten başlatmak istiyorsan `systemctl start kanit-bot` kullan. Aynı Telegram anahtarıyla başka PowerShell, Docker veya test botu süreci çalıştırma.
 
 ## 1a. Alan adı ile HTTPS — Cloudflare (TURUNCU bulut), ana yol
 
