@@ -41,6 +41,9 @@ def coz(metin):
 
 
 def kanonikle(metin, projeler=None):
+    # 'superadmin' / 'süperadmin' (büyük-küçük harf fark etmez) 'admin'in eş anlamlısıdır; arayüz ve CLI yardımı süperadmin der.
+    if str(metin or '').strip().replace('İ', 'i').casefold() in ('superadmin', 'süperadmin'):
+        metin = 'admin'
     parsed = coz(metin)
     if not parsed['gecerli'] or (not parsed['admin'] and not parsed['projeler']):
         raise ValueError('Geçerli rol ve en az bir açık proje izni seçin. * veya admin: biçimi kullanılamaz.')

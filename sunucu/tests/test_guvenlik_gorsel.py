@@ -60,7 +60,7 @@ def test_ayarlar_gecersiz_degerde_varsayilan_kullanir(monkeypatch):
     for ad, kotu in (('GYAZO_ONBELLEK_MB', 'abc'), ('GYAZO_ONBELLEK_GUN', ''), ('KUCUK_ONBELLEK_MB', '12abc')):
         monkeypatch.setenv(ad, kotu)
     a = settings.settings()
-    assert (a['GYAZO_ONBELLEK_MB'], a['GYAZO_ONBELLEK_GUN'], a['KUCUK_ONBELLEK_MB']) == (500, 30, 300)
+    assert (a['GYAZO_ONBELLEK_MB'], a['GYAZO_ONBELLEK_GUN'], a['KUCUK_ONBELLEK_MB']) == (2000, 0, 300)  # 2.3.1: Gyazo kopyaları kanıt kopyasıdır; yaş budaması kapalı
     monkeypatch.setenv('GYAZO_ONBELLEK_MB', ' 250 '); monkeypatch.setenv('GYAZO_ONBELLEK_GUN', '-7'); monkeypatch.setenv('KUCUK_ONBELLEK_MB', '1e400')
     a = settings.settings()
     assert (a['GYAZO_ONBELLEK_MB'], a['GYAZO_ONBELLEK_GUN'], a['KUCUK_ONBELLEK_MB']) == (250, 0, 300)
@@ -68,12 +68,12 @@ def test_ayarlar_gecersiz_degerde_varsayilan_kullanir(monkeypatch):
     assert a['MAX_GORSEL_BYTES'] == 10 * MB and a['SAYFA_BOYU'] == 48 and 'PROJELER' in a and 'ONBELLEK' in a
     assert settings._tam_sayi('OLMAYAN_ANAHTAR_X', 7) == 7
     # GorselCozucu da AYAR'daki bozuk/eksik değere dayanıklı; 0 = sınır yok.
-    assert gorsel._onbellek_siniri({'GYAZO_ONBELLEK_MB': 'bozuk'}, 'GYAZO_ONBELLEK_MB', MB) == 500 * MB
+    assert gorsel._onbellek_siniri({'GYAZO_ONBELLEK_MB': 'bozuk'}, 'GYAZO_ONBELLEK_MB', MB) == 2000 * MB
     assert gorsel._onbellek_siniri({}, 'KUCUK_ONBELLEK_MB', MB) == 300 * MB
     assert gorsel._onbellek_siniri({'GYAZO_ONBELLEK_GUN': 0}, 'GYAZO_ONBELLEK_GUN', 86400) == 0
     assert gorsel._onbellek_siniri({'GYAZO_ONBELLEK_GUN': -3}, 'GYAZO_ONBELLEK_GUN', 86400) == 0
     c = gorsel.GorselCozucu({'BOT_KLASOR': str(settings.DATA), 'GYAZO_ONBELLEK_MB': '2', 'KUCUK_ONBELLEK_MB': None}, str(settings.DATA / 'tmp'))
-    assert c.gyazo_sinir_bayt == 2 * MB and c.kucuk_sinir_bayt == 300 * MB and c.gyazo_yas_sn == 30 * 86400
+    assert c.gyazo_sinir_bayt == 2 * MB and c.kucuk_sinir_bayt == 300 * MB and c.gyazo_yas_sn == 0  # varsayılan GUN=0: yaş sınırı yok
 
 
 # ------------------------------------------------------------------ boyut sınırı
@@ -139,15 +139,15 @@ def test_okunan_dosya_lru_ile_korunur(cozucu):
     c.gyazo_sinir_bayt = 1500
     a_yol = sahte(g, kimlik(0xa) + '.jpg', 1000, 5 * 3600)  # en eski ama okunacak
     b_yol = sahte(g, kimlik(0xb) + '.jpg', 1000, 4 * 3600)
-    assert c._gyazo_onbellek(kimlik(0xa)) == str(a_yol)  # okuma mtime'ı günceller (saatte en fazla bir kez)
+    assert c._gyazo_onbellek(kimlik(0xa)) == str(a_yol)  # okuma mtime'ı günceller (her isabette)
     assert time.time() - a_yol.stat().st_mtime < 60
     rapor = c.onbellek_temizle(zorla=True)['gyazo']
     assert a_yol.exists() and not b_yol.exists() and rapor['silinen'] == 1
-    # Son bir saat içinde zaten dokunulmuş dosyaya tekrar utime yapılmaz (ucuz).
+    # 2.3.1: her isabet dokunur (saatlik eşik yok) → okunan dosya ONBELLEK_TAZE_SN boyunca budamadan korunur, send_file yarışı kapanır.
     m = a_yol.stat().st_mtime
     os.utime(a_yol, (m - 100, m - 100))
     c._gyazo_onbellek(kimlik(0xa))
-    assert abs(a_yol.stat().st_mtime - (m - 100)) < 1
+    assert abs(a_yol.stat().st_mtime - m) < 5
     # utime hatası yutulur
     gorsel._dokun(str(g / 'olmayan.jpg'))
     assert c._gyazo_onbellek(kimlik(0xb)) is None

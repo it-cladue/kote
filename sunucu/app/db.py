@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS panel_kullanicilari (
  id INTEGER PRIMARY KEY, kullanici_adi TEXT UNIQUE NOT NULL, ad TEXT,
  sifre_hash TEXT NOT NULL, yetki TEXT NOT NULL DEFAULT '', aktif INTEGER DEFAULT 1,
  hatali_giris INTEGER DEFAULT 0, kilit_bitis TEXT, sifre_degistir INTEGER DEFAULT 0,
- olusturma TEXT, son_giris TEXT, session_version INTEGER DEFAULT 1
+ olusturma TEXT, son_giris TEXT, session_version INTEGER DEFAULT 1, hesap_surumu INTEGER DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS denetim (
  id INTEGER PRIMARY KEY,zaman TEXT,kullanici TEXT,islem TEXT,proje TEXT,
@@ -150,7 +150,8 @@ def ayar_yaz(conn, anahtar, deger):
 
 def _ready(conn):
     try:
-        return ayar_al(conn, 'core_schema_21') == '1'
+        # 2.3.1: hesap_surumu sütunu; bayrak yükseltilmeden _add_columns canlı (core_schema_21=1 yazılı) DB'de hiç çalışmazdı.
+        return ayar_al(conn, 'core_schema_23') == '1'
     except sqlite3.OperationalError:
         return False
 
@@ -186,12 +187,13 @@ def baglan(yol):
                 conn.executemany('INSERT OR IGNORE INTO kategoriler(code,label,mode) VALUES(?,?,?)', DEFAULT_CATEGORIES)
             _add_columns(conn, 'yorumlar', [('yanit_id','INTEGER'),('alici','TEXT'),('tur',"TEXT DEFAULT 'yorum'")])
             _add_columns(conn, 'tg_kullanicilar', [('ana_proje','TEXT')])
+            _add_columns(conn, 'panel_kullanicilari', [('hesap_surumu','INTEGER DEFAULT 1')])  # iyimser kilit sayacı; çıkış bunu artırmaz
             _add_columns(conn, 'denetim', [('sonuc',"TEXT DEFAULT 'ok'"),('hedef_turu','TEXT'),('hedef_id','TEXT'),('aciklama','TEXT')])
             from . import katalog, donusum_isleri, yetki
             katalog.ensure_schema(conn)
             donusum_isleri.ensure_schema(conn)
             yetki.eski_wildcardlari_sabitle(conn, [p['code'] for p in katalog.list_projects(conn)])
-            ayar_yaz(conn, 'core_schema_21', '1')
+            ayar_yaz(conn, 'core_schema_21', '1'); ayar_yaz(conn, 'core_schema_23', '1')
         return conn
     except BaseException:
         conn.close()

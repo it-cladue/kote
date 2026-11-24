@@ -163,7 +163,7 @@ def _guvenli_yol(hedef):
     if p.scheme or p.netloc or not p.path.startswith('/') or p.path.startswith('//'):return '/'
     return hedef
 
-OTURUM_MESAJI='Oturumunuz sona erdi; yetkileriniz güncellendi veya şifreniz değişti. Lütfen yeniden giriş yapın.'
+OTURUM_MESAJI='Oturumunuz sona erdi; başka bir cihazdan çıkış yapıldı, yetkileriniz güncellendi veya şifreniz değişti. Lütfen yeniden giriş yapın.'
 SURE_MESAJI='Oturum süreniz doldu; güvenlik için girişten 24 saat sonra yeniden giriş istenir. Lütfen yeniden giriş yapın.'
 
 def _sonraki_hedef():
@@ -206,7 +206,8 @@ def before():
         else:
             # Yetki/şifre değişti, hesap kapandı ya da 24 saatlik mutlak süre doldu: işaret, zil yoklaması ya da ikinci sekme
             # tarafından tüketilmesin diye yeni bir giriş yapılana kadar oturumda kalır (giriş sayfası görülmesi işareti silmez).
-            neden='sure' if (u and u['aktif'] and session.get('sv')==u['session_version'] and not suresi_gecerli) else 'degisti'
+            # 'sure' yalnız gz alanı okunabildiğinde: gz olmayan (2.3 öncesi) çerez '24 saat doldu' değil genel açıklamayı alır.
+            neden='sure' if (u and u['aktif'] and session.get('sv')==u['session_version'] and isinstance(gz,int) and not suresi_gecerli) else 'degisti'
             session.clear();session['dustu']=1;session['dustu_zaman']=simdi();session['dustu_neden']=neden;g.oturum_dustu=True
     elif session.get('dustu'):
         g.oturum_dustu=True
@@ -387,14 +388,14 @@ def _son_islemler(allowed,limit=10):
 
 # Ana sayfa "Son işlemler" cümle biçimi. Kodlar: panel.py, bot.py, bot_yonetim.py, katalog.py, kullanicilar.py, yetki.py,
 # discussion.py, donusum_isleri.py, bildirim_gecmisi.py içindeki denetim_yaz çağrıları.
-ISLEM_ADLARI={'giris':'Giriş yaptı','giris_hata':'Hatalı giriş denemesi','onayla':'Kaydı onayladı','onay_kaldir':'Onayı kaldırdı','duzenle':'Kaydı düzenledi','sil':'Kaydı sildi','geri_al':'Kaydı geri aldı','yorum_ekle':'Yorum yazdı','soru_yonelt':'Soru yöneltti','yanit_ekle':'Yanıt verdi','gyazo_istek':'Gyazo dönüşümü istedi','disa_aktar':'Excel çıktısı aldı','dosya_kontrol':'Dosya kontrolü yaptı','kullanici_ekle':'Kullanıcı ekledi','kullanici_guncelle':'Kullanıcıyı güncelledi','sifre_degisti':'Parolasını değiştirdi','cikis':'Çıkış yaptı','giris_kilit':'Hesap kilitlendi','giris_sinir':'IP giriş sınırına ulaştı','sifre_hata':'Hatalı mevcut parola','csrf_hata':'Geçersiz CSRF gönderimi','arsiv_esle':'Arşiv görseli eşledi','beklenen_proje':'Beklenen projeyi atadı','yeni_kayit':'Yeni kanıt ekledi','sunucu_hata':'Sunucu hatası',
+ISLEM_ADLARI={'giris':'Giriş yaptı','giris_hata':'Hatalı giriş denemesi','onayla':'Kaydı onayladı','onay_kaldir':'Onayı kaldırdı','duzenle':'Kaydı düzenledi','sil':'Kaydı sildi','geri_al':'Kaydı geri aldı','yorum_ekle':'Yorum yazdı','soru_yonelt':'Soru yöneltti','yanit_ekle':'Yanıt verdi','gyazo_istek':'Gyazo dönüşümü istedi','disa_aktar':'Excel çıktısı aldı','dosya_kontrol':'Dosya kontrolü yaptı','kullanici_ekle':'Kullanıcı ekledi','kullanici_guncelle':'Kullanıcıyı güncelledi','kilit_ac':'Hesap kilidini açtı','sifre_degisti':'Parolasını değiştirdi','cikis':'Çıkış yaptı','giris_kilit':'Hesap kilitlendi','giris_sinir':'IP giriş sınırına ulaştı','sifre_hata':'Hatalı mevcut parola','csrf_hata':'Geçersiz CSRF gönderimi','arsiv_esle':'Arşiv görseli eşledi','beklenen_proje':'Beklenen projeyi atadı','yeni_kayit':'Yeni kanıt ekledi','sunucu_hata':'Sunucu hatası',
  'bildirim_okundu':'Bildirimleri okudu','ice_aktar':'İçe aktarım yaptı','yetki_kanonik':'Yetki tanımı düzeltildi',
  'telegram_kayit':'Telegram ile kanıt ekledi','bot_kayit':'Telegram ile kanıt ekledi','telegram_onay':'Telegram botuna şifreyle giriş yaptı','telegram_admin_giris':'Telegram botuna yönetici olarak giriş yaptı','telegram_admin_giris_hata':'Telegram botunda yönetici parolasını yanlış girdi','telegram_engel':'Telegram botunda engellendi','telegram_eski_buton':'Telegram botunda eski düğmeye bastı','telegram_yanlis_adim_butonu':'Telegram botunda yanlış adımda düğmeye bastı',
  'bot_bakim_ac':'Bakım modunu açtı','bot_bakim_kapat':'Bakım modunu kapattı','bot_bakim':'Bakım modunu değiştirdi','bot_onayla':'Telegram kullanıcısını onayladı','bot_onay_kaldir':'Telegram onayını kaldırdı','bot_engelle':'Telegram kullanıcısını engelledi','bot_engel_kaldir':'Telegram engelini kaldırdı','bot_tam_sifirla':'Telegram kullanıcısını tam sıfırladı','bot_oturum_temizle':'Bot oturumunu temizledi','bot_kontrol':'Botu duraklattı / sürdürdü','bot_yedek':'Veritabanı yedeği aldı','bot_inbox_tekrar':'Bekleyen bot mesajlarını yeniden denedi','bot_kategori_kaydet':'Bot kategorisini kaydetti','bot_kategori_sil':'Bot kategorisini pasife aldı','bot_kategori_yayinla':'Bot kategorilerini yayınladı',
  'katalog_proje_kaydet':'Proje tanımını kaydetti','katalog_kategori_kaydet':'Kategori tanımını kaydetti',
  'gyazo_link_guncelle':'Gyazo bağlantısını güncelledi','gyazo_link_yerel_korundu':'Gyazo bağlantısı eklenmedi, yerel görsel korundu'}
 # İşlem Geçmişi tablosu için kısa ad biçimi.
-DENETIM_ADLARI={'giris':'Giriş','giris_hata':'Hatalı giriş','onayla':'Onay','onay_kaldir':'Onay kaldırma','duzenle':'Düzenleme','sil':'Silme','geri_al':'Geri alma','yorum_ekle':'Yorum','soru_yonelt':'Soru','yanit_ekle':'Yanıt','gyazo_istek':'Gyazo isteği','disa_aktar':'Excel çıktısı','dosya_kontrol':'Dosya kontrolü','kullanici_ekle':'Kullanıcı ekleme','kullanici_guncelle':'Kullanıcı güncelleme','sifre_degisti':'Şifre değişimi','cikis':'Çıkış','giris_kilit':'Hesap kilidi','giris_sinir':'IP giriş sınırı','sifre_hata':'Hatalı mevcut parola','csrf_hata':'Geçersiz CSRF gönderimi','arsiv_esle':'Arşiv eşleme','beklenen_proje':'Beklenen proje','yeni_kayit':'Yeni kanıt','bildirim_okundu':'Bildirim okundu','sunucu_hata':'Sunucu hatası','ice_aktar':'İçe aktarım','yetki_kanonik':'Yetki düzeltme',
+DENETIM_ADLARI={'giris':'Giriş','giris_hata':'Hatalı giriş','onayla':'Onay','onay_kaldir':'Onay kaldırma','duzenle':'Düzenleme','sil':'Silme','geri_al':'Geri alma','yorum_ekle':'Yorum','soru_yonelt':'Soru','yanit_ekle':'Yanıt','gyazo_istek':'Gyazo isteği','disa_aktar':'Excel çıktısı','dosya_kontrol':'Dosya kontrolü','kullanici_ekle':'Kullanıcı ekleme','kullanici_guncelle':'Kullanıcı güncelleme','kilit_ac':'Kilit açma','sifre_degisti':'Şifre değişimi','cikis':'Çıkış','giris_kilit':'Hesap kilidi','giris_sinir':'IP giriş sınırı','sifre_hata':'Hatalı mevcut parola','csrf_hata':'Geçersiz CSRF gönderimi','arsiv_esle':'Arşiv eşleme','beklenen_proje':'Beklenen proje','yeni_kayit':'Yeni kanıt','bildirim_okundu':'Bildirim okundu','sunucu_hata':'Sunucu hatası','ice_aktar':'İçe aktarım','yetki_kanonik':'Yetki düzeltme',
  'katalog_proje_kaydet':'Proje kaydı','katalog_kategori_kaydet':'Kategori kaydı',
  'telegram_kayit':'Telegram ile kanıt','bot_kayit':'Telegram ile kanıt','telegram_onay':'Telegram: şifreyle giriş','telegram_admin_giris':'Telegram: yönetici girişi','telegram_admin_giris_hata':'Telegram: yönetici parolası hatası','telegram_engel':'Telegram: engellendi','telegram_eski_buton':'Telegram: eski düğme','telegram_yanlis_adim_butonu':'Telegram: yanlış adım düğmesi',
  'bot_onayla':'Bot: kullanıcı onayı','bot_onay_kaldir':'Bot: onay kaldırma','bot_engelle':'Bot: engelleme','bot_engel_kaldir':'Bot: engel kaldırma','bot_tam_sifirla':'Bot: tam sıfırlama','bot_oturum_temizle':'Bot: oturum temizleme','bot_bakim':'Bot: bakım modu','bot_bakim_ac':'Bot: bakım modu açıldı','bot_bakim_kapat':'Bot: bakım modu kapatıldı','bot_kontrol':'Bot: duraklat/sürdür','bot_yedek':'Bot: veritabanı yedeği','bot_inbox_tekrar':'Bot: tekrar deneme','bot_kategori_kaydet':'Bot: kategori kaydı','bot_kategori_sil':'Bot: kategori pasife','bot_kategori_yayinla':'Bot: kategori yayını',
@@ -784,12 +785,28 @@ def _delete_state(kid,value):
         db.denetim_yaz(c,g.k['kullanici_adi'],'sil' if value else 'geri_al',r['proje'],r['anahtar'],r['silindi'],value,ip(),aciklama=reason or None); db.degisti(c)
     return jsonify(ok=True,degisiklik=True,damga=_degisiklik_damgasi())
 
+def _yer_tutucu_yaniti(kucuk,baslik,aciklama,durum):
+    """Ham baytlar/500 yerine açıklayıcı yer tutucu görsel (200, X-Gorsel-Durum: bozuk|yok)."""
+    from flask import make_response
+    body=gorsel.yer_tutucu_svg(baslik,aciklama,400 if kucuk else 1200,300 if kucuk else 900)
+    resp=make_response(body); resp.headers['Content-Type']='image/svg+xml; charset=utf-8'; resp.headers['X-Gorsel-Durum']=durum; resp.headers['Content-Security-Policy']="default-src 'none'; style-src 'unsafe-inline'"
+    resp.headers['Cache-Control']='no-store'
+    return resp
+
 def _bozuk_gorsel_yaniti(kucuk=False):
     """Bozuk/okunamayan dosya için ham baytlar yerine açıklayıcı yer tutucu görsel (200, X-Gorsel-Durum: bozuk)."""
-    from flask import make_response
-    body=gorsel.yer_tutucu_svg('Görsel açılamadı','Dosya sunucuda var ama bozuk ya da okunamıyor',400 if kucuk else 1200,300 if kucuk else 900)
-    resp=make_response(body); resp.headers['Content-Type']='image/svg+xml; charset=utf-8'; resp.headers['X-Gorsel-Durum']='bozuk'; resp.headers['Content-Security-Policy']="default-src 'none'; style-src 'unsafe-inline'"
-    return resp
+    return _yer_tutucu_yaniti(kucuk,'Görsel açılamadı','Dosya sunucuda var ama bozuk ya da okunamıyor','bozuk')
+
+def _dosya_gonder(yol,yeniden_coz,yoksa,**secenekler):
+    """send_file yarış koruması: önbellek budaması yol çözümlendikten sonra dosyayı silmiş olabilir (FileNotFoundError → 500 ve
+    'sunucu_hata' kaydı yerine) bir kez yeniden çözümlenir; yine yoksa `yoksa()` yanıtı (yer tutucu / 404) verilir."""
+    try:return send_file(yol,**secenekler)
+    except FileNotFoundError:pass
+    try:
+        yeni=yeniden_coz()
+        if yeni:return send_file(yeni,**secenekler)
+    except FileNotFoundError:pass
+    return yoksa()
 
 def _gorsel_yolu(kid,kucuk=False):
     """(yol, bozuk_mu) döndürür; yol yoksa 404. Bozuk dosyada yol yine verilir, çağıran yer tutucu gösterir."""
@@ -812,7 +829,8 @@ def gorsel_goster(kid):
     indir=request.args.get('indir')=='1'
     if bozuk and not indir: return _bozuk_gorsel_yaniti()
     name='kayit-%d%s%s' % (kid,'-2' if request.args.get('ikinci')=='1' else '',Path(path).suffix.lower() or '.jpg')
-    return send_file(path,conditional=True,as_attachment=indir,download_name=name if indir else None)
+    return _dosya_gonder(path,lambda:_gorsel_yolu(kid)[0],lambda:_yer_tutucu_yaniti(False,'Görsel şu an okunamadı','Dosya yenileniyor; sayfayı yenileyin','yok'),
+                         conditional=True,as_attachment=indir,download_name=name if indir else None)
 
 @app.route('/kucuk/<int:kid>')
 @giris_gerekli
@@ -820,7 +838,10 @@ def kucuk_goster(kid):
     path,bozuk=_gorsel_yolu(kid,True)
     if not path: abort(404)
     if bozuk: return _bozuk_gorsel_yaniti(True)
-    return send_file(path,conditional=True)
+    def yeniden():
+        yol,bozuk=_gorsel_yolu(kid,True)  # küçük resim yeniden üretilir; olmazsa orijinal
+        return None if bozuk else yol
+    return _dosya_gonder(path,yeniden,lambda:_yer_tutucu_yaniti(True,'Görsel şu an okunamadı','Dosya yenileniyor; sayfayı yenileyin','yok'),conditional=True)
 
 def _role_from_form():
     if 'rol' not in request.form and request.form.get('yetki'):
@@ -837,27 +858,46 @@ def _role_from_form():
         rules.append(code+':'+','.join(a for a in yetki.EYLEMLER if a in actions))
     return yetki.kanonikle(';'.join(rules),projeler())
 
+GECICI_SIFRE_OMRU_DK=10        # üretilen geçici parola sunucuda en çok bu kadar kalır (admin görmese de)
+GECICI_SIFRE_TEMIZLIK_SN=600   # dönüşüm işçisi döngüsünde süresi geçen kayıtların periyodik temizliği
+
+def gecici_sifreleri_temizle(c=None):
+    """Süresi geçen gecici_sifre:* satırlarını siler (düz metin parola panel.db'de ve günlük yedeklerde kalmasın).
+    Çağrılma yerleri: geçici parola üretimi, Kullanıcılar sayfası GET'i (oturumda token olmasa da), süreç başı ve
+    dönüşüm işçisinde 10 dakikada bir. Bağlantı verilmezse kendi bağlantısını açar; hata yutar, silinen sayısını döndürür."""
+    kapat=c is None;silinen=0
+    try:
+        if c is None:c=db.baglan(AYAR['DB'])
+        esik=(datetime.now()-timedelta(minutes=GECICI_SIFRE_OMRU_DK)).strftime('%Y-%m-%d %H:%M:%S')
+        with db.transaction(c):
+            for row in c.execute("SELECT anahtar,deger FROM ayarlar WHERE anahtar LIKE 'gecici_sifre:%'").fetchall():
+                try:zaman=json.loads(row['deger']).get('zaman','')
+                except (ValueError,TypeError,AttributeError):zaman=''
+                if not zaman or zaman<esik:c.execute('DELETE FROM ayarlar WHERE anahtar=?',(row['anahtar'],));silinen+=1
+    except Exception as hata:
+        print('Geçici parola temizliği: '+type(hata).__name__,flush=True)
+    finally:
+        if kapat and c is not None:c.close()
+    return silinen
+
 def _gecici_sifre_sakla(ad,sifre,uretildi):
     """Geçici parola imzalı (şifrelenmemiş) oturum çerezine değil, sunucuda tek kullanımlık anahtara yazılır."""
-    token=secrets.token_hex(16);c=baglanti();esik=(datetime.now()-timedelta(minutes=10)).strftime('%Y-%m-%d %H:%M:%S')
+    token=secrets.token_hex(16);c=baglanti()
     with db.transaction(c):
-        for row in c.execute("SELECT anahtar,deger FROM ayarlar WHERE anahtar LIKE 'gecici_sifre:%'").fetchall():
-            try:zaman=json.loads(row['deger']).get('zaman','')
-            except (ValueError,TypeError,AttributeError):zaman=''
-            if not zaman or zaman<esik:c.execute('DELETE FROM ayarlar WHERE anahtar=?',(row['anahtar'],))
+        gecici_sifreleri_temizle(c)
         db.ayar_yaz(c,'gecici_sifre:'+token,json.dumps({'ad':ad,'sifre':sifre,'uretildi':bool(uretildi),'zaman':simdi()},ensure_ascii=False))
     session['gecici_sifre']=token
 
 def _gecici_sifre_al():
+    c=baglanti();gecici_sifreleri_temizle(c)  # token olmasa da: sayfa her açıldığında süresi geçenler gider
     token=session.pop('gecici_sifre',None)
     if not isinstance(token,str) or not re.fullmatch('[a-f0-9]{32}',token):return None
-    c=baglanti()
     with db.transaction(c):
         raw=db.ayar_al(c,'gecici_sifre:'+token)
         c.execute('DELETE FROM ayarlar WHERE anahtar=?',('gecici_sifre:'+token,))
     try:data=json.loads(raw) if raw else None
     except ValueError:return None
-    return data if isinstance(data,dict) and data.get('zaman','')>=(datetime.now()-timedelta(minutes=10)).strftime('%Y-%m-%d %H:%M:%S') else None
+    return data if isinstance(data,dict) and data.get('zaman','')>=(datetime.now()-timedelta(minutes=GECICI_SIFRE_OMRU_DK)).strftime('%Y-%m-%d %H:%M:%S') else None
 
 @app.route('/yonetim/kullanicilar',methods=['GET','POST'])
 @admin_gerekli
@@ -1127,7 +1167,8 @@ def arsiv_gorsel(aid):
     if request.args.get('kucuk')=='1':
         thumb=COZUCU.kucuk({'anahtar':'archive:'+str(aid)},str(path))
         if not thumb:abort(404)
-        path=thumb
+        # Budama küçük resmi sildiyse bir kez yeniden üret; o da yoksa orijinal arşiv dosyası (az önce is_file ile doğrulandı).
+        return _dosya_gonder(thumb,lambda:COZUCU.kucuk({'anahtar':'archive:'+str(aid)},str(path)),lambda:send_file(str(path),conditional=True),conditional=True)
     return send_file(path,conditional=True)
 
 def _cikti_secimi(args):
@@ -1150,8 +1191,9 @@ def _cikti_tarih_hatasi(args):
     return None
 
 # Tek istekte yazılacak en çok kayıt; aşılırsa tarih aralığı/filtre daraltma istenir (bellek ve iş parçacığı koruması).
-try:CIKTI_SATIR_SINIRI=max(1000,int(os.getenv('CIKTI_SATIR_SINIRI','100000')))
-except ValueError:CIKTI_SATIR_SINIRI=100000
+# Varsayılan 30.000 (eskiden 100.000: tek istek ~22 s bir iş parçacığını tutup süreci +200 MB büyütüyordu); .env CIKTI_SATIR_SINIRI ile değişir.
+try:CIKTI_SATIR_SINIRI=max(1000,int(os.getenv('CIKTI_SATIR_SINIRI','30000')))
+except ValueError:CIKTI_SATIR_SINIRI=30000
 
 def _cikti_sinir_mesaji(adet):
     return ('Seçime %s kayıt uyuyor; tek dosyada en çok %s kayıt yazılabilir. Tarih aralığını daraltın ya da proje/durum '
@@ -1503,11 +1545,14 @@ def _start_web_converter():
     import threading
     from . import donusum_isleri
     def loop():
+        son_temizlik=time.time()
         while True:
             conn=None;processed=False
             try:
                 conn=db.baglan(AYAR['DB'])
                 processed=bool(donusum_isleri.worker_step(conn,'web-'+str(os.getpid())))
+                if time.time()-son_temizlik>=GECICI_SIFRE_TEMIZLIK_SN:
+                    son_temizlik=time.time();gecici_sifreleri_temizle(conn)
             except Exception as error:
                 # Ham HTTP hata metni anahtar içeriyor olabilir; yalnız sınıf adı.
                 print('Dönüşüm işçisi kontrolü: '+type(error).__name__,flush=True)
@@ -1529,7 +1574,7 @@ def sunucu_ayarlari():
 def calistir():
     from waitress import serve
     _start_web_converter()
-    eski_kontrolleri_temizle()
+    eski_kontrolleri_temizle();gecici_sifreleri_temizle()
     print(f'Kanıt Paneli {SURUM} — {AYAR["DINLE"]}:{AYAR["PORT"]}',flush=True)
     serve(app,host=AYAR['DINLE'],port=AYAR['PORT'],**sunucu_ayarlari())
 

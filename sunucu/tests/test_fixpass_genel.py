@@ -253,7 +253,7 @@ def test_temporary_password_box_and_turkish_validation_hints(web):
     assert c2.post('/giris', data={'csrf': tk, 'kullanici': 'yeni.kisi', 'sifre': sifre}).status_code == 302
     # Geçici şifre üretme işlemi de kutuyu getirir.
     user = kullanicilar.bul(a, 'yeni.kisi')
-    r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'sifre', 'ad': 'yeni.kisi', 'expected_version': user['session_version']})
+    r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'sifre', 'ad': 'yeni.kisi', 'expected_version': user['hesap_surumu']})
     assert r.status_code == 302
     html = c.get('/yonetim/kullanicilar').data.decode()
     assert 'id="gecici-sifre"' in html and 'için geçici şifre üretildi' in html
@@ -267,7 +267,7 @@ def test_user_edit_form_saves_display_name_scope_and_flags(web):
     c, a = web; login(c)
     kullanicilar.ekle(a, 'duzenlenen', 'OF:oku,kt', 'Test-Password-123!', 'Eski Ad')
     user = kullanicilar.bul(a, 'duzenlenen')
-    r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'guncelle', 'ad': 'duzenlenen', 'expected_version': user['session_version'],
+    r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'guncelle', 'ad': 'duzenlenen', 'expected_version': user['hesap_surumu'],
                                                'gorunen_ad': 'Yeni Ad', 'rol': 'admin', 'projeler': ['OF', 'PA'], 'eylemler_OF': ['kt', 'duzenle'], 'eylemler_PA': ['kt'], 'aktif': '1', 'sifredegistir': '1'})
     assert r.status_code == 302, r.data[:200]
     user = kullanicilar.bul(a, 'duzenlenen')
@@ -275,9 +275,9 @@ def test_user_edit_form_saves_display_name_scope_and_flags(web):
     html = c.get('/yonetim/kullanicilar').data.decode()
     assert 'Hesap ve açık proje kapsamı kaydedildi.' in html and 'Yeni Ad' in html
     # Pasife alma ve aynı sürümle ikinci kayıt denemesi (çakışma) okunur hata verir, 500 değil.
-    r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'guncelle', 'ad': 'duzenlenen', 'expected_version': user['session_version'], 'gorunen_ad': 'Yeni Ad', 'rol': 'admin', 'projeler': ['OF'], 'eylemler_OF': ['kt']})
+    r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'guncelle', 'ad': 'duzenlenen', 'expected_version': user['hesap_surumu'], 'gorunen_ad': 'Yeni Ad', 'rol': 'admin', 'projeler': ['OF'], 'eylemler_OF': ['kt']})
     assert r.status_code == 302 and kullanicilar.bul(a, 'duzenlenen')['aktif'] == 0
-    r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'guncelle', 'ad': 'duzenlenen', 'expected_version': user['session_version'], 'rol': 'admin', 'projeler': ['OF'], 'aktif': '1'})
+    r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'guncelle', 'ad': 'duzenlenen', 'expected_version': user['hesap_surumu'], 'rol': 'admin', 'projeler': ['OF'], 'aktif': '1'})
     assert r.status_code == 200 and 'başka bir admin tarafından değiştirildi' in r.data.decode()
     assert kullanicilar.guncelle(a, 'duzenlenen', gorunen_ad='')['ad'] == 'duzenlenen'
 

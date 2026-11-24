@@ -34,8 +34,10 @@ def settings():
         'PROJE_RENK': {'PP': '#A6A6A6', 'PA': '#4472C4', 'OF': '#FFFF00', 'HI': '#FF0000', 'VI': '#7030A0', 'GA': '#00B050', 'BETA': '#FFA500'},
         'GYAZO_PROXY': os.getenv('GYAZO_PROXY', '1'), 'MAX_GORSEL_BYTES': 10 * 1024 * 1024,
         # Görsel önbelleği sınırları: tmp/gyazo için MB ve gün, tmp/thumbs için MB. 0 = sınır yok.
-        'GYAZO_ONBELLEK_MB': _tam_sayi('GYAZO_ONBELLEK_MB', 500),
-        'GYAZO_ONBELLEK_GUN': _tam_sayi('GYAZO_ONBELLEK_GUN', 30),
+        # Gyazo kopyaları tek kaynağı Gyazo olan kayıtların sunucudaki tek kopyasıdır: varsayılan yaş sınırı yok (0), boyut 2000 MB;
+        # boyut dolunca yine en eski (en uzun süre görüntülenmeyen) silinir.
+        'GYAZO_ONBELLEK_MB': _tam_sayi('GYAZO_ONBELLEK_MB', 2000),
+        'GYAZO_ONBELLEK_GUN': _tam_sayi('GYAZO_ONBELLEK_GUN', 0),
         'KUCUK_ONBELLEK_MB': _tam_sayi('KUCUK_ONBELLEK_MB', 300),
     }
 

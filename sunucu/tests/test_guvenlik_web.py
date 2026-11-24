@@ -241,10 +241,10 @@ def test_admin_parolasi_politika_ve_zorunlu_degisim(web):
     r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'ekle', 'ad': 'yeni.kisi', 'rol': 'admin', 'projeler': ['OF'], 'sifre': 'Gecici-Parola-77', 'gorunen_ad': 'Ad\x00 Soyad\x07'})
     assert r.status_code == 302
     u = kullanicilar.bul(a, 'yeni.kisi'); assert u['sifre_degistir'] == 1 and u['ad'] == 'Ad Soyad'
-    r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'guncelle', 'ad': 'yeni.kisi', 'expected_version': u['session_version'], 'rol': 'admin', 'projeler': ['OF'], 'aktif': '1', 'sifre': 'telecc123'})
+    r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'guncelle', 'ad': 'yeni.kisi', 'expected_version': u['hesap_surumu'], 'rol': 'admin', 'projeler': ['OF'], 'aktif': '1', 'sifre': 'telecc123'})
     assert 'çok yaygın' in r.get_data(as_text=True)
     kullanicilar.guncelle(a, 'yeni.kisi', sifre_degistir=0); u = kullanicilar.bul(a, 'yeni.kisi')
-    r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'guncelle', 'ad': 'yeni.kisi', 'expected_version': u['session_version'], 'rol': 'admin', 'projeler': ['OF'], 'aktif': '1', 'sifre': 'Admin-Biliyor-1'})
+    r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'guncelle', 'ad': 'yeni.kisi', 'expected_version': u['hesap_surumu'], 'rol': 'admin', 'projeler': ['OF'], 'aktif': '1', 'sifre': 'Admin-Biliyor-1'})
     assert r.status_code == 302 and kullanicilar.bul(a, 'yeni.kisi')['sifre_degistir'] == 1
     html = c.get('/yonetim/kullanicilar').get_data(as_text=True)
     assert 'ilk girişte' in html.lower()
@@ -330,7 +330,7 @@ def test_excel_satir_ust_siniri_ve_bicim(web, monkeypatch):
     r = c.get('/disa-aktar.xlsx?durum=hepsi', headers=XHR); assert r.status_code == 400 and 'daraltın' in r.json['hata']
     r = c.get('/disa-aktar.xlsx?durum=hepsi&sayim=1', headers=XHR); assert r.status_code == 400 and r.json['adet'] == 3
     assert denetim_say(a, 'disa_aktar') == 0
-    monkeypatch.setattr(panel, 'CIKTI_SATIR_SINIRI', 100000)
+    monkeypatch.setattr(panel, 'CIKTI_SATIR_SINIRI', 30000)
     r = c.get('/disa-aktar.xlsx?durum=hepsi'); assert r.status_code == 200
     wb = openpyxl.load_workbook(io.BytesIO(r.data)); ws = wb['Kayıtlar']
     assert ws.max_row == 4 and len([x for x in ws[1]]) == 29 and ws[1][0].font.bold and ws[1][0].fill.fgColor.rgb.endswith('1F2937')
