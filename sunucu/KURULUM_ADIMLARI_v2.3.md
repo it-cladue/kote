@@ -114,11 +114,10 @@ cd /root/kanit-kurulum/KanitPaneli_Sunucu_v2.3.0
 python3 deploy/configure-bot.py
 ```
 
-Sorulduğunda gerçek Telegram bot anahtarını ve mevcut bot giriş şifresini (`BOT_PASSWORD`) yazın. Sonra yönetici ayarları (ID yerine Telegram yönetici kimliğinizi, parola sorulduğunda bot yönetici parolasını yazın):
+Sorulduğunda gerçek Telegram bot anahtarını ve mevcut bot giriş şifresini (`BOT_PASSWORD`) yazın. Sonra yönetici ayarları (Telegram yönetici kimliğinizi ve bot yönetici parolasını sorar; parola ekranda görünmez, hiçbir yere yazdırılmaz, `.env` dosyası yerinde güncellenir):
 
 ```bash
-read -rp 'Yonetici Telegram ID: ' AID; read -rs -p 'Bot yonetici parolasi: ' AP; echo
-sed -i "s/^ADMIN_IDS=.*/ADMIN_IDS=$AID/; s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=$AP/" /opt/kanit-paneli/.env; unset AID AP
+python3 deploy/configure-bot.py --yonetici
 grep -E '^(ADMIN_IDS|MAX_DENEME|GYAZO_BAKIM)=' /opt/kanit-paneli/.env
 systemctl restart kanit-bot && sleep 5 && systemctl is-active kanit-bot && journalctl -u kanit-bot -n 15 --no-pager
 ```

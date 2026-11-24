@@ -9,7 +9,7 @@ Veritabanı yapısı yalnız eklemeli değişir; mevcut kayıtlar, kullanıcıla
 - **Tüm panel kullanıcıları bir kez yeniden giriş yapar.** Oturumlara giriş zamanı eklendi ve HTTPS'te çerez adı `__Host-kanit_session` oldu.
 - Oturum en çok **24 saat** sürer (12 saat hareketsizlik sınırı da devam eder). **Çıkış** düğmesi aynı hesabın tüm cihazlardaki oturumlarını kapatır.
 - Şifre değiştirirken yeni kurallar: en az 8 karakter, eskisiyle aynı olamaz, kullanıcı adını içeremez, çok yaygın parolalar (123456, password, telecc123 gibi) kabul edilmez. Mevcut girişler etkilenmez.
-- Bot: bozuk veya çok büyük görsel gönderen personele anında "Görsel okunamadı … yeniden gönderin" denir; onaysız biri önce fotoğraf gönderirse artık engellenmez, parola istenir (3 yanlışta engel).
+- Bot: bozuk veya çok büyük görsel gönderen personele anında "Görsel okunamadı … yeniden gönderin" denir; onaysız biri önce fotoğraf gönderirse artık engellenmez, parola istenir; aynı 20 saniye içinde gelen fotoğraflar ve albümler tek deneme sayılır, engel yalnız 3 ayrı denemede uygulanır.
 - Yönetici komutları (`/admin`): parola 2 dakika içinde yazılmalı, parola mesajı sohbetten silinir, 3 yanlışta 10 dakika kilit, oturum 30 dakika hareketsizlikte kapanır.
 
 ## Web: kimlik doğrulama, oturum ve girdi
@@ -26,7 +26,7 @@ Veritabanı yapısı yalnız eklemeli değişir; mevcut kayıtlar, kullanıcıla
 - Oturum anahtarı döndürme: `SESSION_SECRET_ESKI` ile eski anahtarlar bir süre kabul edilir.
 - Oturumlu kullanıcıdan gelen geçersiz CSRF denemesi İşlem Geçmişi'ne `csrf_hata` olarak yazılır (dakikada en fazla bir).
 - Yorum, soru, yanıt, mesaj bildirimi, silme sebebi ve görünen ad metinlerinden NUL ve kontrol karakterleri temizlenir.
-- Excel çıktısı tek dosyada en çok 100.000 kayıt (`CIKTI_SATIR_SINIRI`); aşılırsa anlaşılır uyarı ve tarih aralığı daraltma önerisi; dosya akışla yazılır (bellek dostu).
+- Excel çıktısı tek dosyada en çok 30.000 kayıt (`CIKTI_SATIR_SINIRI`); aşılırsa anlaşılır uyarı ve tarih aralığı daraltma önerisi; dosya akışla yazılır (bellek dostu).
 - Başarısız giriş, IP sınırı, kilit ve CSRF olayları sunucu günlüğüne (journald) sabit biçimde tek satır yazılır: `kanit-web GIRIS_HATA ip=… kullanici=…`, `GIRIS_SINIR`, `GIRIS_KILIT`, `CSRF_HATA`. fail2ban filtresi bu satırları okur.
 - İstek gövdesi üst sınırı sunucu katmanında da uygulanır (13 MiB); daha büyük yüklemeler okunmadan kesilir.
 - Ters vekil güveni daraltıldı: `trusted_proxy='*'` yerine tek güvenilen vekil (`GUVENILEN_PROXY`, varsayılan 127.0.0.1).
@@ -50,7 +50,7 @@ Veritabanı yapısı yalnız eklemeli değişir; mevcut kayıtlar, kullanıcıla
 
 ## Görsel önbelleği
 
-- `data/tmp/gyazo` (tam boy Gyazo kopyaları) ve `data/tmp/thumbs` (küçük resimler) artık sınırlı: `GYAZO_ONBELLEK_MB` 500, `GYAZO_ONBELLEK_GUN` 30, `KUCUK_ONBELLEK_MB` 300 (0 = sınır yok). Sınır aşılınca en eski kullanılandan başlayarak %90'a inilir; temizlik en fazla 10 dakikada bir çalışır ve yalnız önbellek klasörlerine dokunur. Kullanıcı görselleri (`data/gorseller`, `data/telegram_gorseller`) kapsam dışıdır.
+- `data/tmp/gyazo` (tam boy Gyazo kopyaları) ve `data/tmp/thumbs` (küçük resimler) artık sınırlı: `GYAZO_ONBELLEK_MB` 2000, `GYAZO_ONBELLEK_GUN` 0 (yaşa göre silme kapalı; bu kopyalar yalnız Gyazo'da duran eski kanıtların sunucudaki tek kopyası olabildiği için varsayılan olarak süreyle silinmez), `KUCUK_ONBELLEK_MB` 300 (0 = sınır yok). Sınır aşılınca en eski kullanılandan başlayarak %90'a inilir; temizlik en fazla 10 dakikada bir çalışır ve yalnız önbellek klasörlerine dokunur. Kullanıcı görselleri (`data/gorseller`, `data/telegram_gorseller`) kapsam dışıdır.
 - Yarım kalan indirmeler (`.part`) temizlenir; tek indirme sınırı 20 MB korunur.
 - `python -m app.cli durum` önbellek doluluğunu da gösterir.
 
@@ -66,6 +66,21 @@ Veritabanı yapısı yalnız eklemeli değişir; mevcut kayıtlar, kullanıcıla
 - **Günlük döndürme:** `deploy/logrotate-kanit` IP proxy günlükleri için haftalık döndürme.
 - `apply-update.sh` ön kontrolü artık data dizininde root sahipli dosya bırakmaz; README'deki sunucu komutları `runuser -u kanit` ile ve parolayı `read -rs` ile alır (kabuk geçmişine düşmez); README'ye işletim kontrol listesi (§11) eklendi; `nginx.conf.example` güncellendi.
 
+## Bağımsız inceleme turu (24 Kasım 2026)
+
+Birleşik 2.3.0 kodu, düzeltmeleri yapan ekiplerden bağımsız dört inceleyici (web, bot, kurulum betikleri, yükseltme uyumu) tarafından yeniden incelendi; orta ve üzeri önemde görülen her bulgu ayrı bir denetçi tarafından çürütülmeye çalışıldı ve yalnız yeniden üretilenler kabul edildi. Yeni bir güvenlik açığı çıkmadı; aşağıdakiler bu turda kapatıldı:
+
+- **Güvenlik duvarı betiği (`setup-firewall.sh --uygula`) gerçek ufw'de ilk kuralda duruyordu** (kural kelimeleri tek argüman olarak gidiyordu; sahte ufw ile yapılan test bunu göremedi). Düzeltildi; varsayılan politikalar artık kurallar başarıyla eklendikten sonra yazılır; hata hâlinde "ufw ETKİNLEŞTİRİLMEDİ, elle `ufw enable` yapmayın" uyarısı verilir.
+- **`setup-ip-https.sh --servis-guncelle` dolmuş IP sertifikasıyla hiç başarılı olamıyordu** (sağlık kontrolü sertifika doğruluyordu, her denemede eski birime geri dönüp 18443'ü iki kez yeniden başlatıyordu). Bu yolda sağlık kontrolü artık sertifika doğrulamaz; dolmuş sertifika bilgi satırıyla belirtilir.
+- **`setup-cloudflare-https.sh` DNS kontrolü** birden fazla adres çözüldüğünde (Cloudflare her zaman 2+ adres döndürür) yanlış "ne Cloudflare ne bu sunucu" uyarısı veriyordu; adresler tek tek sınıflandırılır, "turuncu bulut ✓" satırı canlıda da çıkar.
+- **Geri yükleme reçetesi** WAL yan dosyalarını silmiyordu (kalan `-wal` dosyası geri yüklenen yedeğin üzerine bayat sayfalar bindirip indeksleri bozuyor; gerçek uygulamayla yeniden üretildi). Yeni `kanit-yedek.sh --geri-yukle DOSYA` komutu doğru sırayı uygular (durdur → eskiyi kenara al → bütünlük denetimi → yan dosyaları sil → yerleştir → başlat); README §11 ona yönlendirir.
+- **Çıkış ile yönetici formu çakışması:** 2.3.0'da çıkış tüm cihazları düşürmek için oturum sürümünü artırıyordu; Kullanıcılar sayfası aynı sayacı eşzamanlılık denetimi için kullandığından, admin sayfayı açtıktan sonra hedef kullanıcı çıkış yaparsa "başka bir admin değiştirdi" hatası çıkıyordu. İyimser kilit ayrı bir `hesap_surumu` sütununa bağlandı (eklemeli şema değişikliği, ilk açılışta kendiliğinden); çıkışın tüm cihazları kapatma davranışı korunur.
+- **Bot albüm davranışı:** onaysız yeni kullanıcı ilk mesaj olarak 3+ fotoğraflı albüm gönderirse her fotoğraf ayrı deneme sayılıp anında engelleniyordu; aynı 20 saniye içindeki fotoğraflar tek deneme sayılır.
+- Bot: `getFile` kalıcı hataları (çok büyük dosya, geçersiz dosya kimliği) artık 5 kez yeniden denenmez, personele "Görsel okunamadı" denir; teslim edilemeyen korumalı ekran mesajı oturumu kilitlemez (düğmeler "hazırlanıyor" döngüsüne girmez); parola mesajı geçici bir hatada işlenemezse kullanıcıya "yeniden yazın" denir; servis durdurma başlangıç beklemesini keser (SIGKILL'e düşmez); 6 karakterden kısa sır değerleri günlük maskelemesinde kullanılmaz (kimlikleri bozuyordu), 8 karakterden kısa bot parolaları açılışta uyarı verir; 2.2'den kalan ve deneme sınırını aşmış kuyruk satırları güncellemede kapatılır; Telegram 429 duraklaması yalnız ilgili sohbeti bekletir (bir sohbetin seli diğerlerini durdurmaz).
+- Web: güncellemeden önce açılmış (giriş zamanı olmayan) oturum "24 saat doldu" yerine genel yeniden giriş mesajı alır; geçici parolanın süresi geçen kayıtları her okumada ve Kullanıcılar sayfasında temizlenir; "kaydet = kilidi aç" etiketi gerçek davranışla eşlendi (değişiklik olmasa da kaydetmek kilidi açar, denetime `kilit_ac` yazılır); önbellek temizliğiyle görsel servisi arasındaki nadir yarış 500 yerine yeniden çözümleme/yer tutucu ile karşılanır; `--yetki superadmin` komut satırında `admin` eş anlamlısı olarak kabul edilir.
+- Varsayılanlar: `GYAZO_ONBELLEK_GUN` 30 → **0** (Gyazo kopyaları yaşa göre silinmez; eski Excel kayıtlarının tek sunucu kopyası olabilir), `GYAZO_ONBELLEK_MB` 500 → **2000**, `CIKTI_SATIR_SINIRI` 100.000 → **30.000** (tek istek sunucuyu 20 saniye meşgul etmesin).
+- Kurulum: `apply-update.sh` SQLite anlık görüntüsü artık `data/` kökünde `-wal`/`-shm` artığı bırakmaz ve bot açıldıktan 5 saniye sonra hâlâ çalışıyor mu diye bakar (değilse uyarı yazar); `kanit-yedek.sh` ayna sırasında silinen bir dosyada (rsync 24) durmaz; `configure-bot.py --yonetici` yönetici kimliği ve parolasını `.env`'e güvenli yazar (kabuk komutunda parola geçmez); `DOSYA_DOGRULAMA.sha256` güncelliği `tests/test_paket_manifesti.py` ile kilitlendi (manifest eskiyse paket adım 0'daki `PAKET_DOGRU` denetimi başarısız oluyordu).
+
 ## Yeni `.env` anahtarları (hepsi isteğe bağlı; yazılmazsa varsayılan geçerli)
 
 | Anahtar | Varsayılan | Anlam |
@@ -73,9 +88,9 @@ Veritabanı yapısı yalnız eklemeli değişir; mevcut kayıtlar, kullanıcıla
 | `GUVENILEN_HOSTLAR` | boş | Virgülle ayrılmış Host beyaz listesi (örn. `217.156.123.36,panel.alanadi.com`); doluysa 127.0.0.1 ve localhost kendiliğinden eklenir |
 | `GUVENILEN_PROXY` | `127.0.0.1` | TRUST_PROXY=1 iken X-Forwarded-* başlıklarına güvenilen tek vekil |
 | `SESSION_SECRET_ESKI` | boş | Anahtar döndürmede eski SESSION_SECRET değerleri (virgülle); 1-2 gün sonra silin |
-| `CIKTI_SATIR_SINIRI` | `100000` | Excel çıktısında tek dosyaya yazılacak en çok kayıt |
-| `GYAZO_ONBELLEK_MB` | `500` | Gyazo önbelleği toplam üst sınırı (MB) |
-| `GYAZO_ONBELLEK_GUN` | `30` | Bu kadar gün açılmamış Gyazo kopyası silinir |
+| `CIKTI_SATIR_SINIRI` | `30000` | Excel çıktısında tek dosyaya yazılacak en çok kayıt |
+| `GYAZO_ONBELLEK_MB` | `2000` | Gyazo önbelleği toplam üst sınırı (MB) |
+| `GYAZO_ONBELLEK_GUN` | `0` | Bu kadar gün açılmamış Gyazo kopyası silinir; `0` = yaşa göre silme yok (varsayılan) |
 | `KUCUK_ONBELLEK_MB` | `300` | Küçük resim önbelleği toplam üst sınırı (MB) |
 | `MAX_DENEME` | `3` | Bot parolası yanlış deneme sayısı (1-10) |
 | `BOT_YETKISIZ_GORSEL_POLITIKA` | `parola` | Onaysız kişinin ilk görseli: `parola` (parola iste, MAX_DENEME'de engel) ya da `engelle` (eski davranış, hemen engel) |
