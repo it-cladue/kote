@@ -385,7 +385,7 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
 .modal-govde { display: grid; grid-template-columns: 1.4fr 1fr; min-height: 390px; }
 .modal-gorsel { background: #0b1220; display: flex; align-items: center; justify-content: center; min-height: 320px; }
 .modal-gorsel img { max-width: 100%; max-height: 90vh; object-fit: contain; display: block; }
-#m-gorsel-yok { color: #cbd5e1; padding: 30px; text-align: center; line-height: 1.6; word-break: break-all; }
+#m-gorsel-yok { color: #cbd5e1; padding: 30px; text-align: center; line-height: 1.6; word-break: normal; overflow-wrap: anywhere; }
 #m-gorsel-yok a { color: #93c5fd; }
 #m-link { word-break: break-all; margin-bottom: 6px; }
 .modal-bilgi { padding: 22px; }
@@ -393,7 +393,7 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
 .modal-baslik h2 { font-size: 18px; margin: 0 8px 0 0; }
 .modal-baslik h2:focus { outline: 0; }
 .alanlar { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; margin: 0 0 12px; font-size: 14px; }
-.alanlar dt { color: var(--soluk); } .alanlar dd { margin: 0; font-weight: 500; word-break: break-all; }
+.alanlar dt { color: var(--soluk); } .alanlar dd { margin: 0; font-weight: 500; word-break: normal; overflow-wrap: anywhere; }
 .alanlar dd.buyuk { font-size: 19px; font-weight: 700; }
 .modal-butonlar { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
 .duzenle-form { background: var(--yuzey-2); border: 1px solid var(--cizgi); border-radius: var(--yuvarlak); padding: 12px 14px; margin-bottom: 12px; }
@@ -643,3 +643,40 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
   .baslik-eylemler .btn { flex: 1 1 auto; }
   .katalog-bilgi, .katalog-soru { grid-template-columns: 1fr; }
 }
+
+/* ===== 2.3.1: tıklanabilir bildirimler, hatırlatma, geciken sayacı ===== */
+.bildirim-kutu li.tiklanir, .bildirim-satir.tiklanir { cursor: pointer; }
+.bildirim-kutu li.tiklanir:hover, .bildirim-kutu li.tiklanir:focus-visible { background: var(--birincil-yumusak); outline: none; }
+.bildirim-satir.tiklanir:hover, .bildirim-satir.tiklanir:focus-visible { border-color: var(--cizgi-koyu); box-shadow: var(--golge-2); outline: none; }
+.bildirim-kutu li.hatirlatma > b, .bildirim-satir.hatirlatma .bildirim-satir-baslik b { color: var(--turuncu); }
+.geciken-baglanti { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 5px 10px; border-radius: 999px; font-size: 12.5px; color: var(--soluk); background: var(--yuzey-2); border: 1px solid var(--cizgi); align-self: flex-start; }
+.geciken-baglanti b { font-variant-numeric: tabular-nums; }
+.geciken-baglanti.var { background: var(--kirmizi-yumusak); color: var(--kirmizi); border-color: color-mix(in srgb, var(--kirmizi) 30%, transparent); font-weight: 600; }
+.geciken-baglanti:hover { text-decoration: none; filter: brightness(.97); }
+@media (max-width: 700px) { .geciken-baglanti { min-height: 40px; } }
+/* ===== 2.3.1: ekleyen profili — tarih aralığı kısayolları ve özet bloğu (sayaçlar + kategori × tip tablosu) ===== */
+.tarih-kisayollar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 10px 0 0; }
+.profil-ozet-blok { margin: 14px 0; }
+.profil-ozet-blok .kart-baslik { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.profil-ozet-blok .profil-sayaclari { margin: 10px 0 12px; }
+.profil-ozet-blok .mini-ozet.approved b { color: var(--yesil); } .profil-ozet-blok .mini-ozet.pending b { color: var(--turuncu); } .profil-ozet-blok .mini-ozet.deleted b { color: var(--kirmizi); }
+.ozet-tablo { min-width: 0; }
+.ozet-tablo th.sayi, .ozet-tablo td.sayi { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ozet-tablo tr.alt-toplam td { background: var(--yuzey-2); color: var(--yazi-2); font-size: 13px; }
+.ozet-tablo tfoot td { background: var(--yuzey-3); border-top: 2px solid var(--cizgi-koyu); }
+.ozet-notu { margin: 8px 0 0; }
+@media (max-width: 620px) {
+  .tarih-kisayollar .btn { min-height: 40px; }
+  .profil-ozet-blok .kart-baslik .btn { flex: 1 1 100%; text-align: center; }
+  /* Telefonda 5 sütun yana kaydırmadan sığar: sıkı dolgu, sarılabilen başlık, küçük yazı. */
+  .ozet-tablo { min-width: 0; font-size: 12.5px; table-layout: auto; }
+  .ozet-tablo th, .ozet-tablo td { padding: 7px 4px; }
+  .ozet-tablo th { font-size: 10px; letter-spacing: 0; white-space: normal; line-height: 1.15; overflow-wrap: anywhere; }
+  .ozet-tablo th:first-child, .ozet-tablo td.sarmal { max-width: 96px; }
+  .ozet-tablo td.sarmal small { display: block; }
+}
+/* 2.3.1 inceleme: gizle modunda kt'siz projelerin kartında bağlantısız (pasif) sayaçlar */
+.sayi-btn.pasif { cursor: default; opacity: .55; }
+.sayi-btn.pasif:hover { background: var(--yuzey-2); }
+.geciken-baglanti.pasif { cursor: default; opacity: .7; }
+.geciken-baglanti.pasif:hover { filter: none; }

@@ -46,6 +46,8 @@ def main():
     topla.add_argument('--rapor',metavar='DOSYA',help='Açılamayan bağlantı listesi; varsayılan veri klasöründe gyazo-acilamayan.csv')
     backup=_alt(sub,'yedekle','Tutarlı SQLite yedeği ve isteğe bağlı görsel kopyası')
     backup.add_argument('hedef',help='Yedeklerin yazılacağı klasör (altına tarihli klasör açılır)');backup.add_argument('--gorseller',action='store_true',help='Görsel ve arşiv klasörlerini de kopyala')
+    hat=_alt(sub,'hatirlatma-uret','Onay bekleyen kayıtlar için hatırlatma bildirimlerini hemen üret (JSON rapor). Günlük kullanıcı sınırı ve günde bir kuralı nedeniyle aynı gün tekrar çalıştırmak yeni satır eklemez')
+    hat.add_argument('--tarih',metavar='YYYY-AA-GG',help='Bugün yerine bu (geçmiş) güne göre üret; ileri tarih kabul edilmez (gerçek günleri susturur)')
     _alt(sub,'durum','Kayıt sayısı, dosya yolları ve bot gelen kutusu özeti');_alt(sub,'veritabani-kur','Veritabanı dosyasını ve şemayı oluştur')
     args=parser.parse_args()
     if args.command in ('admin-ekle','sifre-sifirla'):
@@ -105,6 +107,14 @@ def main():
                 print('Görsel önbelleği:',f"{d.get('toplam_mb',0)} MB toplam;"," ".join(f"{ad}: {v.get('dosya',0)} dosya / {v.get('mb',0)} MB (sınır {v.get('sinir_mb',0) or 'yok'} MB)" for ad,v in d.items() if isinstance(v,dict) and 'dosya' in v))
             except Exception as hata:
                 print('Görsel önbelleği: okunamadı:',hata)
+        elif args.command=='hatirlatma-uret':
+            from . import hatirlatma
+            bugun=None
+            if args.tarih:
+                try: bugun=datetime.strptime(args.tarih,'%Y-%m-%d').date()
+                except ValueError: raise SystemExit('Hata: tarih YYYY-AA-GG biçiminde olmalı.')
+                if bugun>datetime.now().date(): raise SystemExit('Hata: --tarih bugünden ileri olamaz; ileri tarihli hatırlatma gerçek günleri susturur.')
+            print(json.dumps(hatirlatma.uret(c,AYAR,bugun=bugun),ensure_ascii=False,indent=2))
         elif args.command=='veritabani-kur': print('Veritabanı hazır:',AYAR['DB'])
     finally:c.close()
 

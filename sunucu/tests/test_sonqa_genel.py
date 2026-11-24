@@ -209,7 +209,7 @@ def test_catalog_code_fields_have_turkish_validation_messages(web):
     assert 'pattern="[A-Z0-9_]{1,24}"' in html and 'data-gecersiz="Proje kodu yalnız BÜYÜK harf, rakam ve alt çizgi (en çok 24)."' in html
     assert 'data-bos="Proje kodu zorunludur."' in html
     assert 'data-gecersiz="Kategori kodu yalnız küçük harf, rakam ve alt çizgi içerebilir (en çok 48)."' in html and 'data-bos="Kategori kodu zorunludur."' in html
-    assert 'katalog.js?v=2.3.0' in html
+    assert 'katalog.js?v=2.3.1' in html
     js = (STATIC / 'katalog.js').read_text(encoding='utf-8')
     assert '"data-gecersiz": "Soru anahtarı küçük harfle başlamalı' in js and '"data-question-key"' in js
     panel_js = (STATIC / 'panel.js').read_text(encoding='utf-8')
@@ -255,4 +255,4 @@ def test_docs_mention_ctrl_f5_and_final_qa_fixes(web):
     c, a = web; login(c)
     for url in ('/', '/bildirimler', '/denetim', '/yonetim/kullanicilar', '/yonetim/katalog'):
         html = c.get(url).data.decode()
-        assert 'stil.css?v=2.3.0' in html and 'panel.js?v=2.3.0' in html, url
+        assert 'stil.css?v=2.3.1' in html and 'panel.js?v=2.3.1' in html, url

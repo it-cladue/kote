@@ -364,3 +364,16 @@ body.lightbox-acik { overflow: hidden; }
   .kayit-sayfa .sec-hepsi-alan { margin-left: 0 !important; margin-top: 4px !important; display: flex !important; }
   .kayit-sayfa .sonuc-ozeti { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 }
+
+/* ===== 2.3.1: onaysız kayıt görünürlüğü, bekleme filtresi, yorum vurgusu ===== */
+.kayit-sayfa .durum-rozet.onay-yok { background: #dc2626; color: #fff; letter-spacing: .02em; white-space: normal; text-align: left; line-height: 1.25; max-width: 100%; }
+.kayit-sayfa .durum-rozet.onay-yok::before { background: #fff; }
+[data-theme="dark"] .kayit-sayfa .durum-rozet.onay-yok { background: #ef4444; color: #fff; }
+.kayit-sayfa .onay-yok-serit { background: #dc2626; color: #fff; padding: 10px 16px; font-weight: 700; font-size: 13.5px; line-height: 1.4; border-bottom: 1px solid #b91c1c; }
+.kayit-sayfa .onaysiz-not { display: inline-flex; align-items: center; margin-left: 10px; padding: 3px 10px; border-radius: 999px; background: var(--yuzey-3, #eef2f7); color: var(--soluk); font-size: 12px; }
+.kayit-sayfa .onaysiz-uyari { margin: 8px 0 0; font-weight: 600; }
+.kayit-sayfa .bekleme-alan { min-width: 170px; }
+.kayit-sayfa .bekleme-alan input { max-width: 170px; }
+.kayit-sayfa .yorum-listesi li.vurgu { outline: 3px solid var(--birincil, #1d4ed8); outline-offset: 1px; background: #fff7cc; transition: background .4s, outline-color .4s; }
+[data-theme="dark"] .kayit-sayfa .yorum-listesi li.vurgu { background: #4a3f12; }
+@media (max-width: 620px) { .kayit-sayfa .durum-rozet.onay-yok { font-size: 11px; } .kayit-sayfa .onaysiz-not { margin-left: 0; } }

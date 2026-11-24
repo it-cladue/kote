@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any
 
 _PAGE_SIZE = 50
@@ -83,14 +84,88 @@ def _normalise_filters(
     if page < 1:
         raise ValueError("Geçersiz sayfa.")
 
-    return {"project": project, "kategori": category, "kt": state, "outside": outside, "page": page}
+    # 2.3.1: tarih aralığı (Kayıtlar gelişmiş filtresiyle aynı biçim); ters aralık düzeltilir ve uyarıyla bildirilir.
+    dates: dict[str, str] = {}
+    for name in ("tarih1", "tarih2"):
+        value = _filter_value(filters, name)
+        value = value.strip()[:10] if isinstance(value, str) else ""
+        if value:
+            try:
+                datetime.strptime(value, "%Y-%m-%d")
+            except ValueError:
+                raise ValueError("Tarih biçimi geçersiz; takvimden seçin (YYYY-AA-GG).") from None
+        dates[name] = value
+    warning = ""
+    if dates["tarih1"] and dates["tarih2"] and dates["tarih1"] > dates["tarih2"]:
+        dates["tarih1"], dates["tarih2"] = dates["tarih2"], dates["tarih1"]
+        warning = "Başlangıç tarihi bitişten sonraydı; tarihler yer değiştirildi (%s → %s)." % (dates["tarih1"], dates["tarih2"])
+
+    return {"project": project, "kategori": category, "kt": state, "outside": outside, "page": page,
+            "tarih1": dates["tarih1"], "tarih2": dates["tarih2"], "uyari": warning}
 
 
-def _scope_where(identifier: str, allowed: list[str]) -> tuple[str, list[Any]]:
-    """Tüm profile sorgularında zorunlu olan ekleyen + proje kapsamı."""
+def _date_where(current: Mapping[str, Any]) -> tuple[list[str], list[Any]]:
+    """Kayıt tarihi (``tarih``) aralığı; Kayıtlar sayfasıyla aynı sınırlar (gün başı / gün sonu)."""
+    parts: list[str] = []
+    params: list[Any] = []
+    if current.get("tarih1"):
+        parts.append("tarih >= ?"); params.append(current["tarih1"] + " 00:00:00")
+    if current.get("tarih2"):
+        parts.append("tarih <= ?"); params.append(current["tarih2"] + " 23:59:59")
+    return parts, params
+
+
+TIP_SUTUNLARI = (("sessiz", "Sessiz"), ("telesekreter", "Telesekreter"), ("diger", "Diğer / boş"))
+
+
+def _tip_kodu(value: Any) -> str:
+    text = str(value or "").strip().casefold()
+    if text.startswith("sessiz"):
+        return "sessiz"
+    if text.startswith("tele"):
+        return "telesekreter"
+    return "diger"
+
+
+def _bos_sayac() -> dict[str, int]:
+    return {"sessiz": 0, "telesekreter": 0, "diger": 0, "toplam": 0}
+
+
+def _capraz_tablo(conn: Any, where: str, params: list[Any]) -> dict[str, Any]:
+    """Kategori × tip çapraz tablosu: satır kategori, sütun tip, satır/sütun toplamları; proje birden fazlaysa proje alt toplamları."""
+    rows = conn.execute(
+        f"""SELECT COALESCE(NULLIF(TRIM(kategori), ''), '') AS kategori, COALESCE(tip, '') AS tip, proje, COUNT(*) AS adet
+              FROM kayitlar WHERE {where} GROUP BY 1, 2, 3""",
+        tuple(params),
+    ).fetchall()
+    categories: dict[str, dict[str, int]] = {}
+    projects: dict[str, dict[str, int]] = {}
+    total = _bos_sayac()
+    for row in rows:
+        code = _tip_kodu(row["tip"]); count = int(row["adet"] or 0)
+        for bucket in (categories.setdefault(row["kategori"], _bos_sayac()), projects.setdefault(row["proje"], _bos_sayac()), total):
+            bucket[code] += count; bucket["toplam"] += count
+    satirlar = [dict(kategori=name or "— (kategori yok)", **values) for name, values in categories.items()]
+    satirlar.sort(key=lambda item: (-item["toplam"], item["kategori"].casefold()))
+    proje_satirlari = [dict(proje=name, **values) for name, values in sorted(projects.items(), key=lambda item: (-item[1]["toplam"], item[0]))]
+    return {"satirlar": satirlar, "toplam": total, "projeler": proje_satirlari if len(proje_satirlari) > 1 else [],
+            "sutunlar": [dict(kod=code, etiket=label) for code, label in TIP_SUTUNLARI]}
+
+
+def _scope_where(identifier: str, allowed: list[str], onayli_zorunlu: list[str] | None = None) -> tuple[str, list[Any]]:
+    """Tüm profile sorgularında zorunlu olan ekleyen + proje kapsamı.
+
+    2.3.1 ``onayli_zorunlu``: bu projelerde yalnız onaylı, silinmemiş kayıtlar kapsama girer (ONAYSIZ_GORUNUM=gizle,
+    kullanıcının kt yetkisi olmayan projeler)."""
     if not allowed:
         return "1=0", []
-    return "ekleyen_id=? AND proje IN ({})".format(",".join("?" for _ in allowed)), [identifier, *allowed]
+    where = "ekleyen_id=? AND proje IN ({})".format(",".join("?" for _ in allowed))
+    params: list[Any] = [identifier, *allowed]
+    gizli = [p for p in (onayli_zorunlu or ()) if p in allowed]
+    if gizli:
+        where += " AND (proje NOT IN ({}) OR (kt=1 AND silindi=0))".format(",".join("?" for _ in gizli))
+        params.extend(gizli)
+    return where, params
 
 
 def _has_eligible_evidence(conn: Any, scope: str, scope_params: list[Any]) -> bool:
@@ -176,6 +251,7 @@ def get_profile(
     allowed_projects: Sequence[Any] | None,
     filters: Mapping[str, Any] | None,
     superadmin: bool = False,
+    onayli_zorunlu: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Bir Telegram ekleyenin, yalnızca izinli projelerdeki kanıt profilini döndürür.
 
@@ -186,7 +262,7 @@ def get_profile(
     """
     identifier = _tg_id(tg_id)
     allowed = _allowed_projects(allowed_projects)
-    scope, scope_params = _scope_where(identifier, allowed)
+    scope, scope_params = _scope_where(identifier, allowed, _allowed_projects(onayli_zorunlu))
 
     if not superadmin and not _has_eligible_evidence(conn, scope, scope_params):
         raise PermissionError("Bu kullanıcı için erişilebilir kanıt yok.")
@@ -203,6 +279,12 @@ def get_profile(
         expected_project = _computed_expected(conn, scope, scope_params)
         expected_source = "hesaplanan" if expected_project else "belirsiz"
 
+    current_filters = _normalise_filters(filters, allowed, expected_project)
+    # Tarih aralığı sayaçları, proje listesini, satırları ve çapraz tabloyu daraltır; beklenen proje ve erişim denetimi tüm geçmişe bakar.
+    date_parts, date_params = _date_where(current_filters)
+    ranged = " AND ".join([scope, *date_parts])
+    ranged_params = [*scope_params, *date_params]
+
     count_row = conn.execute(
         f"""
         SELECT COUNT(*) AS total,
@@ -212,9 +294,9 @@ def get_profile(
                SUM(CASE WHEN COALESCE(ekleyen_guven, '') NOT IN (?, ?)
                         THEN 1 ELSE 0 END) AS estimated
           FROM kayitlar
-         WHERE {scope}
+         WHERE {ranged}
         """,
-        (*_CONFIDENT_SOURCES, *scope_params),
+        (*_CONFIDENT_SOURCES, *ranged_params),
     ).fetchone()
     counts = {
         "total": _count_value(count_row, "total"),
@@ -226,8 +308,8 @@ def get_profile(
     }
     if expected_project:
         outside_row = conn.execute(
-            f"SELECT COUNT(*) FROM kayitlar WHERE {scope} AND proje<>?",
-            (*scope_params, expected_project),
+            f"SELECT COUNT(*) FROM kayitlar WHERE {ranged} AND proje<>?",
+            (*ranged_params, expected_project),
         ).fetchone()
         counts["outside"] = int(outside_row[0])
 
@@ -236,16 +318,15 @@ def get_profile(
         for row in conn.execute(
             f"""SELECT proje, COUNT(*) AS adet
                   FROM kayitlar
-                 WHERE {scope}
+                 WHERE {ranged}
                  GROUP BY proje
                  ORDER BY adet DESC, proje COLLATE UNICODE_NOCASE ASC""",
-            tuple(scope_params),
+            tuple(ranged_params),
         ).fetchall()
     ]
 
-    current_filters = _normalise_filters(filters, allowed, expected_project)
-    where_parts = [scope]
-    row_params: list[Any] = list(scope_params)
+    where_parts = [ranged]
+    row_params: list[Any] = list(ranged_params)
     if current_filters["project"]:
         where_parts.append("proje=?")
         row_params.append(current_filters["project"])
@@ -265,7 +346,17 @@ def get_profile(
 
     rows, total_filtered = _safe_rows(conn, " AND ".join(where_parts), row_params, current_filters["page"])
     pages = max(1, (total_filtered + _PAGE_SIZE - 1) // _PAGE_SIZE)
+    # Çapraz tablo bu görünümü (proje, kategori, durum sekmesi, tarih aralığı) izler; "Tümü" sekmesinde silinenler tabloya girmez.
+    table_parts = list(where_parts) if state != "hepsi" else [*where_parts, "silindi=0"]
+    capraz = _capraz_tablo(conn, " AND ".join(table_parts), row_params)
+    capraz["silinen_haric"] = state == "hepsi"
+    link_args = {key: value for key, value in (("project", current_filters["project"]), ("kategori", current_filters["kategori"]),
+                                              ("kt", current_filters["kt"] if current_filters["kt"] != "hepsi" else ""),
+                                              ("outside", "1" if current_filters["outside"] == "1" else ""),
+                                              ("tarih1", current_filters["tarih1"]), ("tarih2", current_filters["tarih2"])) if value}
     return {
+        "capraz": capraz,
+        "link_args": link_args,
         "user": metadata,
         "expected_project": expected_project,
         "expected_source": expected_source,
