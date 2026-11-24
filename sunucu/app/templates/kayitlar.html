@@ -4,7 +4,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='kayit.css', v='2.3.0') }}">
 {% set export_url = url_filtre('disa_aktar_xlsx') if url_filtre is defined else url_for('disa_aktar_xlsx') %}
 {% set proje_etiketleri = {} %}{% for p in proje_bilgileri %}{% set _ = proje_etiketleri.update({p.code: p.label}) %}{% endfor %}
-<div class="kayit-sayfa" id="kayit-sayfa" data-durum="{{ f.durum }}" data-toplu-kt="{{ '1' if toplu_kt else '0' }}" data-gorunum="{{ gorunum }}"{% if acik_kayit %} data-acik="{{ acik_kayit }}"{% endif %}>
+<div class="kayit-sayfa" id="kayit-sayfa" data-durum="{{ f.durum }}" data-toplu-kt="{{ '1' if toplu_kt else '0' }}" data-gorunum="{{ gorunum }}"{% if acik_kayit %} data-acik="{{ acik_kayit }}"{% endif %}{% if acik_yorum %} data-yorum="{{ acik_yorum }}"{% endif %}>
 <section class="sayfa-baslik kayit-baslik">
   <div><p class="ust-etiket">Kanıt çalışma alanı</p><h1>Kayıtlar</h1><p>Kanıt ekleme yalnız Telegram'dan yapılır. Burada kayıtları inceleyin, onaylayın ve işlem yapın. Bir satıra veya karta tıklayarak ayrıntıyı açabilirsiniz.</p></div>
   <div class="baslik-eylemler">{% if toplam %}<a class="btn" href="{{ export_url }}" title="Şu anki proje, durum ve filtre seçimini Excel olarak indirir">Excel (bu görünüm)</a>{% else %}<span class="btn" aria-disabled="true" title="Bu görünümde kayıt olmadığı için indirilecek bir şey yok">Excel (bu görünüm)</span>{% endif %}</div>
@@ -25,8 +25,9 @@
       <button class="btn" type="button" id="sonuclari-yenile" title="Sonuçları sayfayı yenilemeden tazeler">Yenile</button>
       {% if filtre_aktif %}<a class="btn" href="{{ url_for('kayitlar', gorunum=gorunum, durum=f.durum, boy=sayfa_boyu) }}">Temizle</a>{% endif %}
     </div>
-    <details class="gelismis-filtre" {% if f.ekleyen or f.tarih1 or f.tarih2 or f.tarihsiz or uyari %}open{% endif %}><summary>Gelişmiş filtreler{% if f.ekleyen or f.tarih1 or f.tarih2 or f.tarihsiz %} <span class="sayi-rozet">açık</span>{% endif %}</summary><div class="filtre-ileri">
+    <details class="gelismis-filtre" {% if f.ekleyen or f.tarih1 or f.tarih2 or f.tarihsiz or f.bekleme or uyari %}open{% endif %}><summary>Gelişmiş filtreler{% if f.ekleyen or f.tarih1 or f.tarih2 or f.tarihsiz or f.bekleme %} <span class="sayi-rozet">açık</span>{% endif %}</summary><div class="filtre-ileri">
       <label class="filtre-alan"><span>Ekleyen</span><input id="filtre-ekleyen" name="ekleyen" value="{{ f.ekleyen }}" placeholder="Telegram adı veya ID"></label>
+      <label class="filtre-alan bekleme-alan"><span>En az … gündür bekleyen</span><input id="filtre-bekleme" type="number" name="bekleme" min="1" max="3650" inputmode="numeric" value="{{ f.bekleme or '' }}" placeholder="gün (ör. {{ hatirlatma_gun }})" title="Kaydın ilk görülme tarihinden bu yana geçen gün sayısı"></label>
       <label class="filtre-alan"><span>Başlangıç</span><input id="filtre-tarih1" type="date" name="tarih1" value="{{ f.tarih1 }}"></label>
       <label class="filtre-alan"><span>Bitiş</span><input id="filtre-tarih2" type="date" name="tarih2" value="{{ f.tarih2 }}"></label>
       <label class="filtre-onay"><input type="checkbox" name="tarihsiz" value="1" {{ 'checked' if f.tarihsiz }}> Yalnız tarihsiz kayıtlar</label>
@@ -37,21 +38,23 @@
 <section id="kayit-sonuclari" aria-live="polite" aria-busy="false" data-damga="{{ damga or '' }}">
   <div class="sekme-satir">
     <div class="sekmeler" aria-label="Kayıt durumu">
-    {% for d, ad in [('bekleyen','Onay bekleyen'),('onayli','Onaylı'),('silinen','Silinen'),('hepsi','Hepsi')] %}<a class="sekme {{ 'aktif' if f.durum == d }} {{ d }}" href="{{ url_degistir(durum=d,s=1,ac='') }}" {% if f.durum == d %}aria-current="page"{% endif %}>{{ ad }} <b id="sayac-{{ d }}">{{ sayac[d] }}</b></a>{% endfor %}
+    {% for d, ad in [('bekleyen','Onay bekleyen'),('onayli','Onaylı'),('silinen','Silinen'),('hepsi','Hepsi')] if not f.yalniz_onayli or d == 'onayli' %}<a class="sekme {{ 'aktif' if f.durum == d }} {{ d }}" href="{{ url_degistir(durum=d,s=1,ac='') }}" {% if f.durum == d %}aria-current="page"{% endif %}>{{ ad }} <b id="sayac-{{ d }}">{{ sayac[d] }}</b></a>{% endfor %}
+    {% if f.gizli_onaysiz %}<span class="onaysiz-not kucukyazi" id="onaysiz-not" title="Bu projelerde onay yetkiniz olmadığı için onaysız kayıtlar gösterilmez">Onay bekleyen kayıtlar size gösterilmez.</span>{% endif %}
     </div>
     <div class="gorunum-araclar">
       <div class="gorunumler" aria-label="Görünüm"><span>Görünüm</span><a class="{{ 'aktif' if gorunum == 'tablo' }}" href="{{ url_degistir(gorunum='tablo',ac='') }}">Tablo</a><a class="{{ 'aktif' if gorunum == 'kart' }}" href="{{ url_degistir(gorunum='kart',ac='') }}">Kart</a><a class="{{ 'aktif' if gorunum == 'galeri' }}" href="{{ url_degistir(gorunum='galeri',ac='') }}">Galeri</a></div>
       <label class="sayfa-boyu-alan"><span>Sayfada</span><select id="sayfa-boyu" aria-label="Sayfa başına kayıt">{% for b in sayfa_boylari %}<option value="{{ url_degistir(boy=b, s=1, ac='') }}" {{ 'selected' if b == sayfa_boyu }}>{{ b }}</option>{% endfor %}</select></label>
     </div>
   </div>
+  {% if onaysiz_uyari %}<div class="hata onaysiz-uyari" role="alert" id="onaysiz-uyari">{{ onaysiz_uyari }} Bu kayıtlar raporlamada kullanılmaz; takım liderinin onayını bekleyin.</div>{% endif %}
   <div class="sonuc-satir">
-    <p class="sonuc-ozeti"><b>{{ toplam }}</b> kayıt{% if sayfa_sayisi > 1 %} · sayfa {{ sayfa }} / {{ sayfa_sayisi }}{% endif %}{% if f.durum == 'bekleyen' and toplam %} · inceleme bekliyor{% endif %}
+    <p class="sonuc-ozeti"><b>{{ toplam }}</b> kayıt{% if f.bekleme %} · en az {{ f.bekleme }} gündür bekleyen <a href="{{ url_degistir(bekleme='', s=1, ac='') }}" class="arama-temizle" title="Bekleme süresi filtresini kaldır">kaldır</a>{% endif %}{% if sayfa_sayisi > 1 %} · sayfa {{ sayfa }} / {{ sayfa_sayisi }}{% endif %}{% if f.durum == 'bekleyen' and toplam %} · inceleme bekliyor{% endif %}
       {% if f.q %}<span class="arama-rozet" id="arama-rozet">Arama: <b>{{ f.q }}</b> <a href="{{ url_degistir(q='', s=1, ac='') }}" class="arama-temizle" title="Arama sözcüğünü kaldır, diğer filtreler kalsın">Aramayı temizle</a></span>{% endif %}
       {% if toplu_kt and gorunum == 'kart' and kayitlar %}<label class="sec-hepsi-alan"><input type="checkbox" id="sec-hepsi" aria-label="Sayfadaki tüm kayıtları seç"> Sayfadakileri seç</label>{% endif %}</p>
     {% if toplu_kt %}<div class="toplu-arac gizli" id="toplu-arac" role="toolbar" aria-label="Toplu işlem"><span id="toplu-sayi">0 seçili</span><button type="button" class="btn basari kucuk" data-toplu="1">Seçilenleri onayla (<span data-toplu-sayi>0</span>)</button><button type="button" class="btn kucuk" data-toplu="0">Onayı kaldır (<span data-toplu-sayi>0</span>)</button><button type="button" class="btn kucuk" data-toplu-temizle>Seçimi bırak</button></div>{% endif %}
   </div>
   {% macro rozetler(k) -%}{% if k.silindi %}<span class="etiket-kucuk kirmizi-arka">Silindi</span>{% elif k.excel_durum == 'silinmis' %}<span class="etiket-kucuk gri-arka">Eski kaynakta yok</span>{% endif %}{% if k.bekleyen_hata %}<span class="etiket-kucuk kirmizi-arka" title="{{ k.bekleyen_hata }}">İşlem hatası</span>{% elif k.bekleyen_islem %}<span class="etiket-kucuk turuncu-arka">İşleniyor</span>{% endif %}{%- endmacro %}
-  {% macro durum(k) -%}{% if k.kt %}<span class="durum-rozet onayli">Onaylı</span>{% else %}<span class="durum-rozet bekliyor">Bekliyor</span>{% endif %}{%- endmacro %}
+  {% macro durum(k) -%}{% if k.kt %}<span class="durum-rozet onayli">Onaylı</span>{% elif k.onay_uyari %}<span class="durum-rozet onay-yok" title="Takım lideri onayı yok; bu kayıt raporlamada kullanılmaz">ONAY YOK — raporlamada kullanmayın</span>{% else %}<span class="durum-rozet bekliyor">Bekliyor</span>{% endif %}{%- endmacro %}
   {% macro mini(k, sinif) -%}{% if k.gorsel_var %}<span class="mini-kutu {{ sinif }}"><img class="mini" loading="lazy" decoding="async" src="{{ url_for('kucuk_goster', kid=k.id) }}" alt="" data-mini>{% if k.gorsel_kaynak == 'gyazo' %}<span class="mini-etiket" title="Eski Gyazo bağlantısı sunucu üzerinden getiriliyor">Gyazo</span>{% endif %}</span>{% elif k.gorsel_kayip %}<span class="mini-kutu {{ sinif }} bos kayip" title="Görsel dosyası sunucuda bulunamadı (silinmiş veya taşınmış olabilir)">Dosya yok</span>{% else %}<span class="mini-kutu {{ sinif }} bos" title="Görsel yok">—</span>{% endif %}{%- endmacro %}
   {% macro secim(k) -%}{% if toplu_kt %}<input type="checkbox" class="kayit-sec" value="{{ k.id }}" aria-label="Kayıt #{{ k.id }} seç" {% if not k.izin_kt or k.silindi %}disabled title="{{ 'Silinmiş kayıt toplu işleme alınmaz' if k.silindi else 'Bu projede onay yetkiniz yok' }}"{% endif %}>{% endif %}{%- endmacro %}
   {% if gorunum == 'tablo' %}
@@ -69,6 +72,7 @@
     <div class="modal-baslik"><h2 id="modal-baslik" tabindex="-1">Kayıt ayrıntısı</h2><span id="m-proje" class="rozet"></span><span id="m-kategori" class="etiket-ince"></span><span id="m-kt" class="durum-rozet onayli gizli">Onaylı</span><span id="m-bekliyor" class="durum-rozet bekliyor gizli">Bekliyor</span><span id="m-durum"></span></div>
     <div class="modal-kontrol"><span id="m-konum" class="kucukyazi" title="Bu sayfadaki sırası"></span><span class="klavye-ipucu kucukyazi" aria-hidden="true">← → ile gez · Esc kapat</span><button class="modal-onceki" type="button" aria-label="Önceki kayıt (sol ok)" title="Önceki kayıt (←)">‹</button><button class="modal-sonraki" type="button" aria-label="Sonraki kayıt (sağ ok)" title="Sonraki kayıt (→)">›</button><button class="modal-kapat" type="button" aria-label="Ayrıntıyı kapat (Esc)">Kapat</button></div>
   </header>
+  <div id="m-onay-yok" class="onay-yok-serit gizli" role="alert">Bu kaydın takım lideri onayı yok; raporlamaya alınamaz.</div>
   <div class="modal-govde">
     <div class="modal-gorsel">
       <div class="gorsel-sahne" id="m-sahne"><img id="m-gorsel" alt="Kayıt kanıt görseli" class="gizli"><div id="m-gorsel-yok" class="gorsel-yok-kutusu gizli"></div><div id="m-gorsel-yukleniyor" class="gorsel-yukleniyor gizli">Görsel yükleniyor…</div></div>

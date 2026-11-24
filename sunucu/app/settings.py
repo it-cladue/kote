@@ -39,6 +39,15 @@ def settings():
         'GYAZO_ONBELLEK_MB': _tam_sayi('GYAZO_ONBELLEK_MB', 2000),
         'GYAZO_ONBELLEK_GUN': _tam_sayi('GYAZO_ONBELLEK_GUN', 0),
         'KUCUK_ONBELLEK_MB': _tam_sayi('KUCUK_ONBELLEK_MB', 300),
+        # 2.3.1 — Onaysız kayıt görünürlüğü (kt yetkisi olmayan kullanıcı için): 'uyar' (varsayılan; kırmızı rozet ve şerit)
+        # ya da 'gizle' (onaysız kayıtlar liste/arama/ayrıntı/çıktıda hiç görünmez). Başka değer 'uyar' sayılır.
+        'ONAYSIZ_GORUNUM': 'gizle' if str(os.getenv('ONAYSIZ_GORUNUM', '') or '').strip().lower() == 'gizle' else 'uyar',
+        # 2.3.1 — Hatırlatma bildirimleri: yaş eşiği (gün), tekrar aralığı (gün), arka plan kontrol sıklığı (dk; 0 = kapalı),
+        # bir çalıştırmada kullanıcı başına en çok kayıt hatırlatması (aşan kısım proje özetine katlanır).
+        'HATIRLATMA_GUN': _tam_sayi('HATIRLATMA_GUN', 3, en_az=1),
+        'HATIRLATMA_TEKRAR_GUN': _tam_sayi('HATIRLATMA_TEKRAR_GUN', 3, en_az=1),
+        'HATIRLATMA_KONTROL_DK': _tam_sayi('HATIRLATMA_KONTROL_DK', 30),
+        'HATIRLATMA_GUNLUK_SINIR': _tam_sayi('HATIRLATMA_GUNLUK_SINIR', 50, en_az=1),
     }
 
 AYAR = settings()

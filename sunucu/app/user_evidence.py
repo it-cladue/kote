@@ -86,11 +86,20 @@ def _normalise_filters(
     return {"project": project, "kategori": category, "kt": state, "outside": outside, "page": page}
 
 
-def _scope_where(identifier: str, allowed: list[str]) -> tuple[str, list[Any]]:
-    """Tüm profile sorgularında zorunlu olan ekleyen + proje kapsamı."""
+def _scope_where(identifier: str, allowed: list[str], onayli_zorunlu: list[str] | None = None) -> tuple[str, list[Any]]:
+    """Tüm profile sorgularında zorunlu olan ekleyen + proje kapsamı.
+
+    2.3.1 ``onayli_zorunlu``: bu projelerde yalnız onaylı, silinmemiş kayıtlar kapsama girer (ONAYSIZ_GORUNUM=gizle,
+    kullanıcının kt yetkisi olmayan projeler)."""
     if not allowed:
         return "1=0", []
-    return "ekleyen_id=? AND proje IN ({})".format(",".join("?" for _ in allowed)), [identifier, *allowed]
+    where = "ekleyen_id=? AND proje IN ({})".format(",".join("?" for _ in allowed))
+    params: list[Any] = [identifier, *allowed]
+    gizli = [p for p in (onayli_zorunlu or ()) if p in allowed]
+    if gizli:
+        where += " AND (proje NOT IN ({}) OR (kt=1 AND silindi=0))".format(",".join("?" for _ in gizli))
+        params.extend(gizli)
+    return where, params
 
 
 def _has_eligible_evidence(conn: Any, scope: str, scope_params: list[Any]) -> bool:
@@ -176,6 +185,7 @@ def get_profile(
     allowed_projects: Sequence[Any] | None,
     filters: Mapping[str, Any] | None,
     superadmin: bool = False,
+    onayli_zorunlu: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Bir Telegram ekleyenin, yalnızca izinli projelerdeki kanıt profilini döndürür.
 
@@ -186,7 +196,7 @@ def get_profile(
     """
     identifier = _tg_id(tg_id)
     allowed = _allowed_projects(allowed_projects)
-    scope, scope_params = _scope_where(identifier, allowed)
+    scope, scope_params = _scope_where(identifier, allowed, _allowed_projects(onayli_zorunlu))
 
     if not superadmin and not _has_eligible_evidence(conn, scope, scope_params):
         raise PermissionError("Bu kullanıcı için erişilebilir kanıt yok.")

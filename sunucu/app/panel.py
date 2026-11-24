@@ -136,6 +136,7 @@ def url_degistir(**kw):
     for k,v in kw.items():
         if v is None or v=='': args.pop(k,None)
         else: args[k]=list(v) if isinstance(v,(list,tuple)) else [str(v)]
+    if 'ac' not in args: args.pop('yorum',None)  # derin bağlantının yorum vurgusu sekme/sayfa bağlantılarına taşınmaz
     return url_for(request.endpoint or 'kayitlar',**args)
 
 def ip():
@@ -393,13 +394,14 @@ ISLEM_ADLARI={'giris':'Giriş yaptı','giris_hata':'Hatalı giriş denemesi','on
  'telegram_kayit':'Telegram ile kanıt ekledi','bot_kayit':'Telegram ile kanıt ekledi','telegram_onay':'Telegram botuna şifreyle giriş yaptı','telegram_admin_giris':'Telegram botuna yönetici olarak giriş yaptı','telegram_admin_giris_hata':'Telegram botunda yönetici parolasını yanlış girdi','telegram_engel':'Telegram botunda engellendi','telegram_eski_buton':'Telegram botunda eski düğmeye bastı','telegram_yanlis_adim_butonu':'Telegram botunda yanlış adımda düğmeye bastı',
  'bot_bakim_ac':'Bakım modunu açtı','bot_bakim_kapat':'Bakım modunu kapattı','bot_bakim':'Bakım modunu değiştirdi','bot_onayla':'Telegram kullanıcısını onayladı','bot_onay_kaldir':'Telegram onayını kaldırdı','bot_engelle':'Telegram kullanıcısını engelledi','bot_engel_kaldir':'Telegram engelini kaldırdı','bot_tam_sifirla':'Telegram kullanıcısını tam sıfırladı','bot_oturum_temizle':'Bot oturumunu temizledi','bot_kontrol':'Botu duraklattı / sürdürdü','bot_yedek':'Veritabanı yedeği aldı','bot_inbox_tekrar':'Bekleyen bot mesajlarını yeniden denedi','bot_kategori_kaydet':'Bot kategorisini kaydetti','bot_kategori_sil':'Bot kategorisini pasife aldı','bot_kategori_yayinla':'Bot kategorilerini yayınladı',
  'katalog_proje_kaydet':'Proje tanımını kaydetti','katalog_kategori_kaydet':'Kategori tanımını kaydetti',
- 'gyazo_link_guncelle':'Gyazo bağlantısını güncelledi','gyazo_link_yerel_korundu':'Gyazo bağlantısı eklenmedi, yerel görsel korundu'}
+ 'gyazo_link_guncelle':'Gyazo bağlantısını güncelledi','gyazo_link_yerel_korundu':'Gyazo bağlantısı eklenmedi, yerel görsel korundu',
+ 'hatirlatma_uret':'Onay bekleyenler için hatırlatma bildirimi üretti'}
 # İşlem Geçmişi tablosu için kısa ad biçimi.
 DENETIM_ADLARI={'giris':'Giriş','giris_hata':'Hatalı giriş','onayla':'Onay','onay_kaldir':'Onay kaldırma','duzenle':'Düzenleme','sil':'Silme','geri_al':'Geri alma','yorum_ekle':'Yorum','soru_yonelt':'Soru','yanit_ekle':'Yanıt','gyazo_istek':'Gyazo isteği','disa_aktar':'Excel çıktısı','dosya_kontrol':'Dosya kontrolü','kullanici_ekle':'Kullanıcı ekleme','kullanici_guncelle':'Kullanıcı güncelleme','kilit_ac':'Kilit açma','sifre_degisti':'Şifre değişimi','cikis':'Çıkış','giris_kilit':'Hesap kilidi','giris_sinir':'IP giriş sınırı','sifre_hata':'Hatalı mevcut parola','csrf_hata':'Geçersiz CSRF gönderimi','arsiv_esle':'Arşiv eşleme','beklenen_proje':'Beklenen proje','yeni_kayit':'Yeni kanıt','bildirim_okundu':'Bildirim okundu','sunucu_hata':'Sunucu hatası','ice_aktar':'İçe aktarım','yetki_kanonik':'Yetki düzeltme',
  'katalog_proje_kaydet':'Proje kaydı','katalog_kategori_kaydet':'Kategori kaydı',
  'telegram_kayit':'Telegram ile kanıt','bot_kayit':'Telegram ile kanıt','telegram_onay':'Telegram: şifreyle giriş','telegram_admin_giris':'Telegram: yönetici girişi','telegram_admin_giris_hata':'Telegram: yönetici parolası hatası','telegram_engel':'Telegram: engellendi','telegram_eski_buton':'Telegram: eski düğme','telegram_yanlis_adim_butonu':'Telegram: yanlış adım düğmesi',
  'bot_onayla':'Bot: kullanıcı onayı','bot_onay_kaldir':'Bot: onay kaldırma','bot_engelle':'Bot: engelleme','bot_engel_kaldir':'Bot: engel kaldırma','bot_tam_sifirla':'Bot: tam sıfırlama','bot_oturum_temizle':'Bot: oturum temizleme','bot_bakim':'Bot: bakım modu','bot_bakim_ac':'Bot: bakım modu açıldı','bot_bakim_kapat':'Bot: bakım modu kapatıldı','bot_kontrol':'Bot: duraklat/sürdür','bot_yedek':'Bot: veritabanı yedeği','bot_inbox_tekrar':'Bot: tekrar deneme','bot_kategori_kaydet':'Bot: kategori kaydı','bot_kategori_sil':'Bot: kategori pasife','bot_kategori_yayinla':'Bot: kategori yayını',
- 'gyazo_link_guncelle':'Gyazo bağlantısı','gyazo_link_yerel_korundu':'Gyazo: yerel görsel korundu'}
+ 'gyazo_link_guncelle':'Gyazo bağlantısı','gyazo_link_yerel_korundu':'Gyazo: yerel görsel korundu','hatirlatma_uret':'Hatırlatma bildirimi'}
 
 def islem_adi(code,adlar=None):
     """Sözlükte olmayan kod ham yazılmaz; alt çizgiler boşluğa çevrilir (kod ikinci kez basılmaz)."""
@@ -427,19 +429,20 @@ def _denetim_ayrinti(item):
 @app.route('/')
 @giris_gerekli
 def ana():
-    cards=[];allowed=_allowed();kpi=dict(bekleyen=0,bugun=0,bugun_onay=0,toplam=0,onayli=0)
+    cards=[];allowed=_allowed();kpi=dict(bekleyen=0,bugun=0,bugun_onay=0,toplam=0,onayli=0,geciken=0);gun=_hatirlatma_gun()
     for p in allowed:
         row=baglanti().execute('''SELECT SUM(kt=0 AND silindi=0) bekleyen,
             SUM(kt=1 AND silindi=0) onayli,SUM(silindi=1) silinen,
             SUM(date(tarih)=date('now','localtime') AND silindi=0) bugun,
-            SUM(kt=1 AND silindi=0 AND date(kt_zaman)=date('now','localtime')) bugun_onay,COUNT(*) toplam
-            FROM kayitlar WHERE proje=?''',(p,)).fetchone()
+            SUM(kt=1 AND silindi=0 AND date(kt_zaman)=date('now','localtime')) bugun_onay,COUNT(*) toplam,
+            SUM(kt=0 AND silindi=0 AND '''+_GECIKEN_SQL+''') geciken
+            FROM kayitlar WHERE proje=?''',(gun,p)).fetchone()
         card={'proje':p,**{k:row[k] or 0 for k in row.keys()}}
         card['etiket']=next((x['label'] for x in _all_project_info() if x['code']==p),p)
         cards.append(card)
         for key in kpi:kpi[key]+=card[key]
     kpi['acik_soru']=_acik_sorular(allowed)
-    return render_template('ana.html',kartlar=cards,durum=durum_bilgisi(),kpi=kpi,son_islemler=_son_islemler(allowed),islem_adlari=ISLEM_ADLARI)
+    return render_template('ana.html',kartlar=cards,durum=durum_bilgisi(),kpi=kpi,son_islemler=_son_islemler(allowed),islem_adlari=ISLEM_ADLARI,hatirlatma_gun=gun)
 
 SAYFA_BOYLARI=(24,48,96)
 
@@ -467,16 +470,44 @@ def _kategori_kanonik(cat,codes):
     try: return next((k for k in _scoped_categories(codes) if _tr_kucuk(k)==_tr_kucuk(cat)),cat)
     except Exception: return cat
 
+# 2.3.1 — Onaysız kayıt görünürlüğü ve bekleme süresi. Yaş = bugün − date(COALESCE(ilk_gorulme,tarih)); ? = gün eşiği.
+_GECIKEN_SQL="julianday(date('now','localtime')) - julianday(date(COALESCE(ilk_gorulme,tarih))) >= ?"
+
+def _hatirlatma_gun():
+    try: return max(1,int(AYAR.get('HATIRLATMA_GUN',3)))
+    except (TypeError,ValueError): return 3
+
+def _onaysiz_modu():
+    """'gizle' ya da 'uyar' (varsayılan). Kural yalnız kullanıcının kt yetkisi OLMAYAN projelerde uygulanır."""
+    return 'gizle' if str(AYAR.get('ONAYSIZ_GORUNUM','uyar') or '').strip().lower()=='gizle' else 'uyar'
+
+def _kt_yok(projeler_listesi):
+    """Verilen projelerden kullanıcının onay (kt) yetkisi olmayanları döndürür."""
+    yk=g.get('yk') or yetki.coz('')
+    return [p for p in projeler_listesi if not yetki.izin(yk,p,'kt')]
+
+def _bekleme_gun(args):
+    """'bekleme' parametresi: en az N gündür bekleyen; geçersizse yok sayılır."""
+    try: n=int(str(args.get('bekleme','') or '').strip() or 0)
+    except (TypeError,ValueError): return 0
+    return n if 1<=n<=3650 else 0
+
 def _filtre_sql(args,izinli):
     explicit=_explicit_projects(args,izinli)
     selected=explicit or list(izinli)
-    if not selected: return '1=0',[],dict(proje=[],proje_etkin=[],durum=args.get('durum','bekleyen'),kategori='',q='',ekleyen='',tarih1='',tarih2='',tarihsiz=False)
+    if not selected: return '1=0',[],dict(proje=[],proje_etkin=[],durum=args.get('durum','bekleyen'),kategori='',q='',ekleyen='',tarih1='',tarih2='',tarihsiz=False,bekleme=0,kt_yok=[],gizli_onaysiz=False,yalniz_onayli=False)
     where=['proje IN (%s)' % ','.join('?'*len(selected))]; par=list(selected)
+    gizle=_onaysiz_modu()=='gizle'; kt_yok=_kt_yok(selected); yalniz_onayli=gizle and len(kt_yok)==len(selected)
     state=args.get('durum','bekleyen')
+    if yalniz_onayli: state='onayli'  # onaysızlar bu kullanıcıya hiç gösterilmez; sekme seçimi onaylıya sabitlenir
     if state=='bekleyen': where.append('kt=0 AND silindi=0')
     elif state=='onayli': where.append('kt=1 AND silindi=0')
     elif state=='silinen': where.append('silindi=1')
     elif state!='hepsi': state='bekleyen'; where.append('kt=0 AND silindi=0')
+    if gizle and kt_yok and not yalniz_onayli:
+        where.append('(proje NOT IN (%s) OR (kt=1 AND silindi=0))' % ','.join('?'*len(kt_yok))); par.extend(kt_yok)
+    bekleme=_bekleme_gun(args)
+    if bekleme: where.append(_GECIKEN_SQL); par.append(bekleme)
     cat=_kategori_kanonik(args.get('kategori','').strip()[:120],selected)
     if cat: where.append('kategori COLLATE UNICODE_NOCASE=?'); par.append(cat)
     q=args.get('q','').strip()[:200]
@@ -497,7 +528,8 @@ def _filtre_sql(args,izinli):
             where.append(f'tarih {op} ?'); par.append(v+suffix)
         dates[name]=v
     if dates.get('tarih1') and dates.get('tarih2') and dates['tarih1']>dates['tarih2']:abort(400)
-    return ' AND '.join(where),par,dict(proje=explicit,proje_etkin=selected,durum=state,kategori=cat,q=q,ekleyen=by,tarihsiz=undated,**dates)
+    return ' AND '.join(where),par,dict(proje=explicit,proje_etkin=selected,durum=state,kategori=cat,q=q,ekleyen=by,tarihsiz=undated,bekleme=bekleme,
+                                      kt_yok=kt_yok,gizli_onaysiz=gizle and bool(kt_yok),yalniz_onayli=yalniz_onayli,**dates)
 
 def kayit_izin(r,eylem):
     return yetki.izin(g.yk,r['proje'],eylem)
@@ -526,6 +558,8 @@ def kayit_sozluk(row):
     d.update(gorsel_var=bool(path) or source=='gyazo',gorsel_yerel=bool(path),gorsel_kaynak=source,gorsel2_var=bool(ikinci),renk=renk(d['proje']),
              gorsel_kayip=kayip,gorsel_dosya_adi=(os.path.basename(str(dosya).replace('\\','/').rstrip('/')) or None) if kayip else None,
              izin_gyazo=kayit_izin(d,'kt') and kayit_izin(d,'gorsel') and bool(path) and not d['silindi'],izin_kt=kayit_izin(d,'kt'),izin_yorum=kayit_izin(d,'kt'),izin_duzenle=kayit_izin(d,'duzenle'),izin_sil=kayit_izin(d,'sil'),geri_al_olur=bool(d['silindi']))
+    # 2.3.1: kt yetkisi olmayan kullanıcı için onaysız kayıt 'uyar' modunda kırmızı rozet/şeritle işaretlenir.
+    d['onay_uyari']=bool(_onaysiz_modu()=='uyar' and not d['izin_kt'] and not d['kt'])
     link=d.get('link') or ''; d['dis_link']=link if re.match(r'^https?://',link) else None
     link2=d.get('gorsel2') or ''; d['dis_link2']=link2 if re.match(r'^https?://',link2) else None
     d['giris_tipi_metni']=GIRIS_TIPI_ADLARI.get(d.get('giris_tipi') or '',d.get('giris_tipi') or '')
@@ -575,7 +609,14 @@ def kayitlar():
     if view not in ('tablo','kart','galeri'): view='tablo'
     try: acik=int(args.get('ac','') or 0)
     except ValueError: acik=0
-    return render_template('kayitlar.html',kayitlar=records,toplam=total,sayfa=page,sayfa_sayisi=pages,f=f,izinli=allowed,kategoriler=cats,gorunum=view,sayac=counts,sayfa_boyu=size,sayfa_boylari=SAYFA_BOYLARI,toplu_kt=toplu_kt,uyari=uyari,acik_kayit=acik or None,damga=_degisiklik_damgasi() or '',filtre_aktif=bool(f.get('q') or f.get('kategori') or f.get('ekleyen') or f.get('tarih1') or f.get('tarih2') or f.get('tarihsiz') or f.get('proje')))
+    try: yorum=int(args.get('yorum','') or 0)
+    except ValueError: yorum=0
+    # 'uyar' modu: arama yalnız onaysız (kt yetkisi olmayan projelerdeki) kayıt döndürüyorsa listenin üstünde uyarı.
+    onaysiz_uyari=None
+    if f.get('q') and total and f.get('kt_yok') and _onaysiz_modu()=='uyar':
+        onayli=c.execute(f'SELECT COUNT(*) FROM kayitlar WHERE {where} AND NOT (kt=0 AND proje IN (%s))' % ','.join('?'*len(f['kt_yok'])),(*par,*f['kt_yok'])).fetchone()[0]
+        if not onayli: onaysiz_uyari='Aradığınız ID için onaylı kanıt yok; %d onaysız kayıt listelendi.' % total
+    return render_template('kayitlar.html',kayitlar=records,toplam=total,sayfa=page,sayfa_sayisi=pages,f=f,izinli=allowed,kategoriler=cats,gorunum=view,sayac=counts,sayfa_boyu=size,sayfa_boylari=SAYFA_BOYLARI,toplu_kt=toplu_kt,uyari=uyari,acik_kayit=acik or None,acik_yorum=(yorum if acik and yorum>0 else None),onaysiz_uyari=onaysiz_uyari,hatirlatma_gun=_hatirlatma_gun(),damga=_degisiklik_damgasi() or '',filtre_aktif=bool(f.get('q') or f.get('kategori') or f.get('ekleyen') or f.get('tarih1') or f.get('tarih2') or f.get('tarihsiz') or f.get('proje') or f.get('bekleme')))
 
 @app.route('/kayit/<int:kid>')
 @giris_gerekli
@@ -617,6 +658,9 @@ def _kayit_al(kid,action):
     r=baglanti().execute('SELECT * FROM kayitlar WHERE id=?',(kid,)).fetchone()
     if not r: _json_hata(404,'Kayıt bulunamadı; silinmiş veya taşınmış olabilir.')
     if not kayit_izin(r,action): _json_hata(403,'Bu kayıt için yetkiniz yok; kayıt '+str(r['proje'] or '?')+' projesine ait.',proje=r['proje'])
+    # 2.3.1 'gizle': kt yetkisi olmayan kullanıcıya onaysız (ya da silinmiş) kayıt ayrıntı/görsel olarak da verilmez (404 değil 403).
+    if _onaysiz_modu()=='gizle' and not kayit_izin(r,'kt') and (not r['kt'] or r['silindi']):
+        _json_hata(403,'Bu kaydın onayı yok; yalnız onaylı kayıtlar gösterilir.',proje=r['proje'],neden='onay_yok')
     return r
 
 def version_check(r):
@@ -1046,15 +1090,26 @@ def _scoped_counts():
     allowed=_allowed()
     if not allowed:return {},'0'
     places=','.join('?' for _ in allowed)
-    rows=baglanti().execute('SELECT proje,SUM(kt=0 AND silindi=0) bekleyen,SUM(kt=1 AND silindi=0) onayli,SUM(silindi=1) silinen,COUNT(*) toplam,SUM(surum) version_sum FROM kayitlar WHERE proje IN ('+places+') GROUP BY proje',allowed).fetchall()
-    counts={p:dict(bekleyen=0,onayli=0,silinen=0,toplam=0) for p in allowed}
+    rows=baglanti().execute('SELECT proje,SUM(kt=0 AND silindi=0) bekleyen,SUM(kt=1 AND silindi=0) onayli,SUM(silindi=1) silinen,COUNT(*) toplam,SUM(surum) version_sum,SUM(kt=0 AND silindi=0 AND '+_GECIKEN_SQL+') geciken FROM kayitlar WHERE proje IN ('+places+') GROUP BY proje',[_hatirlatma_gun(),*allowed]).fetchall()
+    counts={p:dict(bekleyen=0,onayli=0,silinen=0,toplam=0,geciken=0) for p in allowed}
     stamp=[]
     for row in rows:
-        counts[row['proje']]={key:row[key] or 0 for key in ('bekleyen','onayli','silinen','toplam')}
+        counts[row['proje']]={key:row[key] or 0 for key in ('bekleyen','onayli','silinen','toplam','geciken')}
         stamp.append([row['proje'],row['toplam'],row['version_sum'],row['onayli'],row['silinen']])
     comments=baglanti().execute('SELECT COUNT(*),MAX(y.id) FROM yorumlar y JOIN kayitlar k ON k.id=y.kayit_id WHERE k.proje IN ('+places+')',allowed).fetchone()
     stamp.append(list(comments))
     return counts,json.dumps(stamp,separators=(',',':'))
+
+BILDIRIM_TUR_ADLARI={'soru':'Soru','yanit':'Yanıt','yorum':'Yorum','onay':'Onay','kanit':'Yeni kanıt','kayit':'Yeni kayıt','onay_kaldir':'Onay kaldırıldı','hatirlatma':'Hatırlatma'}
+
+def _bildirim_hedef(row):
+    """2.3.1: bildirime tıklanınca açılacak adres. Kayıt → kayıt modalı (durum=hepsi, liste dışı olsa da açılır);
+    yorum/soru/yanıt → aynı modalda ilgili yorum vurgulanır (&yorum=); hatırlatma özeti → projenin bekleyen listesi."""
+    if row.get('ozet') or str(row.get('olay') or '').startswith('hatirlatma-ozet:'):
+        return url_for('kayitlar',proje=row.get('proje'),durum='bekleyen',bekleme=_hatirlatma_gun())
+    args=dict(proje=row.get('proje'),durum='hepsi',ac=row.get('kayit_id'))
+    if row.get('yorum_id'): args['yorum']=row['yorum_id']
+    return url_for('kayitlar',**args)
 
 @app.route('/bildirim.json')
 @giris_gerekli
@@ -1066,6 +1121,7 @@ def bildirim_json():
     for row in data['bildirimler']:
         item=dict(row);item['bildirim_id']='m:'+str(row['id']) if row['key'].startswith('mesaj:') else str(row['id']);item['id']=row['kayit_id']
         item['kayit_id']=row['kayit_id'];item['personel']=row.get('personel') or '';item['kategori']=row.get('kategori') or ''
+        item['url']=_bildirim_hedef(row);item['etiket']=BILDIRIM_TUR_ADLARI.get(row.get('tur'),row.get('tur') or 'Bildirim');item['ozet']=bool(row.get('ozet'))
         alerts.append(item)
     return jsonify(bildirimler=alerts,okunmamis=data['counts']['okunmamis'],sayac=counts,degisiklik=stamp,kuyruk_bekleyen=0)
 
@@ -1086,7 +1142,8 @@ def bildirim_sayfasi():
         kept['okundu']=filters.get('okundu','') if filters.get('okundu') in ('0','1') else ''
         return render_template('bildirimler.html',bildirimler=[],toplam=0,sayfa=1,sayfa_sayisi=1,counts={},turler=[],filters=kept,uyari=str(error))
     data['filters']['okundu']='0' if data['filters']['durum']=='okunmamis' else '1' if data['filters']['durum']=='okundu' else ''
-    return render_template('bildirimler.html',**data)
+    for row in data['bildirimler']:row['url']=_bildirim_hedef(row)
+    return render_template('bildirimler.html',tur_adlari=BILDIRIM_TUR_ADLARI,**data)
 
 @app.route('/bildirimler/okundu',methods=['POST'])
 @giris_gerekli
@@ -1200,8 +1257,9 @@ def _cikti_sinir_mesaji(adet):
             'filtresiyle birkaç parça hâlinde indirin.') % (format(adet,',').replace(',','.'),format(CIKTI_SATIR_SINIRI,',').replace(',','.'))
 
 def _cikti_sayfasi(secim=None,hata=None,status=200):
-    cats=_scoped_categories(_allowed())
-    return render_template('disa_aktar.html',izinli=yetki.izinli_projeler(g.yk,projeler()),kategoriler=cats,f=_cikti_secimi(secim),hata=hata),status
+    cats=_scoped_categories(_allowed());izinli=yetki.izinli_projeler(g.yk,projeler());kt_yok=_kt_yok(izinli)
+    yalniz_onayli=bool(izinli) and _onaysiz_modu()=='gizle' and len(kt_yok)==len(izinli)
+    return render_template('disa_aktar.html',izinli=izinli,kategoriler=cats,f=_cikti_secimi(secim),hata=hata,yalniz_onayli=yalniz_onayli,gizli_onaysiz=_onaysiz_modu()=='gizle' and bool(kt_yok)),status
 
 @app.route('/disa-aktar')
 @giris_gerekli
@@ -1232,6 +1290,7 @@ def _cikti_degeri(r,name,yorumlar):
     """Çıktı hücresi: türetilmiş alanlar okunur metin, diğerleri olduğu gibi."""
     if name=='soru_ozet':return '\n'.join(x['label']+': '+str(x['value']) for x in _question_answers(r))
     if name=='durum_metni':return 'Silindi' if r['silindi'] else ('Onaylı' if r['kt'] else 'Bekliyor')
+    if name=='tl_onay':return 'Onaylı' if r['kt'] else 'YOK'
     if name=='giris_tipi_metni':return GIRIS_TIPI_ADLARI.get(r['giris_tipi'] or '',r['giris_tipi'] or '')
     if name=='kaynak_metni':return KAYNAK_ADLARI.get(r['kaynak'] or '',r['kaynak'] or '')
     if name=='gorsel_dosya_adi':return os.path.basename(str(r['gorsel_dosya'])) if r['gorsel_dosya'] else ''
@@ -1271,7 +1330,8 @@ def disa_aktar_xlsx():
     from openpyxl.utils import get_column_letter
     wb=openpyxl.Workbook(write_only=True); ws=wb.create_sheet('Kayıtlar')
     # Girilen her alan çıktıda: eski Excel düzeni + panelde eklenen bilgiler (durum, onay, ekleyen, yorum, bağlantı).
-    columns=[('Kayıt ID','id'),('Proje','proje'),('Kategori','kategori'),('Personel','personel'),('Üye ID','uye_id'),('Ana üye ID','ana_uye_id'),('Sessiz / Telesekreter','tip'),('Lead ID','lead_id'),('Tarih','tarih'),('Durum','durum_metni'),('KT','kt'),('Onaylayan','kt_kim'),('Onay zamanı','kt_zaman'),('Ekleyen','ekleyen_ad'),('Ekleyen Telegram ID','ekleyen_id'),('Giriş tipi','giris_tipi_metni'),('Kaynak','kaynak_metni'),('Görsel bağlantısı','link'),('2. görsel bağlantısı','gorsel2'),('Görsel dosyası','gorsel_dosya_adi'),('Açıklama','aciklama'),('Ek not','ek_not'),('Ek sorular','soru_ozet'),('Yorum sayısı','yorum_sayisi'),('Son yorum','son_yorum'),('Silen','silen'),('Silme zamanı','silme_zamani'),('Eski Excel satırı','excel_satir'),('Panel bağlantısı','panel_link')]
+    # 2.3.1: eski sayısal 'KT' (0/1) sütunu 'Takım lideri onayı' (Onaylı / YOK) oldu; sütun sayısı değişmedi.
+    columns=[('Kayıt ID','id'),('Proje','proje'),('Kategori','kategori'),('Personel','personel'),('Üye ID','uye_id'),('Ana üye ID','ana_uye_id'),('Sessiz / Telesekreter','tip'),('Lead ID','lead_id'),('Tarih','tarih'),('Durum','durum_metni'),('Takım lideri onayı','tl_onay'),('Onaylayan','kt_kim'),('Onay zamanı','kt_zaman'),('Ekleyen','ekleyen_ad'),('Ekleyen Telegram ID','ekleyen_id'),('Giriş tipi','giris_tipi_metni'),('Kaynak','kaynak_metni'),('Görsel bağlantısı','link'),('2. görsel bağlantısı','gorsel2'),('Görsel dosyası','gorsel_dosya_adi'),('Açıklama','aciklama'),('Ek not','ek_not'),('Ek sorular','soru_ozet'),('Yorum sayısı','yorum_sayisi'),('Son yorum','son_yorum'),('Silen','silen'),('Silme zamanı','silme_zamani'),('Eski Excel satırı','excel_satir'),('Panel bağlantısı','panel_link')]
     yorumlar=_yorum_ozetleri([r['id'] for r in rows])
     def satir(r):
         vals=[]
@@ -1300,9 +1360,14 @@ def disa_aktar_xlsx():
     summary=wb.create_sheet('Proje özeti');summary.append(['Proje','Kayıt','KT onaylı','KT bekleyen'])
     for project in sorted(ozet):
         summary.append([project,ozet[project][0],ozet[project][1],ozet[project][2]])
+    onaysiz=sum(v[2] for v in ozet.values())
+    summary.append([]);summary.append(['Takım lideri onayı YOK (raporlamada kullanılmaz)',onaysiz])
     stream=io.BytesIO(); wb.save(stream); stream.seek(0)
     db.denetim_yaz(baglanti(),g.k['kullanici_adi'],'disa_aktar',yeni=str(len(rows)),ip=ip())
-    return send_file(stream,as_attachment=True,download_name='kanit-kayitlari.xlsx',mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    # 2.3.1 'uyar': kt yetkisi olmayan kullanıcının dosyasında onaysız satır varsa dosya adı bunu söyler.
+    ad='kanit-kayitlari.xlsx';onaysiz_ktsiz=sum(ozet[p][2] for p in _kt_yok(sorted(ozet)))
+    if onaysiz_ktsiz:ad='kanit-kayitlari-ONAYSIZ-%d.xlsx' % onaysiz_ktsiz
+    return send_file(stream,as_attachment=True,download_name=ad,mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 @app.route('/bot/kullanici/<tg_id>')
@@ -1385,7 +1450,7 @@ def excel_kontrol():
                     if workbook['format']=='id_list':
                         options.update(id_field=request.form.get('id_field') or (options['match_fields'][0] if options['match_fields'] else 'personel'))
                         options.update(match_fields=[options['id_field']],columns={})
-                    report=excel_check.check_source(path,baglanti(),allowed,options)
+                    report=excel_check.check_source(path,baglanti(),allowed,options,onayli_zorunlu=_kt_yok(allowed) if _onaysiz_modu()=='gizle' else None)
                     (folder/'result.json').write_text(json.dumps({'report':report,'options':options},ensure_ascii=False))
                     db.denetim_yaz(baglanti(),g.k['kullanici_adi'],'dosya_kontrol',yeni={'format':workbook['format'],'satir':report['total'],'alanlar':options['match_fields']},ip=ip(),hedef_turu='kontrol')
                 else:
@@ -1481,7 +1546,8 @@ def telegram_kayitlari(tg_id):
             c.execute('INSERT INTO tg_kullanicilar(id,ana_proje) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET ana_proje=excluded.ana_proje',(tg_id,project or None))
             db.denetim_yaz(c,g.k['kullanici_adi'],'beklenen_proje',yeni=tg_id+':'+project,ip=ip());db.degisti(c)
         return redirect(url_for('telegram_kayitlari',tg_id=tg_id))
-    try:data=user_evidence.get_profile(c,tg_id,allowed,request.args.to_dict(),superadmin=g.yk['admin'])
+    onayli_zorunlu=_kt_yok(allowed) if _onaysiz_modu()=='gizle' else []
+    try:data=user_evidence.get_profile(c,tg_id,allowed,request.args.to_dict(),superadmin=g.yk['admin'],onayli_zorunlu=onayli_zorunlu)
     except PermissionError:abort(403)
     except ValueError as e:return render_template('hata.html',kod=400,mesaj=str(e)),400
     return render_template('telegram_kayitlari.html',profile=data,allowed=allowed)
@@ -1561,6 +1627,27 @@ def _start_web_converter():
             time.sleep(0.5 if processed else 2)
     threading.Thread(target=loop,name='kanit-web-gyazo',daemon=True).start()
 
+def _start_hatirlatma_isi():
+    """2.3.1: onay bekleyen kayıtlar için hatırlatma bildirimlerini HATIRLATMA_KONTROL_DK dakikada bir üretir (0 = kapalı).
+    Üretim gün bazlı idempotent olduğu için sık çalışması yeni satır eklemez; ilk çalışma açılıştan ~20 sn sonra."""
+    try:dk=int(AYAR.get('HATIRLATMA_KONTROL_DK',30) or 0)
+    except (TypeError,ValueError):dk=30
+    if dk<=0:return None
+    import threading
+    from . import hatirlatma
+    def loop():
+        time.sleep(20)
+        while True:
+            conn=None
+            try:
+                conn=db.baglan(AYAR['DB']);hatirlatma.uret(conn,AYAR)
+            except Exception as error:
+                print('Hatırlatma işi: '+type(error).__name__,flush=True)
+            finally:
+                if conn:conn.close()
+            time.sleep(dk*60)
+    t=threading.Thread(target=loop,name='kanit-web-hatirlatma',daemon=True);t.start();return t
+
 def sunucu_ayarlari():
     """waitress serve() parametreleri (test edilebilir): gövde üst sınırı ve yalnız tek güvenilen vekil."""
     ayar=dict(threads=8,max_request_body_size=EN_BUYUK_ISTEK+1024*1024)  # 12 MB dosya + çok parçalı form payı; Türkçe 413'ü Flask verir
@@ -1573,7 +1660,7 @@ def sunucu_ayarlari():
 
 def calistir():
     from waitress import serve
-    _start_web_converter()
+    _start_web_converter();_start_hatirlatma_isi()
     eski_kontrolleri_temizle();gecici_sifreleri_temizle()
     print(f'Kanıt Paneli {SURUM} — {AYAR["DINLE"]}:{AYAR["PORT"]}',flush=True)
     serve(app,host=AYAR['DINLE'],port=AYAR['PORT'],**sunucu_ayarlari())

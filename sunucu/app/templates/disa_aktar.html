@@ -21,7 +21,7 @@
     <div class="form-iki">
       <label for="cikti-tarih1">Başlangıç tarihi<input id="cikti-tarih1" type="date" name="tarih1" value="{{ f.get('tarih1','') }}"></label>
       <label for="cikti-tarih2">Bitiş tarihi<input id="cikti-tarih2" type="date" name="tarih2" value="{{ f.get('tarih2','') }}" aria-describedby="cikti-tarih-hata"></label>
-      <label for="cikti-durum">Onay durumu<select id="cikti-durum" name="durum">{% for v,t in [('hepsi','Hepsi'),('onayli','Yalnız onaylı'),('bekleyen','Yalnız onay bekleyen'),('silinen','Yalnız silinen')] %}<option value="{{ v }}" {{ 'selected' if f.get('durum','hepsi')==v }}>{{ t }}</option>{% endfor %}</select></label>
+      <label for="cikti-durum">Onay durumu<select id="cikti-durum" name="durum">{% for v,t in [('hepsi','Hepsi'),('onayli','Onaylılar'),('bekleyen','Onaysızlar (onay bekleyen)'),('silinen','Silinenler')] if not yalniz_onayli or v == 'onayli' %}<option value="{{ v }}" {{ 'selected' if (f.get('durum','hepsi')==v) or (yalniz_onayli and v == 'onayli') }}>{{ t }}</option>{% endfor %}</select>{% if gizli_onaysiz %}<small class="kucukyazi onaysiz-not">Onay bekleyen kayıtlar size gösterilmez; dosyaya yalnız onaylılar girer.</small>{% endif %}</label>
       <label for="cikti-kategori">Kategori<select id="cikti-kategori" name="kategori"><option value="">Tüm kategoriler</option>{% for kat in kategoriler %}<option value="{{ kat }}" {{ 'selected' if f.get('kategori','')|lower==kat|lower }}>{{ kat }}</option>{% endfor %}</select></label>
       <label for="cikti-q">Arama <small>(personel, üye ID, lead, açıklama, ekleyen, kategori)</small><input id="cikti-q" name="q" value="{{ f.get('q','') }}" placeholder="İsteğe bağlı" autocomplete="off"></label>
       <label for="cikti-ekleyen">Ekleyen kişi<input id="cikti-ekleyen" name="ekleyen" value="{{ f.get('ekleyen','') }}" placeholder="Telegram adı veya ID (isteğe bağlı)"></label>
@@ -34,8 +34,8 @@
 </section>
 <section class="kart" aria-labelledby="cikti-icerik-baslik">
   <h2 id="cikti-icerik-baslik">Dosyada neler var?</h2>
-  <p class="kucukyazi">"Kayıtlar" sayfası: Kayıt ID, Proje, Kategori, Personel, Üye ID, Ana üye ID, Tür, Tarih, Onay (KT), Onaylayan, Ekleyen, Lead ID, Eski bağlantı, Açıklama, Ek not ve ek soru cevapları.</p>
-  <p class="kucukyazi">"Proje özeti" sayfası: proje başına toplam kayıt, onaylı ve onay bekleyen sayıları.</p>
+  <p class="kucukyazi">"Kayıtlar" sayfası: Kayıt ID, Proje, Kategori, Personel, Üye ID, Ana üye ID, Tür, Tarih, Durum, Takım lideri onayı (Onaylı / YOK), Onaylayan, Ekleyen, Lead ID, Eski bağlantı, Açıklama, Ek not ve ek soru cevapları.</p>
+  <p class="kucukyazi">"Proje özeti" sayfası: proje başına toplam kayıt, onaylı ve onay bekleyen sayıları; en altta onaysız (raporlamada kullanılmaz) toplamı.</p>
   <p class="kucukyazi">Formül gibi başlayan değerler güvenlik için düz metin olarak yazılır. Dosyaya yalnız yetkili olduğunuz projeler girer. Seçime uyan kayıt yoksa dosya indirilmez, bu sayfada uyarı gösterilir.</p>
 </section>
 </div>

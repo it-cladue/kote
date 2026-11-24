@@ -215,12 +215,15 @@ def _row_value(row: Any, field: str) -> Any:
 
 
 def _candidate_rows(conn: Any, allowed: list[str], fixed_project: str | None, kt: str,
-                    values: dict[str, str], match_fields: list[str], cache: dict[tuple[Any, ...], list[Any]]) -> list[Any]:
-    """Parametreli SELECT ile yalnız izinli, silinmemiş adayları getirir."""
+                    values: dict[str, str], match_fields: list[str], cache: dict[tuple[Any, ...], list[Any]],
+                    onayli_zorunlu: list[str] | None = None) -> list[Any]:
+    """Parametreli SELECT ile yalnız izinli, silinmemiş adayları getirir.
+    2.3.1 ``onayli_zorunlu``: bu projelerde yalnız onaylı kayıtlar aday olur (ONAYSIZ_GORUNUM=gizle)."""
     projects = [fixed_project] if fixed_project else allowed
     if not projects:
         return []
-    cache_key = (tuple(projects), kt, tuple((field, values[field]) for field in match_fields))
+    gizli = [str(p).upper() for p in (onayli_zorunlu or ())]
+    cache_key = (tuple(projects), kt, tuple(gizli), tuple((field, values[field]) for field in match_fields))
     if cache_key in cache:
         return cache[cache_key]
     where = ["silindi=0", "UPPER(proje) IN (" + ",".join("?" for _ in projects) + ")"]
@@ -229,6 +232,9 @@ def _candidate_rows(conn: Any, allowed: list[str], fixed_project: str | None, kt
         where.append("kt=1")
     elif kt == "bekleyen":
         where.append("kt=0")
+    if gizli:
+        where.append("(UPPER(proje) NOT IN (" + ",".join("?" for _ in gizli) + ") OR kt=1)")
+        params.extend(gizli)
     for field in match_fields:
         if field in CATEGORICAL_FIELDS:
             where.append(f"KANIT_CASEFOLD(COALESCE({field},''))=?")
@@ -263,7 +269,7 @@ def _status_row(source_row: file_sources.SourceRow, values: dict[str, str], stat
 
 
 def check_source(path: str | Path, conn: Any, allowed_projects: Any,
-                 options: dict[str, Any] | None = None) -> dict[str, Any]:
+                 options: dict[str, Any] | None = None, onayli_zorunlu: Any = None) -> dict[str, Any]:
     """Her desteklenen kaynağı tek snapshot'ta salt-okunur kontrol eder.
 
     ``yok`` yalnız güvenilir olarak ayrıştırılmış satırda üretilir. Biçim, formül,
@@ -328,7 +334,8 @@ def check_source(path: str | Path, conn: Any, allowed_projects: Any,
                 rows.append(_status_row(source_row, values, "proje_filtre_uyusmazligi", "Dosyadaki proje sabit proje filtresiyle uyuşmuyor."))
                 continue
 
-            candidates = _candidate_rows(conn, parsed["allowed"], parsed["fixed_project"], parsed["kt"], values, match_fields, cache)
+            candidates = _candidate_rows(conn, parsed["allowed"], parsed["fixed_project"], parsed["kt"], values, match_fields, cache,
+                                         [str(p) for p in (onayli_zorunlu or ()) if isinstance(p, str)])
             ids = [int(_row_value(candidate, "id")) for candidate in candidates if _matches(candidate, values, match_fields)]
             if len(ids) == 1:
                 status, reason = "bulundu", "Tek eşleşen kayıt bulundu."
