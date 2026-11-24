@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import sys
+import threading
 import time
 import uuid
 import warnings
@@ -491,8 +492,14 @@ class KanitBot:
         self._uyari_zamani: dict[str, float] = {}
         self._admin_hatali: dict[str, dict] = {}
         self._son_temizlik: Optional[float] = None
-        # Telegram 429 retry_after: bu ana kadar hiçbir gönderim yapılmaz (monotonic).
+        # Telegram 429 retry_after: önce yalnız ilgili sohbet duraklatılır (_chat_duraklat);
+        # aynı 60 sn içinde birden çok sohbet 429 alırsa (gerçek genel sınır) bu ana kadar
+        # hiçbir gönderim yapılmaz (monotonic).
         self._outbox_duraklat_bitis: float = 0.0
+        self._chat_duraklat: dict[str, float] = {}
+        self._hiz_siniri_zamani: dict[str, float] = {}
+        # stop() bu olayı set eder; uyku/bekleme süreleri SIGTERM ile hemen kesilir.
+        self._stop_event = threading.Event()
 
     # ---- bağlantı, log ve kalıcı inbox -------------------------------------------------
     def _conn(self):
@@ -616,9 +623,37 @@ class KanitBot:
         finally:
             conn.close()
 
-    def _outbox_duraklama(self) -> float:
-        """429 sonrası kalan duraklama süresi (sn); 0 ise gönderim serbest."""
-        return max(0.0, self._outbox_duraklat_bitis - time.monotonic())
+    def _outbox_duraklama(self, chat_id: Any = None) -> float:
+        """429 sonrası kalan duraklama süresi (sn); 0 ise gönderim serbest.
+
+        ``chat_id`` verilmezse yalnız genel duraklama; verilirse o sohbetin kendi
+        duraklaması da hesaba katılır.
+        """
+        now = time.monotonic()
+        wait = self._outbox_duraklat_bitis - now
+        if chat_id is not None:
+            wait = max(wait, self._chat_duraklat.get(str(chat_id), 0.0) - now)
+        return max(0.0, wait)
+
+    def _hiz_siniri_kaydet(self, chat_id: str, wait: int) -> int:
+        """429'u sohbet bazında kaydeder; 60 sn içinde ≥2 farklı sohbet 429 aldıysa genel duraklama.
+
+        Telegram'ın en sık 429'u sohbet başına limittir; tek sohbetin seli diğer
+        kullanıcıların teslimatını durdurmaz. Dönüş: genel duraklama süresi (sn,
+        tavan 60) ya da 0 (yalnız bu sohbet duraklatıldı).
+        """
+        now = time.monotonic()
+        chat_id = str(chat_id)
+        if len(self._chat_duraklat) > 1000:
+            self._chat_duraklat = {k: v for k, v in self._chat_duraklat.items() if v > now}
+        self._chat_duraklat[chat_id] = max(self._chat_duraklat.get(chat_id, 0.0), now + int(wait))
+        self._hiz_siniri_zamani = {k: v for k, v in self._hiz_siniri_zamani.items() if now - v < 60}
+        self._hiz_siniri_zamani[chat_id] = now
+        if len(self._hiz_siniri_zamani) < 2:
+            return 0
+        genel = max(1, min(int(wait), 60))
+        self._outbox_duraklat_bitis = max(self._outbox_duraklat_bitis, now + genel)
+        return genel
 
     def poll_once(self, timeout: int = 25) -> int:
         if not self.api:
@@ -669,7 +704,8 @@ class KanitBot:
                     retry_at = (datetime.now() + timedelta(seconds=delay)).strftime("%Y-%m-%d %H:%M:%S")
                     state = "tekrar"
                 veri = None  # None: ham update yeniden deneme için saklanır
-                if self._parola_mesaji_mi(update):
+                parola = self._parola_mesaji_mi(update)
+                if parola:
                     # Parola (ya da parola denemesi) içeren metin yedeklere ve
                     # 'tekrar'/'olu' satırlarına düz metin olarak yazılmaz.
                     state, veri = "olu", "{}"
@@ -684,6 +720,10 @@ class KanitBot:
                             (state, attempt, message, retry_at, veri, self.bot_id, row["update_id"]),
                         )
                         conn2.execute("UPDATE tg_durum SET heartbeat=?,hata=? WHERE bot_id=?", (_simdi(), message, self.bot_id))
+                        if parola:
+                            # Parola mesajı yeniden denenmediği için kullanıcı sessiz kalmasın: aynı
+                            # transaction'da tek bir bilgilendirme kuyruğa girer (parola metni saklanmaz).
+                            self._parola_hatasi_bildir(conn2, update, int(row["update_id"]))
                 finally:
                     conn2.close()
                 self._log(logging.WARNING, f"Güncelleme {row['update_id']} {state}: {message}")
@@ -693,6 +733,24 @@ class KanitBot:
         # geçici Telegram kesintisi kullanıcı durumunu ya da inbox'ı geri almaz.
         self.process_outbox(limit=max(10, limit * 3))
         return done
+
+    def _parola_hatasi_bildir(self, conn, update: Any, update_id: int) -> None:
+        """İşlenemeyen parola mesajı için kullanıcıya tek 'yeniden yazın' bildirimi kuyruğa ekler."""
+        message = update.get("message") if isinstance(update, dict) else None
+        if not isinstance(message, dict):
+            return
+        chat_id = (message.get("chat") or {}).get("id")
+        if chat_id is None:
+            return
+        user_id = (message.get("from") or {}).get("id")
+        now = _simdi()
+        conn.execute(
+            "INSERT OR IGNORE INTO tg_giden(bot_id,source_update_id,action_key,tur,chat_id,user_id,metin,durum,deneme,hata,olusturma,guncelleme) "
+            "VALUES(?,?,?,'send',?,?,?,'bekliyor',0,NULL,?,?)",
+            (self.bot_id, int(update_id), f"u{int(update_id)}:parola:send", str(chat_id),
+             None if user_id is None else str(user_id),
+             "Mesajınız geçici bir hata nedeniyle işlenemedi; lütfen parolayı yeniden yazın.", now, now),
+        )
 
     def _queue_outbox(self, conn, tur: str, chat_id: str, text: str = "", keyboard: Optional[list] = None,
                       message_id: Optional[int] = None, user_id: Optional[str] = None,
@@ -783,6 +841,13 @@ class KanitBot:
                 if state == "olu" and row["tur"] == "send" and row["job_key"]:
                     # Teslim edilemeyecek dönüşüm bildirimi her döngüde yeniden seçilmesin.
                     donusum_isleri.mark_notice_delivered(conn, str(row["job_key"]), bot_id=self.bot_id)
+                if state == "olu" and row["tur"] == "send" and row["guard_revision"] is not None and row["user_id"]:
+                    # Korumalı UI mesajı kalıcı hatayla düştü: oturumda bekleyen anahtar kalmasın
+                    # ki bir sonraki düğme ekranı _resume_ui ile yeniden göndersin.
+                    session = self._get_session(conn, str(row["user_id"]))
+                    if session and session.get("ui_pending_key") == row["action_key"]:
+                        session.pop("ui_pending_key", None)
+                        self._save_session(conn, str(row["user_id"]), session)
                 return state
         finally:
             conn.close()
@@ -792,16 +857,24 @@ class KanitBot:
 
         Kalıcı Telegram hataları (400 chat not found, 403 bot engellendi, HTML
         ayrıştırma hatası...) ilk denemede 'olu' olur. 429'da Telegram'ın retry_after
-        süresi boyunca tüm gönderimler duraklatılır.
+        süresi boyunca yalnız ilgili sohbetin gönderimleri duraklatılır; 60 sn içinde
+        birden çok sohbet 429 alırsa tüm gönderimler (en çok 60 sn) duraklar.
+        Deneme üst sınırını aşmış eski 'tekrar' satırları (güncelleme artığı) seçilmez.
         """
         if self._outbox_duraklama() > 0:
             return 0
+        # 429 bekleyen sohbetlerin satırları seçime girmez: tek sohbetin yığını LIMIT'i doldurup
+        # diğer sohbetleri aç bırakamaz.
+        now = time.monotonic()
+        paused = [chat for chat, until in self._chat_duraklat.items() if until > now][:50]
+        where_chat = f" AND chat_id NOT IN ({','.join('?' for _ in paused)})" if paused else ""
         conn = self._conn()
         try:
             rows = conn.execute(
-                "SELECT * FROM tg_giden WHERE bot_id=? AND (durum='bekliyor' OR (durum='tekrar' AND guncelleme<=?)) "
-                "ORDER BY CASE WHEN tur='answer' THEN 0 WHEN tur IN ('send','edit') THEN 1 ELSE 2 END, id LIMIT ?",
-                (self.bot_id, _simdi(), max(1, min(limit, 500)))
+                "SELECT * FROM tg_giden WHERE bot_id=? AND (durum='bekliyor' OR (durum='tekrar' AND deneme<? AND guncelleme<=?))"
+                + where_chat +
+                " ORDER BY CASE WHEN tur='answer' THEN 0 WHEN tur IN ('send','edit') THEN 1 ELSE 2 END, id LIMIT ?",
+                (self.bot_id, _outbox_max_deneme(), _simdi(), *paused, max(1, min(limit, 500)))
             ).fetchall()
         finally:
             conn.close()
@@ -809,6 +882,8 @@ class KanitBot:
         for row in rows:
             if self._outbox_duraklama() > 0:
                 break
+            if self._outbox_duraklama(row["chat_id"]) > 0:
+                continue  # yalnız bu sohbet 429 bekliyor; diğer sohbetler akmaya devam eder
             if not self._outbox_guard_current(row):
                 self._finish_outbox(row)  # stale render: gönderme, fakat tekrar da etme
                 continue
@@ -831,10 +906,13 @@ class KanitBot:
                 retry_after = getattr(exc, "retry_after", None)
                 if retry_after:
                     wait = max(1, min(int(retry_after), 300))
-                    self._outbox_duraklat_bitis = time.monotonic() + wait
                     self._finish_outbox(row, error=exc, retry_in=wait)
-                    self._log(logging.WARNING, f"Telegram hız sınırı (429): gönderimler {wait} sn duraklatıldı: {exc}")
-                    break
+                    genel = self._hiz_siniri_kaydet(str(row["chat_id"]), wait)
+                    if genel:
+                        self._log(logging.WARNING, f"Telegram hız sınırı (429) birden çok sohbette: tüm gönderimler {genel} sn duraklatıldı: {exc}")
+                        break
+                    self._log(logging.WARNING, f"Telegram hız sınırı (429): {row['chat_id']} sohbetine gönderimler {wait} sn duraklatıldı: {exc}")
+                    continue
                 state = self._finish_outbox(row, error=exc)
                 if state == "olu":
                     self._log(logging.WARNING, f"Mesaj teslim edilemedi; vazgeçildi ({row['tur']}, deneme {int(row['deneme'] or 0) + 1}): {exc}")
@@ -1464,11 +1542,14 @@ class KanitBot:
                 return update
         try:
             pending, ext = self._download_image(image, str(chat["id"]), int(message["message_id"]))
-        except GorselReddedildi as exc:
-            # Kalıcı red: yeniden indirme yok; handler kullanıcıya tek açıklama gönderir
-            # ve update normal 'tamam' yolunu izler.
-            message["_image_error"] = str(exc)
-            return update
+        except TelegramHatasi as exc:
+            if isinstance(exc, GorselReddedildi) or exc.kalici:
+                # Kalıcı red (içerik/boyut) ya da Telegram'ın kalıcı 4xx yanıtı (getFile
+                # 'file is too big', 'wrong file identifier'): yeniden indirme yok; handler
+                # kullanıcıya tek açıklama gönderir ve update normal 'tamam' yolunu izler.
+                message["_image_error"] = str(exc)
+                return update
+            raise  # ağ/zaman aşımı/5xx: geçici, sınırlı sayıda yeniden denenir
         conn = self._conn()
         try:
             with db.transaction(conn):
@@ -2185,6 +2266,10 @@ class KanitBot:
                     if self._uyari_izinli(uid, "parola", _parola_istem_saniye()):
                         self._say(chat_id, "Bu bot için önce parolayı yazın. Görseliniz indirilmedi; paroladan sonra yeniden gönderin.")
                 elif _yetkisiz_gorsel_politikasi() == "parola":
+                    if not self._uyari_izinli(uid, "gorsel_deneme", _parola_istem_saniye()):
+                        # Aynı pencerede (BOT_PAROLA_ISTEM_SANIYE) gelen albüm (media_group)
+                        # veya fotoğraf seli tek deneme sayılır; indirme yine yok.
+                        return
                     trial = int(profile.get("deneme") or 0) + 1
                     if trial >= _max_deneme():
                         self._block(conn, uid, "yetkisiz_gorsel_gonderimi")
@@ -2406,11 +2491,16 @@ class KanitBot:
         if not self.token or not self.api:
             self._log(logging.ERROR, "Yapılandırma hatası: TELEGRAM_TOKEN ayarlanmamış; bot başlatılmadı (çıkış kodu 2). .env dosyasına TELEGRAM_TOKEN ekleyip servisi yeniden başlatın.")
             return False
+        for key in ("BOT_PASSWORD", "ADMIN_PASSWORD"):
+            # Değer yazılmaz; kısa parola günlük maskelemesinde (guvenli_log.text) kimlik/sayıları bozabilir.
+            if 0 < len(os.environ.get(key, "")) < 8:
+                self._log(logging.WARNING, f"{key} 8 karakterden kısa; günlük maskelemesi metinleri bozabilir. .env dosyasında en az 8 karakterlik bir değer seçin.")
         lock = BotLock(Path(self.ayar["BOT_KLASOR"]) / "locks" / f"telegram-{_safe_piece(self.bot_id, 64)}.lock")
         if not lock.acquire():
             self._log(logging.ERROR, "Bu bot için başka bir süreç zaten çalışıyor; ikinci kopya başlatılmadı (çıkış kodu 2). Çift kurulum/servis olup olmadığını kontrol edin.")
             return False
         try:
+            self._eski_tekrarlari_kapat()
             # Webhook varsa asla sessizce deleteWebhook çağrısı yapmayız. getMe yalnızca
             # nabız/kimlik görünümü içindir; webhook sahipliği olduğu gibi korunur.
             # Geçici ağ hatasında süreç hemen çıkmaz (systemd hızlı yeniden başlatma
@@ -2435,7 +2525,7 @@ class KanitBot:
                     attempt += 1
                     wait = min(300, 15 * attempt)
                     self._log(logging.WARNING, f"Telegram'a ulaşılamadı (deneme {attempt}); {wait} sn sonra yeniden denenecek: {exc}")
-                    time.sleep(wait)
+                    self._bekle(wait)
                     if self._stopped:
                         return True
             while not self._stopped:
@@ -2444,7 +2534,7 @@ class KanitBot:
                     # processing yapılır; Docker yeniden başlasa da DB bayrağı kalır.
                     if self._paused():
                         self._heartbeat()
-                        time.sleep(1)
+                        self._bekle(1)
                         if once:
                             break
                         continue
@@ -2466,15 +2556,46 @@ class KanitBot:
                     self._log(logging.ERROR, f"Long polling hatası: {exc}")
                     if once:
                         return False
-                    time.sleep(3)
+                    self._bekle(3)
                 if once:
                     break
             return True
         finally:
             lock.release()
 
+    def _bekle(self, saniye: float) -> bool:
+        """Kesilebilir bekleme: stop() çağrılırsa (SIGTERM) hemen döner; dönüş True ise durduruldu."""
+        return self._stop_event.wait(max(0.0, float(saniye)))
+
+    def _eski_tekrarlari_kapat(self) -> int:
+        """Başlangıçta tek sefer: deneme üst sınırını aşmış 'tekrar' satırlarını 'olu' yapar.
+
+        Eski sürümlerde (2.2.x) sınırsız yeniden denenen satırlar güncellemeden sonra
+        haftalar önceki mesajı teslim etmesin; process_outbox bunları zaten seçmez.
+        """
+        try:
+            conn = self._conn()
+            try:
+                with db.transaction(conn):
+                    # guncelleme yenilenir: satır panelde saklama süresi boyunca açıklamasıyla görünür kalır.
+                    count = conn.execute(
+                        "UPDATE tg_giden SET durum='olu',hata=COALESCE(hata,'')||' | üst sınır aşıldı (güncelleme)',guncelleme=? "
+                        "WHERE bot_id=? AND durum='tekrar' AND deneme>=?",
+                        (_simdi(), self.bot_id, _outbox_max_deneme()),
+                    ).rowcount
+            finally:
+                conn.close()
+        except Exception as exc:
+            self._log(logging.WARNING, f"Eski teslimat tekrarları kapatılamadı: {exc}")
+            return 0
+        count = int(count or 0)
+        if count:
+            self._log(logging.INFO, f"Güncelleme artığı {count} teslimat tekrarı 'olu' yapıldı (deneme üst sınırı aşılmış).")
+        return count
+
     def stop(self) -> None:
         self._stopped = True
+        self._stop_event.set()
 
 
 # Kısa ad, harici test/işletme kodunun sınıfı kolay bulabilmesi için korunur.
