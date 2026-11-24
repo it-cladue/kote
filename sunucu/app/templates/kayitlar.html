@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block baslik %}Kayıtlar — Kanıt Paneli{% endblock %}
 {% block icerik %}
-<link rel="stylesheet" href="{{ url_for('static', filename='kayit.css', v='2.3.0') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='kayit.css', v=SURUM) }}">
 {% set export_url = url_filtre('disa_aktar_xlsx') if url_filtre is defined else url_for('disa_aktar_xlsx') %}
 {% set proje_etiketleri = {} %}{% for p in proje_bilgileri %}{% set _ = proje_etiketleri.update({p.code: p.label}) %}{% endfor %}
 <div class="kayit-sayfa" id="kayit-sayfa" data-durum="{{ f.durum }}" data-toplu-kt="{{ '1' if toplu_kt else '0' }}" data-gorunum="{{ gorunum }}"{% if acik_kayit %} data-acik="{{ acik_kayit }}"{% endif %}{% if acik_yorum %} data-yorum="{{ acik_yorum }}"{% endif %}>
@@ -47,8 +47,9 @@
     </div>
   </div>
   {% if onaysiz_uyari %}<div class="hata onaysiz-uyari" role="alert" id="onaysiz-uyari">{{ onaysiz_uyari }} Bu kayıtlar raporlamada kullanılmaz; takım liderinin onayını bekleyin.</div>{% endif %}
+  {% if onayli_notu %}<div class="bilgi onaysiz-uyari" role="status" id="onayli-notu">Bu sekmede onaylı kanıt yok; <a href="{{ url_degistir(durum='onayli', s=1, ac='') }}">Onaylı sekmesinde {{ onayli_notu }} onaylı kayıt var</a>.</div>{% endif %}
   <div class="sonuc-satir">
-    <p class="sonuc-ozeti"><b>{{ toplam }}</b> kayıt{% if f.bekleme %} · en az {{ f.bekleme }} gündür bekleyen <a href="{{ url_degistir(bekleme='', s=1, ac='') }}" class="arama-temizle" title="Bekleme süresi filtresini kaldır">kaldır</a>{% endif %}{% if sayfa_sayisi > 1 %} · sayfa {{ sayfa }} / {{ sayfa_sayisi }}{% endif %}{% if f.durum == 'bekleyen' and toplam %} · inceleme bekliyor{% endif %}
+    <p class="sonuc-ozeti"><b>{{ toplam }}</b> kayıt{% if f.bekleme %} · {% if f.durum == 'bekleyen' %}en az {{ f.bekleme }} gündür bekleyen{% else %}ilk görülmeden bu yana en az {{ f.bekleme }} gün{% endif %} <a href="{{ url_degistir(bekleme='', s=1, ac='') }}" class="arama-temizle" title="Bekleme süresi filtresini kaldır">kaldır</a>{% endif %}{% if sayfa_sayisi > 1 %} · sayfa {{ sayfa }} / {{ sayfa_sayisi }}{% endif %}{% if f.durum == 'bekleyen' and toplam %} · inceleme bekliyor{% endif %}
       {% if f.q %}<span class="arama-rozet" id="arama-rozet">Arama: <b>{{ f.q }}</b> <a href="{{ url_degistir(q='', s=1, ac='') }}" class="arama-temizle" title="Arama sözcüğünü kaldır, diğer filtreler kalsın">Aramayı temizle</a></span>{% endif %}
       {% if toplu_kt and gorunum == 'kart' and kayitlar %}<label class="sec-hepsi-alan"><input type="checkbox" id="sec-hepsi" aria-label="Sayfadaki tüm kayıtları seç"> Sayfadakileri seç</label>{% endif %}</p>
     {% if toplu_kt %}<div class="toplu-arac gizli" id="toplu-arac" role="toolbar" aria-label="Toplu işlem"><span id="toplu-sayi">0 seçili</span><button type="button" class="btn basari kucuk" data-toplu="1">Seçilenleri onayla (<span data-toplu-sayi>0</span>)</button><button type="button" class="btn kucuk" data-toplu="0">Onayı kaldır (<span data-toplu-sayi>0</span>)</button><button type="button" class="btn kucuk" data-toplu-temizle>Seçimi bırak</button></div>{% endif %}

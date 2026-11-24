@@ -6,7 +6,8 @@
     <p class="ust-etiket">Kanıt operasyonu</p>
     <h1 id="hero-baslik">Hoş geldiniz, {{ k.ad or k.kullanici_adi }}</h1>
     <p>Yeni kanıtlar yalnız Telegram üzerinden gelir. Burada kayıtları kontrol edin, onaylayın, soru sorun ve takip edin.</p>
-    <div class="baslik-eylemler"><a class="btn birincil" href="{{ url_for('kayitlar', durum='bekleyen') }}">Onay bekleyenleri aç</a><a class="btn" href="{{ url_for('kayitlar', durum='hepsi') }}">Tüm kayıtlar</a><a class="btn" href="{{ url_for('disa_aktar_sayfasi') }}">Excel çıktısı</a></div>
+    <div class="baslik-eylemler">{% if bekleyen_baglanti %}<a class="btn birincil" href="{{ url_for('kayitlar', durum='bekleyen') }}">Onay bekleyenleri aç</a>{% else %}<a class="btn birincil" href="{{ url_for('kayitlar', durum='onayli') }}">Onaylı kayıtları aç</a>{% endif %}<a class="btn" href="{{ url_for('kayitlar', durum='hepsi') }}">Tüm kayıtlar</a><a class="btn" href="{{ url_for('disa_aktar_sayfasi') }}">Excel çıktısı</a></div>
+    {% if gizli_proje_var %}<p class="kucukyazi" id="ana-onaysiz-not">Onay yetkiniz olmayan projelerde onay bekleyen kayıtlar size gösterilmez; sayılar yalnız onaylı kayıtları kapsar.</p>{% endif %}
   </div>
   <div class="arama-blok">
   <form class="arama-buyuk" method="get" action="{{ url_for('kayitlar') }}" role="search">
@@ -20,7 +21,7 @@
 </section>
 
 <section aria-label="Genel sayılar" class="kpi-izgara">
-  <a class="kpi bekleyen" href="{{ url_for('kayitlar', durum='bekleyen') }}"><b data-kpi="bekleyen">{{ kpi.bekleyen }}</b><span>Onay bekleyen kayıt</span></a>
+  {% if bekleyen_baglanti %}<a class="kpi bekleyen" href="{{ url_for('kayitlar', durum='bekleyen') }}"><b data-kpi="bekleyen">{{ kpi.bekleyen }}</b><span>Onay bekleyen kayıt</span></a>{% else %}<div class="kpi bekleyen" title="Onay bekleyen kayıtlar size gösterilmez"><b data-kpi="bekleyen">{{ kpi.bekleyen }}</b><span>Onay bekleyen kayıt</span></div>{% endif %}
   <a class="kpi bugun" href="{{ url_for('kayitlar', durum='hepsi', tarih1=simdi()[:10], tarih2=simdi()[:10]) }}"><b>{{ kpi.bugun }}</b><span>Bugün eklenen</span></a>
   <a class="kpi onay" href="{{ url_for('kayitlar', durum='onayli') }}"><b>{{ kpi.bugun_onay }}</b><span>Bugün onaylanan</span></a>
   <a class="kpi soru" href="{{ url_for('bildirim_sayfasi', tur='soru', okundu='0') }}"><b>{{ kpi.acik_soru }}</b><span>Bana yöneltilmiş açık soru</span></a>
@@ -33,11 +34,11 @@
     <div class="proje-baslik"><span class="rozet" style="background:{{ renk(kart.proje) }};color:{{ metin_rengi(renk(kart.proje)) }}">{{ kart.proje }}</span><small><span data-sayac="{{ kart.proje }}:toplam">{{ kart.toplam }}</span> kayıt</small></div>
     {% if kart.etiket and kart.etiket != kart.proje %}<div class="proje-ad" title="{{ kart.etiket }}">{{ kart.etiket }}</div>{% endif %}
     <div class="proje-butonlar">
-      <a class="sayi-btn bekleyen" href="{{ url_for('kayitlar',proje=kart.proje,durum='bekleyen') }}"><b data-sayac="{{ kart.proje }}:bekleyen">{{ kart.bekleyen }}</b><span>Bekleyen</span></a>
+      {% if kart.gizli %}<span class="sayi-btn bekleyen pasif" title="Onay bekleyen kayıtlar size gösterilmez"><b data-sayac="{{ kart.proje }}:bekleyen">{{ kart.bekleyen }}</b><span>Bekleyen</span></span>{% else %}<a class="sayi-btn bekleyen" href="{{ url_for('kayitlar',proje=kart.proje,durum='bekleyen') }}"><b data-sayac="{{ kart.proje }}:bekleyen">{{ kart.bekleyen }}</b><span>Bekleyen</span></a>{% endif %}
       <a class="sayi-btn onayli" href="{{ url_for('kayitlar',proje=kart.proje,durum='onayli') }}"><b data-sayac="{{ kart.proje }}:onayli">{{ kart.onayli }}</b><span>Onaylı</span></a>
-      <a class="sayi-btn silinen" href="{{ url_for('kayitlar',proje=kart.proje,durum='silinen') }}"><b data-sayac="{{ kart.proje }}:silinen">{{ kart.silinen }}</b><span>Silinen</span></a>
+      {% if kart.gizli %}<span class="sayi-btn silinen pasif" title="Silinen kayıtlar size gösterilmez"><b data-sayac="{{ kart.proje }}:silinen">{{ kart.silinen }}</b><span>Silinen</span></span>{% else %}<a class="sayi-btn silinen" href="{{ url_for('kayitlar',proje=kart.proje,durum='silinen') }}"><b data-sayac="{{ kart.proje }}:silinen">{{ kart.silinen }}</b><span>Silinen</span></a>{% endif %}
     </div>
-    <a class="geciken-baglanti {{ 'var' if kart.geciken }}" href="{{ url_for('kayitlar',proje=kart.proje,durum='bekleyen',bekleme=hatirlatma_gun) }}" title="{{ hatirlatma_gun }} gün veya daha uzun süredir onay bekleyen kayıtlar">{{ hatirlatma_gun }} gündür bekleyen: <b data-sayac="{{ kart.proje }}:geciken">{{ kart.geciken }}</b></a>
+    {% if kart.gizli %}<span class="geciken-baglanti pasif" title="Onay bekleyen kayıtlar size gösterilmez">Onay bekleyenler gösterilmez<b data-sayac="{{ kart.proje }}:geciken" hidden>{{ kart.geciken }}</b></span>{% else %}<a class="geciken-baglanti {{ 'var' if kart.geciken }}" href="{{ url_for('kayitlar',proje=kart.proje,durum='bekleyen',bekleme=hatirlatma_gun) }}" title="{{ hatirlatma_gun }} gün veya daha uzun süredir onay bekleyen kayıtlar">{{ hatirlatma_gun }} gündür bekleyen: <b data-sayac="{{ kart.proje }}:geciken">{{ kart.geciken }}</b></a>{% endif %}
     <a class="metin-baglanti" href="{{ url_for('kayitlar',proje=kart.proje,durum='hepsi') }}">Proje kayıtlarını incele <span aria-hidden="true">→</span></a>
   </article>
 {% else %}
@@ -63,7 +64,7 @@
   <section class="kart" aria-labelledby="hizli-baslik">
     <div class="kart-baslik"><div><p class="ust-etiket">Kısayollar</p><h2 id="hizli-baslik">Sık kullanılan sayfalar</h2></div></div>
     <div class="hizli-baglantilar">
-      <a href="{{ url_for('kayitlar', durum='bekleyen') }}">Onay bekleyen kayıtlar <small>Kayıtlar</small></a>
+      {% if bekleyen_baglanti %}<a href="{{ url_for('kayitlar', durum='bekleyen') }}">Onay bekleyen kayıtlar <small>Kayıtlar</small></a>{% else %}<a href="{{ url_for('kayitlar', durum='onayli') }}">Onaylı kayıtlar <small>Kayıtlar</small></a>{% endif %}
       <a href="{{ url_for('disa_aktar_sayfasi') }}">Excel çıktısı al <small>Çıktı</small></a>
       <a href="{{ url_for('excel_kontrol') }}">Listeyi kayıtlarla karşılaştır <small>Kanıt Kontrolü</small></a>
       <a href="{{ url_for('bildirim_sayfasi') }}">Bildirim geçmişi <small>Bildirimler</small></a>

@@ -385,7 +385,7 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
 .modal-govde { display: grid; grid-template-columns: 1.4fr 1fr; min-height: 390px; }
 .modal-gorsel { background: #0b1220; display: flex; align-items: center; justify-content: center; min-height: 320px; }
 .modal-gorsel img { max-width: 100%; max-height: 90vh; object-fit: contain; display: block; }
-#m-gorsel-yok { color: #cbd5e1; padding: 30px; text-align: center; line-height: 1.6; word-break: break-all; }
+#m-gorsel-yok { color: #cbd5e1; padding: 30px; text-align: center; line-height: 1.6; word-break: normal; overflow-wrap: anywhere; }
 #m-gorsel-yok a { color: #93c5fd; }
 #m-link { word-break: break-all; margin-bottom: 6px; }
 .modal-bilgi { padding: 22px; }
@@ -393,7 +393,7 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
 .modal-baslik h2 { font-size: 18px; margin: 0 8px 0 0; }
 .modal-baslik h2:focus { outline: 0; }
 .alanlar { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; margin: 0 0 12px; font-size: 14px; }
-.alanlar dt { color: var(--soluk); } .alanlar dd { margin: 0; font-weight: 500; word-break: break-all; }
+.alanlar dt { color: var(--soluk); } .alanlar dd { margin: 0; font-weight: 500; word-break: normal; overflow-wrap: anywhere; }
 .alanlar dd.buyuk { font-size: 19px; font-weight: 700; }
 .modal-butonlar { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
 .duzenle-form { background: var(--yuzey-2); border: 1px solid var(--cizgi); border-radius: var(--yuvarlak); padding: 12px 14px; margin-bottom: 12px; }
@@ -675,3 +675,8 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
   .ozet-tablo th:first-child, .ozet-tablo td.sarmal { max-width: 96px; }
   .ozet-tablo td.sarmal small { display: block; }
 }
+/* 2.3.1 inceleme: gizle modunda kt'siz projelerin kartında bağlantısız (pasif) sayaçlar */
+.sayi-btn.pasif { cursor: default; opacity: .55; }
+.sayi-btn.pasif:hover { background: var(--yuzey-2); }
+.geciken-baglanti.pasif { cursor: default; opacity: .7; }
+.geciken-baglanti.pasif:hover { filter: none; }

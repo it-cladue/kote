@@ -101,7 +101,7 @@ window.Panel = (function () {
     var dialog=modal.querySelector('.modal-icerik'),form=document.getElementById('m-duzenle'),yf=document.getElementById('m-yorum-form'),formHata=document.getElementById('m-duzenle-hata');
     var acikId=null,acikKayit=null,acan=null,refreshRunning=false,openSerial=0,gorseller=[],gorselIdx=0,lightboxBekliyor=false;
     /* 2.3.1 derin bağlantı: ?ac=<kayıt>&yorum=<yorum> → modal açılır, Konuşma bölümünde ilgili yorum kaydırılıp 3 sn vurgulanır (bir kez). */
-    var ilkParam=new URLSearchParams(window.location.search),ilkAc=ilkParam.get('ac')||(sayfa&&sayfa.getAttribute('data-acik'))||'',yorumParam=ilkParam.get('yorum')||(sayfa&&sayfa.getAttribute('data-yorum'))||'',bekleyenYorum=/^\d+$/.test(yorumParam)?yorumParam:null;
+    var ilkParam=new URLSearchParams(window.location.search),ilkAc=ilkParam.get('ac')||(sayfa&&sayfa.getAttribute('data-acik'))||'',yorumParam=ilkParam.get('yorum')||(sayfa&&sayfa.getAttribute('data-yorum'))||'',bekleyenYorum=/^\d{1,10}$/.test(yorumParam)?yorumParam:null;
     var lb=lightboxKur(document.getElementById('lightbox'));
     var ust=document.querySelector('header.ust');
     function ustYukseklik(){if(sayfa&&ust)sayfa.style.setProperty('--ust-h',ust.offsetHeight+'px');}
@@ -179,7 +179,10 @@ window.Panel = (function () {
     function editDirty(){if(!acikKayit||!formOpen())return false;return ['personel','uye_id','ana_uye_id','lead_id','tip','kategori','aciklama'].some(function(n){return String(form.elements[n].value||'').trim()!==String(acikKayit[n]||'').trim();});}
     function leaveOk(){return !editDirty()||confirm('Kaydedilmemiş düzenleme var. Kaydetmeden devam ederseniz değişiklikler kaybolur. Yine de devam edilsin mi?');}
     var gyazoWatchSerial=0;
-    function closeRecord(force){if(!force&&!leaveOk())return;if(lb)lb.close();saveDraft();gyazoWatchSerial++;modal.classList.add('gizli');modal.setAttribute('aria-hidden','true');document.body.style.overflow='';acikId=null;acikKayit=null;urlAc(null);if(acan&&typeof acan.focus==='function')acan.focus();}
+    function closeRecord(force){if(!force&&!leaveOk())return;if(lb)lb.close();saveDraft();gyazoWatchSerial++;modal.classList.add('gizli');modal.setAttribute('aria-hidden','true');document.body.style.overflow='';var kapanan=acikId;acikId=null;acikKayit=null;urlAc(null);
+      /* Bildirimden (derin bağlantı) açılan pencerede tetikleyici yok: odak kaybolmasın, ilgili satıra ya da sonuç alanına dönsün. */
+      var hedef=(acan&&typeof acan.focus==='function')?acan:(cardOf(kapanan)||resultRoot()||document.querySelector('h1'));
+      if(hedef){if(!acan&&!hedef.hasAttribute('tabindex'))hedef.setAttribute('tabindex','-1');try{hedef.focus({preventScroll:true});}catch(_){hedef.focus();}}}
     function openRecord(id,trigger,buyut){
       var serial=++openSerial;if(acikId&&acikId!==id){saveDraft();yf.reset();resetReply();}
       acikId=id;if(trigger)acan=trigger;lightboxBekliyor=!!buyut;urlAc(id);
@@ -209,6 +212,7 @@ window.Panel = (function () {
       var onayYok=document.getElementById('m-onay-yok');if(onayYok)onayYok.classList.add('gizli');
       var baslik=e.status===403?'Bu kayıt için yetkiniz yok':e.status===404?'Kayıt bulunamadı':'Açılamadı';
       if(e.status===403&&e.veri&&e.veri.neden==='onay_yok')baslik='Bu kaydın onayı yok';
+      if(e.status===403&&e.veri&&e.veri.neden==='silindi')baslik='Bu kayıt silinmiş';
       var mesaj=e.message||'Kayıt açılamadı.';if(proje&&mesaj.indexOf(proje)<0)mesaj+=' Kayıt '+proje+' projesine ait.';
       document.getElementById('m-alanlar').innerHTML='<div class="genis"><dt>'+esc(baslik)+'</dt><dd>'+esc(mesaj)+(e.status===403&&!(e.veri&&e.veri.neden==='onay_yok')?'<br><small>Gerekirse süperadminden bu proje için yetki isteyin.</small>':'')+'</dd></div>';
     }
@@ -386,7 +390,7 @@ window.Panel = (function () {
     var permission=document.getElementById('bildirim-izin'), permissionBtn=document.getElementById('bildirim-izin-btn'), clean=document.getElementById('bildirim-temizle');
     if(window.Notification&&Notification.permission==='default'&&permission)permission.classList.remove('gizli');
     if(permissionBtn)permissionBtn.addEventListener('click',function(){window.Notification.requestPermission().then(function(){permission.classList.add('gizli');});});
-    function openBox(open){box.classList.toggle('gizli',!open);zil.setAttribute('aria-expanded',String(open));if(open){poll(true);}}
+    function openBox(open){box.classList.toggle('gizli',!open);zil.setAttribute('aria-expanded',String(open));if(open){poll(true);var ilk=list.querySelector('li[tabindex]')||box.querySelector('a,button');if(ilk)setTimeout(function(){if(!box.classList.contains('gizli'))ilk.focus();},0);}}
     zil.addEventListener('click',function(){openBox(box.classList.contains('gizli'));});
     document.addEventListener('click',function(e){if(box.classList.contains('gizli'))return;if(box.contains(e.target)||zil.contains(e.target))return;openBox(false);});
     document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!box.classList.contains('gizli')){openBox(false);zil.focus();}});
@@ -399,7 +403,10 @@ window.Panel = (function () {
       var items=data.bildirimler||[];var sig=JSON.stringify(items.map(function(n){return n.key||n.bildirim_id;}))+':'+unread;
       var LIMIT=15, shown=items.slice(0,LIMIT), kalan=Math.max(items.length,unread)-shown.length;
       if(sig!==last){last=sig;list.innerHTML=shown.map(function(n){var id=n.key||n.bildirim_id||'', label=TUR_ADLARI[n.tur]||n.etiket||'Yeni kayıt', color=(window.PROJE_RENKLERI||{})[n.proje]||'#64748b', kid=n.kayit_id||n.id, hedef=n.url||recordURL(n), kayit=n.ozet?'':(kid?'#'+esc(kid):'')+(n.personel?(kid?' · ':'')+esc(n.personel):''), kim=(n.kim&&n.kim!=='sistem')?' · '+esc(n.kim):'';return '<li class="tiklanir '+(n.okundu?'':'okunmamis')+(n.tur==='hatirlatma'?' hatirlatma':'')+'" data-notify-hedef="'+esc(hedef)+'" data-notify-id="'+esc(id)+'" tabindex="0" role="link" aria-label="'+esc(label)+(kid&&!n.ozet?' · Kayıt #'+esc(kid):'')+' — aç"><span class="rozet" style="background:'+esc(color)+';color:'+yaziRengi(color)+'">'+esc(n.proje||'—')+'</span> <b>'+esc(label)+kim+'</b>'+(kayit?'<span class="bildirim-kayit"><b>'+kayit+'</b>'+(n.kategori?' <small>'+esc(n.kategori)+'</small>':'')+'</span>':'')+'<p>'+esc(n.metin||'Kayıt hareketi')+'</p><div class="bildirim-eylem"><small>'+esc(n.zaman||n.tarih||'')+'</small><span><a class="btn kucuk ikincil" href="'+esc(hedef)+'" data-notify="'+esc(id)+'">'+(n.ozet?'Bekleyenleri aç':(n.yorum_id?'Yorumu aç':'Kaydı aç'))+'</a> <button type="button" class="btn kucuk hayalet" data-notify-okundu="'+esc(id)+'" aria-label="Okundu işaretle">Okundu</button></span></div></li>';}).join('')||'<li class="bos">Okunmamış bildirim yok.</li>';if(kalan>0)list.innerHTML+='<li class="tumu"><a class="btn kucuk hayalet" href="/bildirimler?okundu=0">'+kalan+' bildirim daha · Tümünü gör</a></li>';}
-      items.forEach(function(n){var id=n.key||n.bildirim_id;if(!seen[id]){seen[id]=true;if(!initial){var kid=n.kayit_id||n.id,ozet=(kid&&!n.ozet?'#'+kid+' · ':'')+(n.personel&&!n.ozet?n.personel+' · ':'')+(n.metin||n.kim||'');toast((n.tur==='hatirlatma'?'Hatırlatma: ':'Yeni bildirim: ')+(n.proje||'')+' · '+ozet);if(window.Notification&&Notification.permission==='granted'){try{new Notification('Kanıt Paneli · '+(n.proje||''),{body:ozet||'Yeni bildirim',tag:'kanit-'+(window.PANEL_KULLANICI||'')+'-'+id});}catch(_){}}setChangeStrip(true);}}});
+      /* Yeni satırlar: 1-2 ise tek tek, 3 ve üzeri ise tek özet tost/masaüstü bildirimi (hatırlatma partileri 20 ayrı tost üretmesin). */
+      var yeniler=items.filter(function(n){var id=n.key||n.bildirim_id;if(seen[id])return false;seen[id]=true;return !initial;});
+      if(yeniler.length>=3){var hat=yeniler.filter(function(n){return n.tur==='hatirlatma';}).length,ozetMetin=yeniler.length+' yeni bildirim'+(hat?' ('+hat+' hatırlatma)':'');toast(ozetMetin);if(window.Notification&&Notification.permission==='granted'){try{new Notification('Kanıt Paneli',{body:ozetMetin,tag:'kanit-'+(window.PANEL_KULLANICI||'')+'-toplu'});}catch(_){}}setChangeStrip(true);}
+      else yeniler.forEach(function(n){var id=n.key||n.bildirim_id,kid=n.kayit_id||n.id,ozet=(kid&&!n.ozet?'#'+kid+' · ':'')+(n.personel&&!n.ozet?n.personel+' · ':'')+(n.metin||n.kim||'');toast((n.tur==='hatirlatma'?'Hatırlatma: ':'Yeni bildirim: ')+(n.proje||'')+' · '+ozet);if(window.Notification&&Notification.permission==='granted'){try{new Notification('Kanıt Paneli · '+(n.proje||''),{body:ozet||'Yeni bildirim',tag:'kanit-'+(window.PANEL_KULLANICI||'')+'-'+id});}catch(_){}}setChangeStrip(true);});
       try{sessionStorage.setItem(key,JSON.stringify(seen));}catch(_){}
       if(data.degisiklik&&stamp&&stamp!==data.degisiklik)document.dispatchEvent(new CustomEvent('kp:degisti',{detail:data}));
       if(data.degisiklik)stamp=data.degisiklik;initial=false;

@@ -19,7 +19,7 @@ from PIL import Image, UnidentifiedImageError
 from . import db, yetki, kullanicilar, gorsel, bot_yonetim
 from .settings import AYAR, ROOT
 
-SURUM = '2.3.0'
+SURUM = '2.3.1'
 secret_path = Path(AYAR['BOT_KLASOR']) / 'session.key'
 secret = os.getenv('SESSION_SECRET')
 if not secret:
@@ -117,6 +117,18 @@ def _selected_projects(args,allowed):
     selected=_explicit_projects(args,allowed)
     return selected or list(allowed)
 
+def _gizli_kayit_sql(alias='',projeler_listesi=None,sol_birlesim=False):
+    """2.3.1 ONAYSIZ_GORUNUM=gizle: kullanıcının kt yetkisi olmayan projelerde onaysız/silinmiş kayıtları dışlayan ortak koşul.
+    (sql, params) döndürür; kural uygulanmıyorsa ('', []). Liste, sayaçlar, kategori, denetim/son işlemler ve bildirim akışı aynı yardımcıyı kullanır.
+    sol_birlesim=True: LEFT JOIN'de kayıt satırı olmayan (k NULL) satırlar korunur."""
+    if _onaysiz_modu()!='gizle':return '',[]
+    kt_yok=_kt_yok(projeler_listesi if projeler_listesi is not None else _allowed())
+    if not kt_yok:return '',[]
+    a=(alias+'.') if alias else ''
+    sql='NOT (%sproje IN (%s) AND (%skt=0 OR %ssilindi=1))' % (a,','.join('?'*len(kt_yok)),a,a)
+    if sol_birlesim:sql='(%sid IS NULL OR %s)' % (a,sql)
+    return sql,list(kt_yok)
+
 def _scoped_categories(codes):
     from . import katalog
     if not codes:return []
@@ -124,7 +136,8 @@ def _scoped_categories(codes):
     for code in codes:
         names.update(r['label'] for r in katalog.list_categories(baglanti(),project_code=code,active_only=True))
     places=','.join('?' for _ in codes)
-    names.update(r[0] for r in baglanti().execute("SELECT DISTINCT kategori FROM kayitlar WHERE proje IN ("+places+") AND kategori IS NOT NULL AND kategori<>''",codes))
+    gizli_sql,gizli_par=_gizli_kayit_sql('',codes)
+    names.update(r[0] for r in baglanti().execute("SELECT DISTINCT kategori FROM kayitlar WHERE proje IN ("+places+") AND kategori IS NOT NULL AND kategori<>''"+(' AND '+gizli_sql if gizli_sql else ''),[*codes,*gizli_par]))
     return sorted(names,key=str.casefold)
 
 def url_filtre(endpoint):
@@ -379,6 +392,8 @@ def _son_islemler(allowed,limit=10):
     if g.yk['admin']:where,params='1=1',[]
     elif allowed:where,params='k.proje IN ('+','.join('?' for _ in allowed)+')',list(allowed)
     else:return []
+    gizli_sql,gizli_par=_gizli_kayit_sql('k',allowed,sol_birlesim=True)
+    if gizli_sql:where+=' AND '+gizli_sql;params=[*params,*gizli_par]
     rows=[]
     # Kullanıcının kendi "okundu" hareketleri akışı doldurmasın; İşlem Geçmişi'nde görünmeye devam eder.
     for row in baglanti().execute("SELECT d.*,k.id record_id FROM denetim d LEFT JOIN kayitlar k ON k.anahtar=d.anahtar WHERE "+where+" AND d.islem<>'bildirim_okundu' ORDER BY d.id DESC LIMIT ?",[*params,limit]):
@@ -430,19 +445,22 @@ def _denetim_ayrinti(item):
 @giris_gerekli
 def ana():
     cards=[];allowed=_allowed();kpi=dict(bekleyen=0,bugun=0,bugun_onay=0,toplam=0,onayli=0,geciken=0);gun=_hatirlatma_gun()
+    gizli_sql,gizli_par=_gizli_kayit_sql('',allowed);gizli_projeler=set(gizli_par)  # gizle: kt'siz projelerde yalnız onaylılar sayılır
     for p in allowed:
         row=baglanti().execute('''SELECT SUM(kt=0 AND silindi=0) bekleyen,
             SUM(kt=1 AND silindi=0) onayli,SUM(silindi=1) silinen,
             SUM(date(tarih)=date('now','localtime') AND silindi=0) bugun,
             SUM(kt=1 AND silindi=0 AND date(kt_zaman)=date('now','localtime')) bugun_onay,COUNT(*) toplam,
             SUM(kt=0 AND silindi=0 AND '''+_GECIKEN_SQL+''') geciken
-            FROM kayitlar WHERE proje=?''',(gun,p)).fetchone()
+            FROM kayitlar WHERE proje=?'''+(' AND '+gizli_sql if gizli_sql else ''),(gun,p,*gizli_par)).fetchone()
         card={'proje':p,**{k:row[k] or 0 for k in row.keys()}}
         card['etiket']=next((x['label'] for x in _all_project_info() if x['code']==p),p)
+        card['gizli']=p in gizli_projeler  # onay bekleyen/silinen bağlantıları üretilmez, sayaçlar 0
         cards.append(card)
         for key in kpi:kpi[key]+=card[key]
     kpi['acik_soru']=_acik_sorular(allowed)
-    return render_template('ana.html',kartlar=cards,durum=durum_bilgisi(),kpi=kpi,son_islemler=_son_islemler(allowed),islem_adlari=ISLEM_ADLARI,hatirlatma_gun=gun)
+    bekleyen_baglanti=any(p not in gizli_projeler for p in allowed)
+    return render_template('ana.html',kartlar=cards,durum=durum_bilgisi(),kpi=kpi,son_islemler=_son_islemler(allowed),islem_adlari=ISLEM_ADLARI,hatirlatma_gun=gun,bekleyen_baglanti=bekleyen_baglanti,gizli_proje_var=bool(gizli_projeler))
 
 SAYFA_BOYLARI=(24,48,96)
 
@@ -471,7 +489,7 @@ def _kategori_kanonik(cat,codes):
     except Exception: return cat
 
 # 2.3.1 — Onaysız kayıt görünürlüğü ve bekleme süresi. Yaş = bugün − date(COALESCE(ilk_gorulme,tarih)); ? = gün eşiği.
-_GECIKEN_SQL="julianday(date('now','localtime')) - julianday(date(COALESCE(ilk_gorulme,tarih))) >= ?"
+_GECIKEN_SQL="julianday(date('now','localtime')) - julianday(date(COALESCE(NULLIF(ilk_gorulme,''),tarih))) >= ?"
 
 def _hatirlatma_gun():
     try: return max(1,int(AYAR.get('HATIRLATMA_GUN',3)))
@@ -505,8 +523,8 @@ def _filtre_sql(args,izinli):
     elif state=='silinen': where.append('silindi=1')
     elif state!='hepsi': state='bekleyen'; where.append('kt=0 AND silindi=0')
     if gizle and kt_yok and not yalniz_onayli:
-        where.append('(proje NOT IN (%s) OR (kt=1 AND silindi=0))' % ','.join('?'*len(kt_yok))); par.extend(kt_yok)
-    bekleme=_bekleme_gun(args)
+        gizli_sql,gizli_par=_gizli_kayit_sql('',selected); where.append(gizli_sql); par.extend(gizli_par)
+    bekleme=0 if yalniz_onayli else _bekleme_gun(args)  # onaylıya sabitlenen listede 'gündür bekleyen' süzgeci anlamsız: yok sayılır
     if bekleme: where.append(_GECIKEN_SQL); par.append(bekleme)
     cat=_kategori_kanonik(args.get('kategori','').strip()[:120],selected)
     if cat: where.append('kategori COLLATE UNICODE_NOCASE=?'); par.append(cat)
@@ -559,7 +577,7 @@ def kayit_sozluk(row):
              gorsel_kayip=kayip,gorsel_dosya_adi=(os.path.basename(str(dosya).replace('\\','/').rstrip('/')) or None) if kayip else None,
              izin_gyazo=kayit_izin(d,'kt') and kayit_izin(d,'gorsel') and bool(path) and not d['silindi'],izin_kt=kayit_izin(d,'kt'),izin_yorum=kayit_izin(d,'kt'),izin_duzenle=kayit_izin(d,'duzenle'),izin_sil=kayit_izin(d,'sil'),geri_al_olur=bool(d['silindi']))
     # 2.3.1: kt yetkisi olmayan kullanıcı için onaysız kayıt 'uyar' modunda kırmızı rozet/şeritle işaretlenir.
-    d['onay_uyari']=bool(_onaysiz_modu()=='uyar' and not d['izin_kt'] and not d['kt'])
+    d['onay_uyari']=bool(_onaysiz_modu()=='uyar' and not d['izin_kt'] and not d['kt'] and not d['silindi'])
     link=d.get('link') or ''; d['dis_link']=link if re.match(r'^https?://',link) else None
     link2=d.get('gorsel2') or ''; d['dis_link2']=link2 if re.match(r'^https?://',link2) else None
     d['giris_tipi_metni']=GIRIS_TIPI_ADLARI.get(d.get('giris_tipi') or '',d.get('giris_tipi') or '')
@@ -611,12 +629,19 @@ def kayitlar():
     except ValueError: acik=0
     try: yorum=int(args.get('yorum','') or 0)
     except ValueError: yorum=0
-    # 'uyar' modu: arama yalnız onaysız (kt yetkisi olmayan projelerdeki) kayıt döndürüyorsa listenin üstünde uyarı.
-    onaysiz_uyari=None
-    if f.get('q') and total and f.get('kt_yok') and _onaysiz_modu()=='uyar':
-        onayli=c.execute(f'SELECT COUNT(*) FROM kayitlar WHERE {where} AND NOT (kt=0 AND proje IN (%s))' % ','.join('?'*len(f['kt_yok'])),(*par,*f['kt_yok'])).fetchone()[0]
-        if not onayli: onaysiz_uyari='Aradığınız ID için onaylı kanıt yok; %d onaysız kayıt listelendi.' % total
-    return render_template('kayitlar.html',kayitlar=records,toplam=total,sayfa=page,sayfa_sayisi=pages,f=f,izinli=allowed,kategoriler=cats,gorunum=view,sayac=counts,sayfa_boyu=size,sayfa_boylari=SAYFA_BOYLARI,toplu_kt=toplu_kt,uyari=uyari,acik_kayit=acik or None,acik_yorum=(yorum if acik and yorum>0 else None),onaysiz_uyari=onaysiz_uyari,hatirlatma_gun=_hatirlatma_gun(),damga=_degisiklik_damgasi() or '',filtre_aktif=bool(f.get('q') or f.get('kategori') or f.get('ekleyen') or f.get('tarih1') or f.get('tarih2') or f.get('tarihsiz') or f.get('proje') or f.get('bekleme')))
+    if acik<=0: acik=0
+    if not (0<yorum<2**31): yorum=0
+    # 'uyar' modu: arama sonucu yalnız onaysız (kt yetkisi olmayan projelerdeki, silinmemiş) kayıt içeriyor ve aynı arama için
+    # HİÇBİR sekmede onaylı kanıt yoksa uyarı; onaylı kanıt başka sekmedeyse yalnız yönlendirici bilgi notu.
+    onaysiz_uyari=None;onayli_notu=None
+    if f.get('q') and f.get('kt_yok') and _onaysiz_modu()=='uyar':
+        places=','.join('?'*len(f['kt_yok']))
+        listelenen=c.execute(f'SELECT COUNT(*) FROM kayitlar WHERE {where} AND kt=0 AND silindi=0 AND proje IN ({places})',(*par,*f['kt_yok'])).fetchone()[0]
+        tum=args.to_dict(flat=False);tum['durum']=['hepsi'];w_tum,p_tum,_=_filtre_sql(MultiDict(tum),allowed)
+        onayli_tum=c.execute(f'SELECT COUNT(*) FROM kayitlar WHERE {w_tum} AND kt=1 AND silindi=0',p_tum).fetchone()[0]
+        if listelenen and not onayli_tum: onaysiz_uyari='Aradığınız ID için onaylı kanıt yok; %d onaysız kayıt listelendi.' % listelenen
+        elif onayli_tum and f['durum'] in ('bekleyen','silinen'): onayli_notu=onayli_tum
+    return render_template('kayitlar.html',kayitlar=records,toplam=total,sayfa=page,sayfa_sayisi=pages,f=f,izinli=allowed,kategoriler=cats,gorunum=view,sayac=counts,sayfa_boyu=size,sayfa_boylari=SAYFA_BOYLARI,toplu_kt=toplu_kt,uyari=uyari,acik_kayit=acik or None,acik_yorum=(yorum if acik and yorum else None),onaysiz_uyari=onaysiz_uyari,onayli_notu=onayli_notu,hatirlatma_gun=_hatirlatma_gun(),damga=_degisiklik_damgasi() or '',filtre_aktif=bool(f.get('q') or f.get('kategori') or f.get('ekleyen') or f.get('tarih1') or f.get('tarih2') or f.get('tarihsiz') or f.get('proje') or f.get('bekleme')))
 
 @app.route('/kayit/<int:kid>')
 @giris_gerekli
@@ -660,8 +685,13 @@ def _kayit_al(kid,action):
     if not kayit_izin(r,action): _json_hata(403,'Bu kayıt için yetkiniz yok; kayıt '+str(r['proje'] or '?')+' projesine ait.',proje=r['proje'])
     # 2.3.1 'gizle': kt yetkisi olmayan kullanıcıya onaysız (ya da silinmiş) kayıt ayrıntı/görsel olarak da verilmez (404 değil 403).
     if _onaysiz_modu()=='gizle' and not kayit_izin(r,'kt') and (not r['kt'] or r['silindi']):
-        _json_hata(403,'Bu kaydın onayı yok; yalnız onaylı kayıtlar gösterilir.',proje=r['proje'],neden='onay_yok')
+        if r['silindi']: _json_hata(403,'Bu kayıt silinmiş; size gösterilmez.',neden='silindi')
+        _json_hata(403,'Bu kaydın onayı yok; yalnız onaylı kayıtlar gösterilir.',neden='onay_yok')
     return r
+
+def _hatirlatmalari_kapat(c,kid):
+    """2.3.1: onaylanan ya da silinen kaydın açık hatırlatmaları okundu olur (zil sayacı düşer); akış da bunları süzer."""
+    c.execute("UPDATE mesaj_bildirimleri SET okundu=1 WHERE kayit_id=? AND tur='hatirlatma' AND olay LIKE 'hatirlatma:%' AND okundu=0",(kid,))
 
 def version_check(r):
     v=request.form.get('surum')
@@ -672,6 +702,7 @@ def _kt_uygula(c,r,v):
     """Tek kayit icin onay/onay kaldirma; kayit_kt ve toplu-kt ayni kurali kullanir."""
     from . import discussion
     c.execute('UPDATE kayitlar SET kt=?,kt_kaynak=\'panel\',kt_kim=?,kt_zaman=?,surum=surum+1,guncelleme=? WHERE id=?',(v,g.k['kullanici_adi'],simdi(),simdi(),r['id']))
+    if v: _hatirlatmalari_kapat(c,r['id'])
     discussion.approval_notice(c,r,g.k['kullanici_adi'],v,r['surum']+1)
     db.denetim_yaz(c,g.k['kullanici_adi'],'onayla' if v else 'onay_kaldir',r['proje'],r['anahtar'],r['kt'],v,ip())
 
@@ -826,6 +857,7 @@ def _delete_state(kid,value):
         if bool(r['silindi'])==bool(value): return jsonify(ok=True,degisiklik=False)
         reason=db.metin_temizle(request.form.get('sebep') or '',300).strip()
         c.execute('UPDATE kayitlar SET silindi=?,silen=?,silme_zamani=?,surum=surum+1,guncelleme=? WHERE id=?',(value,g.k['kullanici_adi'] if value else None,simdi() if value else None,simdi(),kid))
+        if value: _hatirlatmalari_kapat(c,kid)
         db.denetim_yaz(c,g.k['kullanici_adi'],'sil' if value else 'geri_al',r['proje'],r['anahtar'],r['silindi'],value,ip(),aciklama=reason or None); db.degisti(c)
     return jsonify(ok=True,degisiklik=True,damga=_degisiklik_damgasi())
 
@@ -1044,6 +1076,8 @@ def denetim():
     if not g.yk['admin']:
         if not allowed:abort(403)
         where.append('k.proje IN ('+','.join('?' for _ in allowed)+')');params.extend(allowed)
+        gizli_sql,gizli_par=_gizli_kayit_sql('k',allowed,sol_birlesim=True)
+        if gizli_sql:where.append(gizli_sql);params.extend(gizli_par)
     filters={key:request.args.get(key,'')[:100] for key in ('q','kullanici','islem','proje','tarih1','tarih2')}
     if filters['proje']:
         if filters['proje'] not in allowed:abort(403)
@@ -1090,7 +1124,8 @@ def _scoped_counts():
     allowed=_allowed()
     if not allowed:return {},'0'
     places=','.join('?' for _ in allowed)
-    rows=baglanti().execute('SELECT proje,SUM(kt=0 AND silindi=0) bekleyen,SUM(kt=1 AND silindi=0) onayli,SUM(silindi=1) silinen,COUNT(*) toplam,SUM(surum) version_sum,SUM(kt=0 AND silindi=0 AND '+_GECIKEN_SQL+') geciken FROM kayitlar WHERE proje IN ('+places+') GROUP BY proje',[_hatirlatma_gun(),*allowed]).fetchall()
+    gizli_sql,gizli_par=_gizli_kayit_sql('',allowed)
+    rows=baglanti().execute('SELECT proje,SUM(kt=0 AND silindi=0) bekleyen,SUM(kt=1 AND silindi=0) onayli,SUM(silindi=1) silinen,COUNT(*) toplam,SUM(surum) version_sum,SUM(kt=0 AND silindi=0 AND '+_GECIKEN_SQL+') geciken FROM kayitlar WHERE proje IN ('+places+')'+(' AND '+gizli_sql if gizli_sql else '')+' GROUP BY proje',[_hatirlatma_gun(),*allowed,*gizli_par]).fetchall()
     counts={p:dict(bekleyen=0,onayli=0,silinen=0,toplam=0,geciken=0) for p in allowed}
     stamp=[]
     for row in rows:
@@ -1115,7 +1150,7 @@ def _bildirim_hedef(row):
 @giris_gerekli
 def bildirim_json():
     from . import bildirim_gecmisi
-    data=bildirim_gecmisi.liste(baglanti(),g.k['kullanici_adi'],_allowed(),{'durum':'okunmamis'},20)
+    data=bildirim_gecmisi.liste(baglanti(),g.k['kullanici_adi'],_allowed(),{'durum':'okunmamis'},20,gizli=_gizli_kayit_sql('k'))
     counts,stamp=_scoped_counts()
     alerts=[]
     for row in data['bildirimler']:
@@ -1134,7 +1169,7 @@ def bildirim_sayfasi():
     elif filters.get('okundu'):abort(400)
     if filters.get('tur')=='kayit':filters['tur']='kanit'
     if 'sayfa' in filters and 's' not in filters:filters['s']=filters['sayfa']
-    try:data=bildirim_gecmisi.liste(baglanti(),g.k['kullanici_adi'],_allowed(),filters)
+    try:data=bildirim_gecmisi.liste(baglanti(),g.k['kullanici_adi'],_allowed(),filters,gizli=_gizli_kayit_sql('k'))
     except PermissionError:abort(403)
     except ValueError as error:
         # Ters tarih aralığı gibi girdi hataları: tam sayfa 400 yerine formun içinde uyarı; seçimler korunur.
@@ -1292,7 +1327,7 @@ def _cikti_degeri(r,name,yorumlar):
     """Çıktı hücresi: türetilmiş alanlar okunur metin, diğerleri olduğu gibi."""
     if name=='soru_ozet':return '\n'.join(x['label']+': '+str(x['value']) for x in _question_answers(r))
     if name=='durum_metni':return 'Silindi' if r['silindi'] else ('Onaylı' if r['kt'] else 'Bekliyor')
-    if name=='tl_onay':return 'Onaylı' if r['kt'] else 'YOK'
+    if name=='tl_onay':return 'Silindi' if r['silindi'] else ('Onaylı' if r['kt'] else 'YOK')
     if name=='giris_tipi_metni':return GIRIS_TIPI_ADLARI.get(r['giris_tipi'] or '',r['giris_tipi'] or '')
     if name=='kaynak_metni':return KAYNAK_ADLARI.get(r['kaynak'] or '',r['kaynak'] or '')
     if name=='gorsel_dosya_adi':return os.path.basename(str(r['gorsel_dosya'])) if r['gorsel_dosya'] else ''
@@ -1350,7 +1385,8 @@ def disa_aktar_xlsx():
         for i,v in enumerate(satir(r)):
             n=len(str(v if v is not None else ''))
             if n>genislik[i]:genislik[i]=n
-        proje_ozet=ozet.setdefault(r['proje'],[0,0,0]);proje_ozet[0]+=1;proje_ozet[1 if r['kt'] else 2]+=1
+        proje_ozet=ozet.setdefault(r['proje'],[0,0,0,0]);proje_ozet[0]+=1;proje_ozet[1 if r['kt'] else 2]+=1
+        if not r['kt'] and r['silindi']:proje_ozet[3]+=1  # silinmiş onaysız: 'Takım lideri onayı YOK' toplamına ve dosya adına girmez
     for i,n in enumerate(genislik,1):ws.column_dimensions[get_column_letter(i)].width=min(45,max(12,n+2))
     ws.freeze_panes='A2'
     baslik=[]
@@ -1362,12 +1398,12 @@ def disa_aktar_xlsx():
     summary=wb.create_sheet('Proje özeti');summary.append(['Proje','Kayıt','KT onaylı','KT bekleyen'])
     for project in sorted(ozet):
         summary.append([project,ozet[project][0],ozet[project][1],ozet[project][2]])
-    onaysiz=sum(v[2] for v in ozet.values())
+    onaysiz=sum(v[2]-v[3] for v in ozet.values())
     summary.append([]);summary.append(['Takım lideri onayı YOK (raporlamada kullanılmaz)',onaysiz])
     stream=io.BytesIO(); wb.save(stream); stream.seek(0)
     db.denetim_yaz(baglanti(),g.k['kullanici_adi'],'disa_aktar',yeni=str(len(rows)),ip=ip())
     # 2.3.1 'uyar': kt yetkisi olmayan kullanıcının dosyasında onaysız satır varsa dosya adı bunu söyler.
-    ad='kanit-kayitlari.xlsx';onaysiz_ktsiz=sum(ozet[p][2] for p in _kt_yok(sorted(ozet)))
+    ad='kanit-kayitlari.xlsx';onaysiz_ktsiz=sum(ozet[p][2]-ozet[p][3] for p in _kt_yok(sorted(ozet)))
     if onaysiz_ktsiz:ad='kanit-kayitlari-ONAYSIZ-%d.xlsx' % onaysiz_ktsiz
     return send_file(stream,as_attachment=True,download_name=ad,mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
@@ -1553,7 +1589,8 @@ def telegram_kayitlari(tg_id):
     except PermissionError:abort(403)
     except ValueError as e:return render_template('hata.html',kod=400,baslik='Geçersiz istek',mesaj=str(e)),400
     return render_template('telegram_kayitlari.html',profile=data,allowed=allowed,kisayollar=_profil_kisayollari(tg_id,data),
-                           excel_url=_profil_excel_url(tg_id,data),ozet_etiketi=_profil_aralik_etiketi(data['filters']))
+                           excel_url=_profil_excel_url(tg_id,data),ozet_etiketi=_profil_aralik_etiketi(data['filters']),
+                           uyar_kt_yok=set(_kt_yok(allowed)) if _onaysiz_modu()=='uyar' else set())
 
 def _profil_kisayollari(tg_id,data):
     """2.3.1 ekleyen profili: tarih aralığı kısayolları (Son 7 gün, Son 30 gün, Bu ay, Tümü); diğer süzgeçler korunur."""
@@ -1654,22 +1691,25 @@ def _start_web_converter():
 def _start_hatirlatma_isi():
     """2.3.1: onay bekleyen kayıtlar için hatırlatma bildirimlerini HATIRLATMA_KONTROL_DK dakikada bir üretir (0 = kapalı).
     Üretim gün bazlı idempotent olduğu için sık çalışması yeni satır eklemez; ilk çalışma açılıştan ~20 sn sonra."""
-    try:dk=int(AYAR.get('HATIRLATMA_KONTROL_DK',30) or 0)
-    except (TypeError,ValueError):dk=30
-    if dk<=0:return None
-    import threading
+    import sqlite3,threading
     from . import hatirlatma
+    dk=hatirlatma.ayarlar(AYAR)['kontrol_dk']
+    if dk<=0:return None
     def loop():
         time.sleep(20)
         while True:
             conn=None
             try:
                 conn=db.baglan(AYAR['DB']);hatirlatma.uret(conn,AYAR)
+            except sqlite3.Error as error:
+                # SQLite metni gizli veri içermez ve teşhis için gerekir ('database is locked' / 'disk I/O error').
+                print('Hatırlatma işi: %s: %s' % (type(error).__name__,str(error)[:160]),flush=True)
             except Exception as error:
                 print('Hatırlatma işi: '+type(error).__name__,flush=True)
             finally:
                 if conn:conn.close()
-            time.sleep(dk*60)
+            try:time.sleep(dk*60)
+            except (OverflowError,ValueError):time.sleep(1800)
     t=threading.Thread(target=loop,name='kanit-web-hatirlatma',daemon=True);t.start();return t
 
 def sunucu_ayarlari():

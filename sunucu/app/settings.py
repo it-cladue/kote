@@ -19,6 +19,11 @@ def _tam_sayi(ad, varsayilan, en_az=0):
         return varsayilan
     return max(en_az, deger)
 
+def _pozitif(ad, varsayilan):
+    """1'den küçük (0, negatif) ya da geçersiz değer varsayılana döner (0 burada 'kapalı/sınırsız' anlamına gelmez)."""
+    deger = _tam_sayi(ad, varsayilan, en_az=0)
+    return deger if deger >= 1 else varsayilan
+
 def settings():
     media = Path(os.getenv('GORSEL_KLASOR', str(DATA / 'gorseller'))).resolve()
     archive = Path(os.getenv('ARSIV_KLASOR', str(DATA / 'telegram_gorseller'))).resolve()
@@ -42,12 +47,13 @@ def settings():
         # 2.3.1 — Onaysız kayıt görünürlüğü (kt yetkisi olmayan kullanıcı için): 'uyar' (varsayılan; kırmızı rozet ve şerit)
         # ya da 'gizle' (onaysız kayıtlar liste/arama/ayrıntı/çıktıda hiç görünmez). Başka değer 'uyar' sayılır.
         'ONAYSIZ_GORUNUM': 'gizle' if str(os.getenv('ONAYSIZ_GORUNUM', '') or '').strip().lower() == 'gizle' else 'uyar',
-        # 2.3.1 — Hatırlatma bildirimleri: yaş eşiği (gün), tekrar aralığı (gün), arka plan kontrol sıklığı (dk; 0 = kapalı),
-        # bir çalıştırmada kullanıcı başına en çok kayıt hatırlatması (aşan kısım proje özetine katlanır).
-        'HATIRLATMA_GUN': _tam_sayi('HATIRLATMA_GUN', 3, en_az=1),
-        'HATIRLATMA_TEKRAR_GUN': _tam_sayi('HATIRLATMA_TEKRAR_GUN', 3, en_az=1),
-        'HATIRLATMA_KONTROL_DK': _tam_sayi('HATIRLATMA_KONTROL_DK', 30),
-        'HATIRLATMA_GUNLUK_SINIR': _tam_sayi('HATIRLATMA_GUNLUK_SINIR', 50, en_az=1),
+        # 2.3.1 — Hatırlatma bildirimleri: yaş eşiği (gün), tekrar aralığı (gün), arka plan kontrol sıklığı (dk; 0 = kapalı, en çok 7 gün),
+        # kullanıcı başına GÜNLÜK en çok kayıt hatırlatması (aşan kısım o günün proje özetine katlanır).
+        # 0, negatif ya da geçersiz değer (eşik/tekrar/sınır için) varsayılana döner; hatirlatma.ayarlar() aynı kuralı uygular.
+        'HATIRLATMA_GUN': _pozitif('HATIRLATMA_GUN', 3),
+        'HATIRLATMA_TEKRAR_GUN': _pozitif('HATIRLATMA_TEKRAR_GUN', 3),
+        'HATIRLATMA_KONTROL_DK': min(_tam_sayi('HATIRLATMA_KONTROL_DK', 30), 7 * 24 * 60),
+        'HATIRLATMA_GUNLUK_SINIR': _pozitif('HATIRLATMA_GUNLUK_SINIR', 50),
     }
 
 AYAR = settings()

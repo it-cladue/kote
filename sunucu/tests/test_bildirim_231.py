@@ -123,10 +123,10 @@ def test_hatirlatma_eski_excel_ozeti_ve_gunluk_sinir(web):
     tekil = rows(a, "SELECT kayit_id FROM mesaj_bildirimleri WHERE olay LIKE 'hatirlatma:%' AND kullanici_adi='testadmin' ORDER BY kayit_id")
     assert [x['kayit_id'] for x in tekil] == sorted(tg[2:])  # en eski ikisi (yaş 8 ve 7)
     of_ozet = rows(a, "SELECT metin FROM mesaj_bildirimleri WHERE olay LIKE 'hatirlatma-ozet:OF:%' AND kullanici_adi='testadmin'")
-    assert len(of_ozet) == 1 and of_ozet[0]['metin'] == 'OF: 2 kayıt 3 günden uzun süredir onay bekliyor.'
+    assert len(of_ozet) == 1 and of_ozet[0]['metin'] == 'OF: 4 kayıt 3 günden uzun süredir onay bekliyor (tek tek bildirilmeyen 2).'  # sayı = bağlantının listelediği küme
     assert r['hatirlatma'] == 2 and r['ozet'] == 2 and r['sinira_katlanan'] == 2 and r['eski_excel'] == 7
-    # Aynı gün tekrar → hiçbir şey eklenmez; özet de tekrar aralığına uyar (ertesi gün yok, 3 gün sonra var).
-    assert conn_uret(a)['ozet'] == 0
+    # Aynı gün tekrar → hiçbir şey eklenmez (günlük sınır gün bazlı); özet tekrar aralığına uyar (ertesi gün taşma olmadığı için yok, 3 gün sonra var).
+    r2 = conn_uret(a); assert r2['ozet'] == 0 and r2['hatirlatma'] == 0
     assert conn_uret(a, bugun=date.today() + timedelta(days=1))['ozet'] == 0
     r3 = conn_uret(a, bugun=date.today() + timedelta(days=3))
     assert r3['ozet'] >= 1 and any(x['olay'].endswith((date.today() + timedelta(days=3)).isoformat()) for x in rows(a, "SELECT olay FROM mesaj_bildirimleri WHERE olay LIKE 'hatirlatma-ozet:GA:%'"))
@@ -178,14 +178,18 @@ def test_hatirlatma_cli_raporu_ve_kapali_arka_plan(tmp_path):
     assert r.returncode == 0, r.stderr
     rapor = json.loads(r.stdout)
     assert rapor['esik_gun'] == 2 and rapor['hatirlatma'] == 1 and rapor['alici'] == 1 and rapor['kullanicilar']['lider']['hatirlatma'] == 1
-    r2 = subprocess.run([sys.executable, '-m', 'app.cli', 'hatirlatma-uret', '--tarih', (date.today() + timedelta(days=3)).isoformat()], cwd=str(ROOT), env=ortam, capture_output=True, text=True, timeout=120)
-    assert json.loads(r2.stdout)['hatirlatma'] == 1
+    # Aynı gün yeniden çalıştırma yeni satır eklemez; ileri tarih reddedilir (gerçek günleri susturmasın diye — inceleme bulgusu).
+    r2 = subprocess.run([sys.executable, '-m', 'app.cli', 'hatirlatma-uret', '--tarih', date.today().isoformat()], cwd=str(ROOT), env=ortam, capture_output=True, text=True, timeout=120)
+    assert r2.returncode == 0, r2.stderr
+    assert json.loads(r2.stdout)['hatirlatma'] == 0
+    ileri = subprocess.run([sys.executable, '-m', 'app.cli', 'hatirlatma-uret', '--tarih', (date.today() + timedelta(days=3)).isoformat()], cwd=str(ROOT), env=ortam, capture_output=True, text=True, timeout=120)
+    assert ileri.returncode != 0 and 'ileri' in ileri.stderr
     hata = subprocess.run([sys.executable, '-m', 'app.cli', 'hatirlatma-uret', '--tarih', '31.12.2026'], cwd=str(ROOT), env=ortam, capture_output=True, text=True, timeout=120)
     assert hata.returncode != 0 and 'YYYY-AA-GG' in hata.stderr
     assert 'hatirlatma-uret' in subprocess.run([sys.executable, '-m', 'app.cli', '--help'], cwd=str(ROOT), env=ortam, capture_output=True, text=True, timeout=120).stdout
     # Ayar okuma: boş/geçersiz değerler varsayılana düşer; HATIRLATMA_KONTROL_DK=0 arka plan işini kapatır.
     from app import panel
-    assert hatirlatma.ayarlar({'HATIRLATMA_GUN': 'x', 'HATIRLATMA_TEKRAR_GUN': 0, 'HATIRLATMA_GUNLUK_SINIR': None}) == dict(gun=3, tekrar=1, sinir=50, kontrol_dk=30)
+    assert hatirlatma.ayarlar({'HATIRLATMA_GUN': 'x', 'HATIRLATMA_TEKRAR_GUN': 0, 'HATIRLATMA_GUNLUK_SINIR': None}) == dict(gun=3, tekrar=3, sinir=50, kontrol_dk=30)
     eski = dict(panel.AYAR)
     try:
         panel.AYAR['HATIRLATMA_KONTROL_DK'] = 0; assert panel._start_hatirlatma_isi() is None
@@ -360,7 +364,7 @@ def test_bildirim_gecmisi_filtre_sql_ve_onay_bildirimi_hedefi(web):
         a['ONAYSIZ_GORUNUM'] = 'gizle'
         w, p, f = panel._filtre_sql(MultiDict([('durum', 'hepsi'), ('bekleme', '5')]), ['OF', 'PA'])
         assert p[:2] == ['OF', 'PA'] and f['bekleme'] == 5 and f['kt_yok'] == ['OF'] and f['gizli_onaysiz'] and not f['yalniz_onayli']
-        assert '(proje NOT IN (?) OR (kt=1 AND silindi=0))' in w and 'julianday' in w and p[2] == 'OF' and p[3] == 5
+        assert 'NOT (proje IN (?) AND (kt=0 OR silindi=1))' in w and 'julianday' in w and p[2] == 'OF' and p[3] == 5
         w, p, f = panel._filtre_sql(MultiDict([('proje', 'OF'), ('durum', 'bekleyen')]), ['OF', 'PA'])
         assert f['yalniz_onayli'] and f['durum'] == 'onayli' and 'kt=1 AND silindi=0' in w
         a['ONAYSIZ_GORUNUM'] = 'uyar'
