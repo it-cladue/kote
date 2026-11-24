@@ -16,7 +16,9 @@ def text(value):
     value = _HASH.sub('[PAROLA HASHİ]', value)
     for key in ('TELEGRAM_TOKEN', 'GYAZO_TOKEN', 'BOT_PASSWORD', 'ADMIN_PASSWORD', 'SESSION_SECRET'):
         secret = os.environ.get(key)
-        if secret:
+        # Kısa değerler (< 6 karakter) update_id, deneme sayısı ve Telegram kimliklerini parçalar;
+        # kelime sınırı KULLANILMAZ: token URL içinde 'bot<token>' biçiminde bitişik geçer.
+        if secret and len(secret) >= 6:
             value = value.replace(secret, '[GİZLİ]')
     return value[:4000]
 

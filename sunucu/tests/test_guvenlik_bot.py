@@ -288,20 +288,22 @@ def test_outbox_gecici_hata_sinirli_tekrar_sonra_olu(setup):
     assert q(ayar, "SELECT COUNT(*) n FROM tg_giden WHERE bot_id=? AND durum='tekrar'", (bot.bot_id,))[0]["n"] == 0
 
 
-def test_429_retry_after_tum_gonderimleri_duraklatir(setup):
+def test_429_retry_after_ilgili_sohbetin_gonderimlerini_duraklatir(setup):
+    """429 yalnız o sohbeti duraklatır (tek sohbetin seli diğerlerini durdurmaz; bkz. test_qa_bot.py)."""
     ayar, fake, bot = setup
     authorize(ayar, bot)
     bot._durable_insert([message(10, 10, "/start"), message(11, 11, "/start"), message(12, 12, "/start")])
     start = len(fake.calls)
     fake.send_errors = [tg_error(429, "Too Many Requests: retry after 5", retry_after=5)]
     assert bot.process_pending() == 3
-    assert sum(1 for m, _ in fake.calls[start:] if m == "sendMessage") == 1  # kuyruğun kalanı denenmedi
+    assert sum(1 for m, _ in fake.calls[start:] if m == "sendMessage") == 1  # aynı sohbetin kalanı denenmedi
     rows = q(ayar, "SELECT durum,deneme FROM tg_giden WHERE bot_id=? AND source_update_id IN (10,11,12) ORDER BY id", (bot.bot_id,))
     assert [tuple(r.values()) for r in rows] == [("tekrar", 0), ("bekliyor", 0), ("bekliyor", 0)]  # 429 deneme saymaz
-    assert bot.process_outbox() == 0 and bot._outbox_duraklama() > 0
+    assert bot.process_outbox() == 0 and bot._outbox_duraklama("1") > 0
+    assert bot._outbox_duraklama() == 0  # tek sohbet: genel duraklama yok
     bot.poll_once(25)
     assert fake.calls[-1][1]["timeout"] <= 6  # duraklama bitince kuyruk hemen akar
-    bot._outbox_duraklat_bitis = 0.0  # süre doldu
+    bot._chat_duraklat.clear()  # süre doldu
     run(ayar, "UPDATE tg_giden SET guncelleme='2000-01-01 00:00:00' WHERE bot_id=? AND durum='tekrar'", (bot.bot_id,))
     assert bot.process_outbox() == 3
     assert q(ayar, "SELECT COUNT(*) n FROM tg_giden WHERE bot_id=? AND durum!='tamam'", (bot.bot_id,))[0]["n"] == 0
@@ -587,11 +589,17 @@ def test_fotografla_gelen_onaysiz_kullanici_parola_politikasinda_engellenmez(set
     assert q(ayar, "SELECT onayli,deneme FROM tg_kullanicilar WHERE id='7'")[0] == {"onayli": 1, "deneme": 0}
     feed(bot, message(12, 12, photo=True, user=7))
     assert session(ayar, bot, user=7)["step"] == "storage"
-    # Tekrarlayan yetkisiz görsel MAX_DENEME'de engellenir.
+    # Tekrarlayan yetkisiz görsel (pencere dışı, ≥20 sn arayla) MAX_DENEME'de engellenir;
+    # aynı pencerede gelen albüm/fotoğraf seli ise tek deneme sayılır (tests/test_qa_bot.py).
+    gercek_monotonic = time.monotonic
+    clock = {"t": gercek_monotonic()}
+    monkeypatch.setattr(bot_module.time, "monotonic", lambda: clock["t"])
     for i in range(3):
+        clock["t"] += 25
         feed(bot, message(20 + i, 20 + i, photo=True, user=8))
     user = q(ayar, "SELECT deneme,engelli FROM tg_kullanicilar WHERE id='8'")[0]
     assert (user["deneme"], user["engelli"]) == (3, 1)
+    monkeypatch.setattr(bot_module.time, "monotonic", gercek_monotonic)
     # Varsayılan politika 'parola'dır: ilk görselde engel YOK, deneme sayılır.
     monkeypatch.delenv("BOT_YETKISIZ_GORSEL_POLITIKA")
     feed(bot, message(30, 30, photo=True, user=9))
@@ -745,7 +753,9 @@ def test_ensure_schema_gerekmedikce_yazmaz_ve_conn_bir_kez_kurar(setup, monkeypa
 def test_run_forever_getme_ag_hatasinda_bekler_kalici_hatada_cikar(setup, monkeypatch):
     ayar, fake, bot = setup
     sleeps = []
-    monkeypatch.setattr(bot_module.time, "sleep", lambda s: sleeps.append(s))
+    # Bekleme artık kesilebilir _bekle (threading.Event.wait) üzerinden; time.sleep çağrılmaz.
+    monkeypatch.setattr(bot_module.time, "sleep", lambda s: (_ for _ in ()).throw(AssertionError("time.sleep kullanılmamalı")))
+    monkeypatch.setattr(KanitBot, "_bekle", lambda self, s: sleeps.append(s) or False)
     fake.getme_errors = [requests.ConnectionError("http://x/bot123:secret/getMe"), tg_error(502, "Bad Gateway")]
     monkeypatch.setattr(bot, "_paused", lambda: bot.stop() or True)
     assert bot.run_forever() is True
