@@ -148,7 +148,7 @@ bash deploy/nginx-giris-siniri.sh
 curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:18443/giris
 ```
 
-Beklenen: `BIRIM_GUNCELLENDI ... sağlık OK`, nginx yamasında `nginx -t` başarılı ve yeniden yükleme, son komutta `200`.
+Beklenen: `BIRIM_GUNCELLENDI ... sağlık OK` (IP sertifikası dolmuş olsa da çalışır; çıktıda "sertifika dolmuş" bilgi satırı görünür, sorun değildir), nginx yamasında `nginx -t` başarılı ve yeniden yükleme, son komutta `200`.
 
 ## 7. Günlük döndürme
 
@@ -211,7 +211,7 @@ bash deploy/setup-firewall.sh            # yalnız plan; SSH portu ve posta/Ples
 bash deploy/setup-firewall.sh --uygula   # gerekirse --plesk / --posta-kapat
 ```
 
-Uyguladıktan hemen sonra yeni bir PuTTY penceresiyle giriş yapabildiğinizi doğrulayın; giremezseniz açık oturumdan `ufw disable`.
+Beklenen: her kural için bir satır ve sonda `GUVENLIK_DUVARI_TAMAM`. Uyguladıktan hemen sonra yeni bir PuTTY penceresiyle giriş yapabildiğinizi doğrulayın; giremezseniz açık oturumdan `ufw disable`. Betik bir kuralda hata verip durursa güvenlik duvarı etkinleştirilmemiştir; elle `ufw enable` yazmayın.
 
 ## 12. Eski görseller (isteğe bağlı, 2 GB)
 
