@@ -32,7 +32,7 @@ def main():
     parser=_TurkceParser(prog='python -m app.cli',description='Kanıt Paneli sunucu araçları',epilog='Örnek: KANIT_PW=GucluParola1 python -m app.cli sifre-sifirla admin --password-env KANIT_PW --kalici')
     sub=parser.add_subparsers(dest='command',required=True,title='Komutlar',metavar='KOMUT')
     admin=_alt(sub,'admin-ekle','İlk veya ek panel hesabını oluştur')
-    admin.add_argument('ad',nargs='?',default='admin',help='Kullanıcı adı (varsayılan: admin)'); admin.add_argument('--yetki',default='admin',help="Yetki: admin, superadmin veya 'OF:oku,kt' gibi proje kapsamı")
+    admin.add_argument('ad',nargs='?',default='admin',help='Kullanıcı adı (varsayılan: admin)'); admin.add_argument('--yetki',default='admin',help="Yetki: admin (süperadmin) veya 'OF:oku,kt' gibi proje kapsamı")
     reset=_alt(sub,'sifre-sifirla','Mevcut hesabın parolasını sıfırla ve hesabı aktif et');reset.add_argument('ad',help='Kullanıcı adı')
     for command in (admin,reset):
         command.add_argument('--password-env',metavar='DEGISKEN',help='Parolanın okunacağı ortam değişkeninin adı; parolayı komut satırına yazmayın')

@@ -76,7 +76,8 @@ def guncelle(ayar, ad, expected_version=None, islem_yapan=None, **alanlar):
         user = conn.execute('SELECT * FROM panel_kullanicilari WHERE kullanici_adi=?', (ad,)).fetchone()
         if not user:
             raise ValueError('Kullanıcı bulunamadı.')
-        if expected_version is not None and str(user['session_version']) != str(expected_version):
+        # İyimser kilit ayrı sayaçta (hesap_surumu): yalnız bu fonksiyon artırır; kullanıcının çıkışı (session_version+1) admin formunu düşürmez.
+        if expected_version is not None and str(user['hesap_surumu']) != str(expected_version):
             raise ValueError('Hesap başka bir admin tarafından değiştirildi; sayfayı yenileyin.')
         if 'yetki' in alanlar:
             alanlar['yetki'] = _canonical(conn, alanlar['yetki'])
@@ -90,9 +91,11 @@ def guncelle(ayar, ad, expected_version=None, islem_yapan=None, **alanlar):
             if count <= 1:
                 raise ValueError('Son süperadmin kapatılamaz veya yetkisi kaldırılamaz.')
         changed = {key: value for key, value in alanlar.items() if user[key] != value}
+        # "Kaydet" kilidi de açar: hiçbir alan değişmese bile kilitli ya da hatalı giriş sayacı dolu hesap sıfırlanır (Kullanıcılar sayfası etiketi bunu söyler).
+        kilit_acilir = bool(user['kilit_bitis']) or (user['hatali_giris'] or 0) > 0
         if changed:
             sets = ','.join(key + '=?' for key in changed)
-            conn.execute('UPDATE panel_kullanicilari SET ' + sets + ',session_version=session_version+1,hatali_giris=0,kilit_bitis=NULL WHERE kullanici_adi=?',
+            conn.execute('UPDATE panel_kullanicilari SET ' + sets + ',session_version=session_version+1,hesap_surumu=hesap_surumu+1,hatali_giris=0,kilit_bitis=NULL WHERE kullanici_adi=?',
                          (*changed.values(), ad))
             public_keys = [key for key in changed if key != 'sifre_hash']
             before = {key: user[key] for key in public_keys}
@@ -101,6 +104,13 @@ def guncelle(ayar, ad, expected_version=None, islem_yapan=None, **alanlar):
                 after['parola_degisti'] = True
             db.denetim_yaz(conn, islem_yapan or ad, 'kullanici_guncelle', anahtar=ad,
                            eski=before, yeni=after, hedef_turu='hesap', hedef_id=ad)
+            db.degisti(conn)
+        elif kilit_acilir:
+            conn.execute('UPDATE panel_kullanicilari SET hatali_giris=0,kilit_bitis=NULL WHERE kullanici_adi=?', (ad,))
+        if kilit_acilir:
+            aciklama = ('%d hatalı deneme sayacı sıfırlandı' % (user['hatali_giris'] or 0)) + ('; kilit %s kadar sürecekti' % user['kilit_bitis'][11:16] if kilitli_mi(user) else '')
+            db.denetim_yaz(conn, islem_yapan or ad, 'kilit_ac', anahtar=ad, eski={'hatali_giris': user['hatali_giris'], 'kilit_bitis': user['kilit_bitis']},
+                           yeni={'hatali_giris': 0, 'kilit_bitis': None}, hedef_turu='hesap', hedef_id=ad, aciklama=aciklama)
             db.degisti(conn)
     return bul(ayar, ad)
 

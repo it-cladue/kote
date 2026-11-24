@@ -87,7 +87,7 @@ def test_admin_parolasi_zorunlu_degisim_ister(web):
     login(c)
     kullanicilar.ekle(a, 'duzenlenen', 'OF:oku', 'Parola-123456'); kullanicilar.guncelle(a, 'duzenlenen', sifre_degistir=0)
     user = kullanicilar.bul(a, 'duzenlenen')
-    c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'guncelle', 'ad': 'duzenlenen', 'expected_version': user['session_version'], 'rol': 'admin', 'projeler': ['OF'], 'aktif': '1', 'sifre': 'AdminBiliyor1'})
+    c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'guncelle', 'ad': 'duzenlenen', 'expected_version': user['hesap_surumu'], 'rol': 'admin', 'projeler': ['OF'], 'aktif': '1', 'sifre': 'AdminBiliyor1'})
     assert kullanicilar.bul(a, 'duzenlenen')['sifre_degistir'] == 1
 
 

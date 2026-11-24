@@ -29,11 +29,10 @@ GYAZO_ZAMAN_ASIMI = 15
 GYAZO_OLUMSUZ_SN = 600
 GYAZO_BICIMLER = {"JPEG": ".jpg", "PNG": ".png"}
 # Önbellek sınırları (AYAR'da yoksa bu varsayılanlar) ve temizlik davranışı.
-ONBELLEK_VARSAYILAN = {"GYAZO_ONBELLEK_MB": 500, "GYAZO_ONBELLEK_GUN": 30, "KUCUK_ONBELLEK_MB": 300}
+ONBELLEK_VARSAYILAN = {"GYAZO_ONBELLEK_MB": 2000, "GYAZO_ONBELLEK_GUN": 0, "KUCUK_ONBELLEK_MB": 300}  # GUN 0 = yaş sınırı yok
 ONBELLEK_TEMIZLIK_ARALIGI_SN = 600   # gerçek tarama en fazla 10 dakikada bir (ve süreç başında bir kez)
 ONBELLEK_HEDEF_ORAN = 0.9            # sınır aşılınca bu orana inilir
-ONBELLEK_TAZE_SN = 60                # son 60 sn içinde yazılan dosya silinmez (yarış koruması)
-ONBELLEK_DOKUNMA_SN = 3600           # okunan dosyanın mtime'ı (LRU) en fazla saatte bir güncellenir
+ONBELLEK_TAZE_SN = 60                # son 60 sn içinde yazılan ya da okunan dosya silinmez (yarış koruması)
 GECICI_DOSYA_YAS_SN = 3600           # yarım kalan .part/.tmp dosyaları bir saat sonra silinir
 _ONBELLEK_GORSEL_RX = re.compile(r"^[0-9a-f]{32}\.(jpg|png)$")
 _ONBELLEK_YOK_RX = re.compile(r"^[0-9a-f]{32}\.yok$")
@@ -77,12 +76,14 @@ def _onbellek_siniri(ayar, anahtar, carpan):
 
 
 def _dokun(yol, mtime=None):
-    """Okunan önbellek dosyasının mtime'ını LRU için günceller (saatte en fazla bir kez); hata yutar."""
+    """Servis edilen önbellek dosyasının mtime'ını HER isabette günceller (ucuz tek utime); hata yutar.
+
+    LRU sırası için yeter; ayrıca dosya ONBELLEK_TAZE_SN boyunca budamadan korunur, böylece yol çözümlendikten
+    sonra send_file açılmadan önce temizliğin dosyayı silmesi (FileNotFoundError → 500) yarışı kapanır.
+    (Eskiden saatte bir güncelleniyordu; 1-60 dk önce görüntülenmiş dosya 'en eski' aday kalabiliyordu.)
+    """
     try:
-        if mtime is None:
-            mtime = os.path.getmtime(yol)
-        if time.time() - mtime > ONBELLEK_DOKUNMA_SN:
-            os.utime(yol, None)
+        os.utime(yol, None)
     except OSError:
         pass
 
