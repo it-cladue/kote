@@ -7,9 +7,11 @@
 #               --posta-kapat   25/465/587/993/995/110/143 posta portları KAPATILIR (varsayılan: açık; yayındaki posta bozulmasın)
 #               --ssh-port N    sshd_config yerine bu SSH portu (birden çok için virgülle: 22,2222)
 #
-# Kurallar: default deny incoming / allow outgoing; allow SSH (sshd_config'den; yoksa 22) ÖNCE; 80, 443, 18443/tcp;
-# 18080/tcp açıkça deny (arka uç zaten 127.0.0.1'de). Uyguladıktan sonra mevcut PuTTY oturumunu KAPATMADAN yeni bir
-# oturumla SSH girişini doğrulayın. Alan adı Cloudflare üzerinden yayına girince 18443 kapatılır: ufw delete allow 18443/tcp
+# Kurallar: allow SSH (sshd_config'den; yoksa 22) ÖNCE; 80, 443, 18443/tcp; 18080/tcp açıkça deny (arka uç zaten
+# 127.0.0.1'de); kurallar eklendikten sonra default deny incoming / allow outgoing ve en son enable. Bir ufw komutu
+# başarısız olursa betik durur, ufw etkinleştirilmez (elle 'ufw enable' YAZMAYIN). Uyguladıktan sonra mevcut PuTTY
+# oturumunu KAPATMADAN yeni bir oturumla SSH girişini doğrulayın. Alan adı Cloudflare üzerinden yayına girince 18443
+# kapatılır: ufw delete allow 18443/tcp
 # UYARI: Plesk'in kendi güvenlik duvarı (psa-firewall) ya da fail2ban iptables zincirleri varsa ufw ikinci bir yönetici olur;
 # betik bunları gösterir, karar sizindir.
 set -Eeuo pipefail
@@ -27,7 +29,7 @@ while (( $# )); do
         --posta-kapat) POSTA_KAPAT=1 ;;
         --ssh-port) shift; SSH_SECIM="${1:-}"; [[ "$SSH_SECIM" =~ ^[0-9]+(,[0-9]+)*$ ]] || { echo 'HATA: --ssh-port sayı (ya da 22,2222) olmalı.' >&2; exit 2; } ;;
         --dry-run) UYGULA=0 ;;
-        -h|--help|--yardim) sed -n '2,15p' "$0"; exit 0 ;;
+        -h|--help|--yardim) sed -n '2,16p' "$0"; exit 0 ;;
         *) echo "HATA: Bilinmeyen seçenek: $1 (--yardim)" >&2; exit 2 ;;
     esac
     shift
@@ -89,9 +91,9 @@ PLAN+=("deny 18080/tcp comment Kanit-arka-uc-yalniz-loopback")
 bilgi ''
 bilgi '=== Plan ==='
 bilgi "SSH portu: $SSH_PORTLAR ($( [[ -n "$SSH_SECIM" ]] && echo '--ssh-port' || echo 'sshd yapılandırmasından; yanlışsa --ssh-port N') ) — ÖNCE izin verilir."
+for r in "${PLAN[@]}"; do bilgi "ufw $r"; done
 bilgi 'ufw default deny incoming'
 bilgi 'ufw default allow outgoing'
-for r in "${PLAN[@]}"; do bilgi "ufw $r"; done
 bilgi 'ufw --force enable'
 bilgi ''
 if (( PLESK )); then bilgi 'Plesk 8443/8880: AÇIK (--plesk).'; else bilgi 'Plesk 8443/8880: KAPALI (lisans bitmiş; gerekirse --plesk).'; fi
@@ -111,12 +113,30 @@ fi
 command -v "$UFW" >/dev/null 2>&1 || fail 'ufw kurulu değil: apt-get install -y ufw'
 bilgi ''
 bilgi '=== Uygulanıyor ==='
-"$UFW" default deny incoming
-"$UFW" default allow outgoing
+# Herhangi bir ufw çağrısı başarısız olursa (örn. sözdizimi) açık mesajla dur. Bu noktada ufw ETKİN DEĞİLDİR ve
+# eklenmiş kurallar pasiftir; operatör elle 'ufw enable' yazarsa kuralsız politika SSH dahil her şeyi kapatır.
+UFW_ADIM=''
+ufw_hata() {
+    trap - ERR
+    printf 'DUR: ufw kuralı eklenemedi (ufw %s); ufw ETKİNLEŞTİRİLMEDİ. Elle '\''ufw enable'\'' YAPMAYIN; yukarıdaki hata çıktısını paylaşın.\n' "${UFW_ADIM:-?}" >&2
+    exit 1
+}
+trap ufw_hata ERR
+# PLAN öğeleri boşluklu dizelerdir ("allow 22/tcp comment SSH"); betiğin IFS'inde boşluk olmadığı için
+# kelimelere burada ayrılır ve ufw'ye ayrı argümanlar olarak gider.
 for r in "${PLAN[@]}"; do
-    # shellcheck disable=SC2086
-    "$UFW" $r
+    UFW_ADIM="$r"
+    IFS=' ' read -r -a kural <<<"$r"
+    "$UFW" "${kural[@]}"
 done
+# Varsayılan politikalar kurallar sorunsuz eklendikten SONRA, enable'dan hemen önce yazılır; bir kural
+# başarısız olursa /etc/default/ufw'ye dokunulmamış olur.
+UFW_ADIM='default deny incoming'
+"$UFW" default deny incoming
+UFW_ADIM='default allow outgoing'
+"$UFW" default allow outgoing
+UFW_ADIM='--force enable'
 "$UFW" --force enable
-"$UFW" status numbered | sed 's/^/   /'
+trap - ERR
+"$UFW" status numbered 2>/dev/null | sed 's/^/   /' || true
 bilgi 'GUVENLIK_DUVARI_TAMAM: ufw etkin. ŞİMDİ bu oturumu kapatmadan YENİ bir PuTTY oturumuyla SSH girişini doğrulayın; girilemiyorsa bu oturumdan: ufw disable'

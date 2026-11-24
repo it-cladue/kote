@@ -5,11 +5,17 @@
 #   kanit-yedek.sh --haftalik    # görsel aynasını bugün de al
 #   kanit-yedek.sh --dogrula     # son SQLite yedeğini aç, PRAGMA integrity_check + kayıt sayısı
 #   kanit-yedek.sh --dry-run     # yalnız planı yaz
+#   kanit-yedek.sh --geri-yukle /var/backups/kanit-paneli/gunluk/panel-YYYYMMDD.db.gz [--dry-run]
+#                                # SQLite'ı yedekten geri yükle: önce yedek açılıp doğrulanır (bozuksa hiçbir şeye dokunulmaz),
+#                                # servisler durur, mevcut panel.db(+-wal/-shm) /root/kanit-onceki/<zaman>/ altına kopyalanır,
+#                                # -wal/-shm SİLİNİR (silinmezse eski WAL geri yüklenen dosyanın üzerine uygulanır), yeni dosya
+#                                # yerine konur (kanit:kanit 600), servisler yeniden başlar. Sonda: GERI_YUKLEME_TAMAM
 #
 # Konumlar (root, 0700):  /var/backups/kanit-paneli/gunluk/panel-YYYYMMDD.db.gz ve env-YYYYMMDD
 #                          /var/backups/kanit-paneli/haftalik/YYYY-Www/{gorseller,telegram_gorseller}/ (rsync --link-dest ile artımlı)
 # Saklama: 14 günlük, 8 haftalık; apply-update yedek dizinlerinden en yeni 5 tutulur (60 günden eskiler silinir);
 # panel "Yedek al" dosyalarından (data/backups) son 5 kalır. Disk yetmiyorsa görsel aynası UYARI ile atlanır.
+# Ayna sırasında silinen/değişen dosya (rsync 23/24) hata değil uyarıdır; ayna yine geçerlidir.
 # Dış kopya (başka sunucu/bulut) bu betiğin işi değildir; README'deki rclone/scp örneğine bakın.
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -25,21 +31,25 @@ HAFTALIK_SAKLA="${KANIT_HAFTALIK_SAKLA:-8}"
 GORSEL_DIZINLER="${KANIT_GORSEL_DIZINLER:-gorseller telegram_gorseller}"
 IFS=' ' read -r -a GORSEL_DIZI <<<"$GORSEL_DIZINLER"
 HAFTALIK_GUN="${KANIT_HAFTALIK_GUN:-7}"
+SYSTEMCTL="${KANIT_SYSTEMCTL:-systemctl}"
+ONCEKI_KOK="${KANIT_ONCEKI_KOK:-/root/kanit-onceki}"
 if [[ -z "${KANIT_TEST:-}" ]]; then PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH; fi
 GUNLUK="$KOK/gunluk"
 HAFTALIK="$KOK/haftalik"
 BUGUN="$(date +%Y%m%d)"
 HAFTA="$(date +%G-W%V)"
 
-DRY_RUN=0; HAFTALIK_ZORLA=0; DOGRULA=0
-for arg in "$@"; do
-    case "$arg" in
+DRY_RUN=0; HAFTALIK_ZORLA=0; DOGRULA=0; GERI_YUKLE=''
+while (( $# )); do
+    case "$1" in
         --dry-run) DRY_RUN=1 ;;
         --haftalik) HAFTALIK_ZORLA=1 ;;
         --dogrula) DOGRULA=1 ;;
-        -h|--help|--yardim) sed -n '2,13p' "$0"; exit 0 ;;
-        *) echo "HATA: Bilinmeyen seçenek: $arg (--yardim)" >&2; exit 2 ;;
+        --geri-yukle) shift; GERI_YUKLE="${1:-}"; [[ -n "$GERI_YUKLE" ]] || { echo 'HATA: --geri-yukle için yedek dosyası (panel-YYYYMMDD.db.gz) verin.' >&2; exit 2; } ;;
+        -h|--help|--yardim) sed -n '2,19p' "$0"; exit 0 ;;
+        *) echo "HATA: Bilinmeyen seçenek: $1 (--yardim)" >&2; exit 2 ;;
     esac
+    shift
 done
 
 gunluk() { if command -v logger >/dev/null 2>&1; then logger -t kanit-yedek -- "$*" || true; fi; }
@@ -106,6 +116,18 @@ haftalik_gerekli() {
     return 1
 }
 
+# Canlı panel çalışırken ayna alınır: rsync liste kurduktan sonra silinen dosya (24 'vanished') ya da aktarılamayan
+# dosya (23 'partial') uyarıdır, betiği kesmez; saklama/temizlik ve YEDEK_TAMAM çalışır. Diğer kodlar ölümcül.
+rsync_ayna() {
+    local rc=0
+    rsync "$@" || rc=$?
+    case "$rc" in
+        0) ;;
+        23|24) uyar "rsync $rc: ayna sırasında bazı dosyalar silindi/aktarılamadı (canlı panel çalışıyor); ayna yine geçerli." ;;
+        *) fail "rsync hatası (çıkış $rc); görsel aynası alınamadı." ;;
+    esac
+}
+
 gorsel_ayna_al() {
     local hedef="$HAFTALIK/$HAFTA" son d boyut bos gerekli
     son="$(son_haftalik)"
@@ -126,9 +148,9 @@ gorsel_ayna_al() {
         if command -v rsync >/dev/null 2>&1; then
             if [[ -n "$son" && -d "$son/$d" ]]; then
                 # -rlptD: sahiplik kopyalanmaz (root yazar); böylece haftalar arası hardlink karşılaştırması tutar.
-                rsync -rlptD --delete --link-dest="$son/$d" -- "$DATA/$d/" "$hedef/$d/"
+                rsync_ayna -rlptD --delete --link-dest="$son/$d" -- "$DATA/$d/" "$hedef/$d/"
             else
-                rsync -rlptD --delete -- "$DATA/$d/" "$hedef/$d/"
+                rsync_ayna -rlptD --delete -- "$DATA/$d/" "$hedef/$d/"
             fi
             bilgi "Görsel aynası: $hedef/$d ($(du -sh -- "$hedef/$d" | cut -f1)${son:+, önceki haftaya hardlink})"
         else
@@ -184,7 +206,71 @@ PY
     bilgi "YEDEK_DOGRULANDI: $son ($sonuc)"
 }
 
+# --geri-yukle: yedeği doğrula -> servisleri durdur -> mevcut DB'yi kenara al -> -wal/-shm sil -> yerine koy -> başlat.
+GERI_GECICI=''
+servis_aktif() { "$SYSTEMCTL" is-active --quiet "$1" 2>/dev/null; }
+# Geri yüklemeden sonra başlatılacaklar: o an aktif olan ya da etkin (enabled) olan servisler. Çökmüş/failed ama etkin
+# servis böylece geri gelir; operatörün bilinçle kapatıp devre dışı bıraktığı servis başlatılmaz.
+servis_baslatilacak() { servis_aktif "$1" || "$SYSTEMCTL" is-enabled --quiet "$1" 2>/dev/null; }
+geri_yukle() {
+    local yedek="$1" hedef="$DATA/panel.db" onceki sonuc s aktifler=()
+    [[ -f "$yedek" ]] || fail "Geri yüklenecek yedek bulunamadı: $yedek (hiçbir şeye dokunulmadı)."
+    [[ "$yedek" == *.gz ]] || fail "Yedek dosyası .db.gz uzantılı olmalı: $yedek (hiçbir şeye dokunulmadı)."
+    onceki="$ONCEKI_KOK/$(date +%Y%m%d-%H%M%S)-$$"
+    if (( DRY_RUN )); then
+        printf 'Plan: %s açılıp doğrulanacak; kanit-web/kanit-bot durdurulacak; mevcut %s (+-wal/-shm) -> %s/; -wal/-shm silinecek; yeni dosya %s olacak (%s 600); servisler başlatılacak.\n' \
+            "$yedek" "$hedef" "$onceki" "$hedef" "$SERVIS_KULLANICI"
+        printf 'DRY-RUN_TAMAM: hiçbir dosya yazılmadı, servislere dokunulmadı.\n'
+        return 0
+    fi
+    # 1) Yedeği geçici dosyaya aç ve doğrula — servisler çalışıyor, hiçbir şeye dokunulmadı.
+    GERI_GECICI="$DATA/.kanit-geri-yukle-$$.db"
+    trap '[[ -n "$GERI_GECICI" ]] && rm -f -- "$GERI_GECICI"' EXIT
+    rm -f -- "${GERI_GECICI:?}"
+    gunzip -c -- "$yedek" > "$GERI_GECICI" || fail "YEDEK_BOZUK: $yedek açılamadı (gzip); hiçbir şeye dokunulmadı."
+    sonuc="$("$PY" -I - "$GERI_GECICI" <<'PYKONTROL'
+import sqlite3, sys
+try:
+    c = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro&immutable=1", uri=True)
+    ic = c.execute("PRAGMA integrity_check").fetchone()[0]
+    tablolar = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    c.close()
+except sqlite3.Error as exc:
+    print(f"sqlite hatası: {exc}"); sys.exit(1)
+if str(ic).lower() != "ok":
+    print(f"integrity={ic}"); sys.exit(1)
+if "kayitlar" not in tablolar:
+    print("Kanıt Paneli veritabanı değil (kayitlar tablosu yok)"); sys.exit(1)
+print(f"integrity=ok tablo={len(tablolar)}")
+PYKONTROL
+)" || fail "YEDEK_BOZUK: $yedek -> ${sonuc:-açılamadı}; hiçbir şeye dokunulmadı."
+    bilgi "Yedek doğrulandı: $yedek ($sonuc)"
+    # 2) Servisleri durdur (aktif ya da etkin olanlar sonra yeniden başlatılır).
+    for s in kanit-web kanit-bot; do
+        if servis_baslatilacak "$s"; then aktifler+=("$s"); fi
+        "$SYSTEMCTL" stop "$s" || fail "$s durdurulamadı; veritabanına dokunulmadı. systemctl status $s"
+    done
+    # 3) Mevcut DB'yi (+WAL/SHM, varsa) kenara al; sonra yan dosyaları SİL (kalırsa eski WAL yeni dosyaya uygulanır).
+    install -d -m 700 -o root -g root "$ONCEKI_KOK" "$onceki"
+    for s in "$hedef" "$hedef-wal" "$hedef-shm"; do
+        if [[ -e "$s" ]]; then cp -a -- "$s" "$onceki/"; fi
+    done
+    rm -f -- "$hedef-wal" "$hedef-shm"
+    # 4) Yeni dosyayı yerine koy (aynı dizin: atomik rename), sahiplik/izin.
+    chmod 600 -- "$GERI_GECICI"
+    if getent passwd "$SERVIS_KULLANICI" >/dev/null 2>&1; then chown "$SERVIS_KULLANICI:$SERVIS_KULLANICI" -- "$GERI_GECICI"; fi
+    mv -f -- "$GERI_GECICI" "$hedef"
+    GERI_GECICI=''
+    # 5) Önceden aktif/etkin servisleri başlat.
+    for s in "${aktifler[@]}"; do
+        "$SYSTEMCTL" start "$s" || uyar "$s başlatılamadı; bakın: systemctl status $s; journalctl -u $s -n 50"
+    done
+    (( ${#aktifler[@]} )) || uyar 'Geri yükleme öncesinde kanit-web/kanit-bot ne aktif ne etkin idi; servisler başlatılmadı (gerekirse: systemctl start kanit-web kanit-bot).'
+    bilgi "GERI_YUKLEME_TAMAM: $hedef <- $yedek; önceki dosyalar: $onceki/ (artık gereksizse silin). Başlatılan: ${aktifler[*]:-yok}"
+}
+
 install -d -m 700 -o root -g root "$KOK" "$GUNLUK" "$HAFTALIK"
+if [[ -n "$GERI_YUKLE" ]]; then geri_yukle "$GERI_YUKLE"; exit 0; fi
 if (( DOGRULA )); then dogrula; exit 0; fi
 
 if (( DRY_RUN )); then

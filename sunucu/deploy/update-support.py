@@ -11,6 +11,7 @@ dosyasını karşılaştırır ve yalnız sabitlenmiş sürüm yükseltmelerini 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import os
 from pathlib import Path
@@ -197,6 +198,9 @@ def online_backup(source_path: Path, destination_path: Path) -> None:
         source.execute("PRAGMA query_only=ON")
         destination = sqlite3.connect(str(destination_path), isolation_level=None, timeout=30)
         source.backup(destination)
+        # Kaynak WAL modundaysa backup API hedef başlığını da WAL olarak kopyalar; snapshot tek dosya olsun
+        # (-wal/-shm yan dosyası kalmasın) diye hedef DELETE moduna alınır (kanit-yedek.sh ile aynı).
+        destination.execute("PRAGMA journal_mode=DELETE")
         if not _integrity_ok(destination):
             raise CheckError("SQLite snapshot bütünlük denetiminden geçmedi.")
         destination.close()
@@ -216,7 +220,8 @@ def online_backup(source_path: Path, destination_path: Path) -> None:
         # Hata halinde eksik/bozuk geçici dosya bırakılmaz.
         if created:
             try:
-                with sqlite3.connect(_ro_uri(destination_path), uri=True, timeout=5) as verify:
+                # sqlite3 bağlantısında ``with`` kapatmaz; closing ile kesin kapanır (yan dosya kalmaz).
+                with contextlib.closing(sqlite3.connect(_ro_uri(destination_path), uri=True, timeout=5)) as verify:
                     valid = _integrity_ok(verify)
             except (OSError, sqlite3.Error):
                 valid = False
