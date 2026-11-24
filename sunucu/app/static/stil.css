@@ -654,3 +654,24 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
 .geciken-baglanti.var { background: var(--kirmizi-yumusak); color: var(--kirmizi); border-color: color-mix(in srgb, var(--kirmizi) 30%, transparent); font-weight: 600; }
 .geciken-baglanti:hover { text-decoration: none; filter: brightness(.97); }
 @media (max-width: 700px) { .geciken-baglanti { min-height: 40px; } }
+/* ===== 2.3.1: ekleyen profili — tarih aralığı kısayolları ve özet bloğu (sayaçlar + kategori × tip tablosu) ===== */
+.tarih-kisayollar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 10px 0 0; }
+.profil-ozet-blok { margin: 14px 0; }
+.profil-ozet-blok .kart-baslik { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.profil-ozet-blok .profil-sayaclari { margin: 10px 0 12px; }
+.profil-ozet-blok .mini-ozet.approved b { color: var(--yesil); } .profil-ozet-blok .mini-ozet.pending b { color: var(--turuncu); } .profil-ozet-blok .mini-ozet.deleted b { color: var(--kirmizi); }
+.ozet-tablo { min-width: 0; }
+.ozet-tablo th.sayi, .ozet-tablo td.sayi { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ozet-tablo tr.alt-toplam td { background: var(--yuzey-2); color: var(--yazi-2); font-size: 13px; }
+.ozet-tablo tfoot td { background: var(--yuzey-3); border-top: 2px solid var(--cizgi-koyu); }
+.ozet-notu { margin: 8px 0 0; }
+@media (max-width: 620px) {
+  .tarih-kisayollar .btn { min-height: 40px; }
+  .profil-ozet-blok .kart-baslik .btn { flex: 1 1 100%; text-align: center; }
+  /* Telefonda 5 sütun yana kaydırmadan sığar: sıkı dolgu, sarılabilen başlık, küçük yazı. */
+  .ozet-tablo { min-width: 0; font-size: 12.5px; table-layout: auto; }
+  .ozet-tablo th, .ozet-tablo td { padding: 7px 4px; }
+  .ozet-tablo th { font-size: 10px; letter-spacing: 0; white-space: normal; line-height: 1.15; overflow-wrap: anywhere; }
+  .ozet-tablo th:first-child, .ozet-tablo td.sarmal { max-width: 96px; }
+  .ozet-tablo td.sarmal small { display: block; }
+}

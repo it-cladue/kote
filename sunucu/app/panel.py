@@ -1264,7 +1264,9 @@ def _cikti_sayfasi(secim=None,hata=None,status=200):
 @app.route('/disa-aktar')
 @giris_gerekli
 def disa_aktar_sayfasi():
-    return _cikti_sayfasi()
+    # 2.3.1: başka sayfadan (ör. ekleyen profili "Bu görünümü Excel'e aktar") gelen koşullar formu önceden doldurur.
+    on_dolu=any(request.args.get(k) for k in ('ekleyen','tarih1','tarih2','proje','durum','kategori','q','tarihsiz'))
+    return _cikti_sayfasi(request.args if on_dolu else None)
 
 def _yorum_ozetleri(ids):
     """Kayıt başına yorum sayısı ve son yorum (çıktı için)."""
@@ -1549,8 +1551,30 @@ def telegram_kayitlari(tg_id):
     onayli_zorunlu=_kt_yok(allowed) if _onaysiz_modu()=='gizle' else []
     try:data=user_evidence.get_profile(c,tg_id,allowed,request.args.to_dict(),superadmin=g.yk['admin'],onayli_zorunlu=onayli_zorunlu)
     except PermissionError:abort(403)
-    except ValueError as e:return render_template('hata.html',kod=400,mesaj=str(e)),400
-    return render_template('telegram_kayitlari.html',profile=data,allowed=allowed)
+    except ValueError as e:return render_template('hata.html',kod=400,baslik='Geçersiz istek',mesaj=str(e)),400
+    return render_template('telegram_kayitlari.html',profile=data,allowed=allowed,kisayollar=_profil_kisayollari(tg_id,data),
+                           excel_url=_profil_excel_url(tg_id,data),ozet_etiketi=_profil_aralik_etiketi(data['filters']))
+
+def _profil_kisayollari(tg_id,data):
+    """2.3.1 ekleyen profili: tarih aralığı kısayolları (Son 7 gün, Son 30 gün, Bu ay, Tümü); diğer süzgeçler korunur."""
+    bugun=datetime.now().date();f=data['filters']
+    secenekler=[('Son 7 gün',(bugun-timedelta(days=6)).isoformat(),bugun.isoformat()),('Son 30 gün',(bugun-timedelta(days=29)).isoformat(),bugun.isoformat()),
+                ('Bu ay',bugun.replace(day=1).isoformat(),bugun.isoformat()),('Tümü','','')]
+    sabit={k:v for k,v in data['link_args'].items() if k not in ('tarih1','tarih2')}
+    return [dict(etiket=ad,url=url_for('telegram_kayitlari',tg_id=tg_id,**sabit,**({'tarih1':t1,'tarih2':t2} if t1 else {})),
+                 aktif=(f['tarih1']==t1 and f['tarih2']==t2)) for ad,t1,t2 in secenekler]
+
+def _profil_excel_url(tg_id,data):
+    """'Bu görünümü Excel'e aktar': mevcut Çıktı formu ekleyen + tarih + proje + durum ile önceden doldurulmuş açılır."""
+    f=data['filters']
+    return url_for('disa_aktar_sayfasi',ekleyen=tg_id,tarih1=f['tarih1'] or None,tarih2=f['tarih2'] or None,proje=f['project'] or None,durum=f['kt'])
+
+def _profil_aralik_etiketi(f):
+    def tr(v):return '.'.join(reversed(v.split('-'))) if v else ''
+    if f['tarih1'] and f['tarih2']:return tr(f['tarih1'])+' – '+tr(f['tarih2'])
+    if f['tarih1']:return tr(f['tarih1'])+' ve sonrası'
+    if f['tarih2']:return tr(f['tarih2'])+' ve öncesi'
+    return 'Tüm zamanlar'
 
 @app.route('/saglik')
 def saglik():
