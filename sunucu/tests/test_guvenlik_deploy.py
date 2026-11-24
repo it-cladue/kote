@@ -402,14 +402,16 @@ def test_setup_ip_https_sablon_ve_servis(ip_proxy_ortami):
         assert satir in metin, satir
     if shutil.which("systemd-analyze"):
         assert _skor(unit) <= 5.0
-    r = run(["bash", betik, "--servis-guncelle"], env=env)
+    # --servis-guncelle yolunda sağlık kontrolü sertifika doğrulamaz (canlıda IP sertifikası dolmuş): KANIT_CURL_EXTRA boş.
+    env_k_yok = dict(env, KANIT_CURL_EXTRA="")
+    r = run(["bash", betik, "--servis-guncelle"], env=env_k_yok)
     assert r.returncode == 0 and "BIRIM_GUNCEL" in r.stdout, r.stdout + r.stderr
     unit.write_text(metin.replace("CapabilityBoundingSet=CAP_NET_BIND_SERVICE", "CapabilityBoundingSet="))
-    r = run(["bash", betik, "--servis-guncelle", "--dry-run"], env=env)
+    r = run(["bash", betik, "--servis-guncelle", "--dry-run"], env=env_k_yok)
     assert r.returncode == 0 and "DRY-RUN_TAMAM" in r.stdout and "CAP_NET_BIND_SERVICE" in r.stdout
     assert unit.read_text() != metin, "dry-run birimi değiştirmez"
-    r = run(["bash", betik, "--servis-guncelle"], env=env)
-    assert r.returncode == 0 and "BIRIM_GUNCELLENDI" in r.stdout, r.stdout + r.stderr
+    r = run(["bash", betik, "--servis-guncelle"], env=env_k_yok)
+    assert r.returncode == 0 and "BIRIM_GUNCELLENDI" in r.stdout and "sertifika dolmuş" not in r.stdout, r.stdout + r.stderr
     assert unit.read_text() == metin
     # yeniden kurulum reddi
     r = run(["bash", betik], env=env)
@@ -505,7 +507,8 @@ def cloudflare_ortami(kanit_tmp, sahte_panel):
     http_port, https_port = bos_port(), bos_port()
     env = {"KANIT_IP": "127.0.0.1", "KANIT_HTTP_PORT": str(http_port), "KANIT_HTTPS_PORT": str(https_port),
            "KANIT_CONF": str(kok / "confd" / "zz020_kanit-panel.conf"), "KANIT_SSL_BASE": str(kok / "ssl"), "KANIT_SYSTEMCTL": str(fake),
-           "KANIT_PANEL_URL": f"http://127.0.0.1:{sahte_panel}", "KANIT_NGINX_T_ARGS": f"-c {root_conf} -p {kok}/", "KANIT_COZUM": "104.16.1.1"}
+           "KANIT_PANEL_URL": f"http://127.0.0.1:{sahte_panel}", "KANIT_NGINX_T_ARGS": f"-c {root_conf} -p {kok}/",
+           "KANIT_COZUM": "104.16.1.1 172.64.1.1 2606:4700::6810:101"}
     try:
         yield kok, env, http_port, https_port
     finally:
@@ -523,9 +526,16 @@ def test_setup_cloudflare_https_uctan_uca(cloudflare_ortami):
     # dry-run: dosya yazılmaz; gri bulut uyarısı
     r = run(["bash", betik, host, "--dry-run"], env=env, stdin="")
     assert r.returncode == 0 and "DRY-RUN_TAMAM" in r.stdout and "turuncu bulut ✓" in r.stdout, r.stdout + r.stderr
+    # Gerçek Cloudflare çözümü çok adreslidir: her adres ayrı satır, 'ne Cloudflare ne de bu sunucu' uyarısı yok.
+    assert r.stdout.count("turuncu bulut ✓") == 3 and "ne Cloudflare ne de bu sunucu" not in r.stderr, r.stdout + r.stderr
+    assert "DNS: cloudflare" in r.stdout
     assert not conf.exists()
     r = run(["bash", betik, host, "--dry-run"], env=dict(env, KANIT_COZUM="127.0.0.1"), stdin="")
     assert r.returncode == 0 and "bulut GRİ" in r.stderr
+    r = run(["bash", betik, host, "--dry-run"], env=dict(env, KANIT_COZUM="127.0.0.1 104.16.1.1"), stdin="")
+    assert r.returncode == 0 and "bulut GRİ" in r.stderr and "DNS: sunucu" in r.stdout, r.stdout + r.stderr
+    r = run(["bash", betik, host, "--dry-run"], env=dict(env, KANIT_COZUM="203.0.113.5 104.16.1.1"), stdin="")
+    assert r.returncode == 0 and "ne Cloudflare ne de bu sunucu" in r.stderr and "203.0.113.5" in r.stderr and "DNS: baska" in r.stdout
     # kurulum (stdin kapalı -> öz imzalı)
     r = run(["bash", betik, host], env=env, stdin="")
     assert r.returncode == 0 and "CLOUDFLARE_HTTPS_TAMAM" in r.stdout and "2/3 Yerel origin kontrolü" in r.stdout and "-> OK" in r.stdout, r.stdout + r.stderr
@@ -662,7 +672,9 @@ def test_setup_firewall_plan_ve_uygula(tmp_path):
     (tmp_path / "d" / "x.conf").write_text("Port 2200\n")
     ufw_log = tmp_path / "ufw.log"
     ufw = tmp_path / "ufw"
-    ufw.write_text(f"#!/bin/bash\necho \"$*\" >> {ufw_log}\n[[ $1 == status ]] && echo 'Status: inactive'\nexit 0\n")
+    # Gerçek ufw gibi: argüman sınırı korunur, tek argümanlı 'allow 22/tcp comment SSH' kullanım hatasıyla reddedilir.
+    ufw.write_text(f"#!/bin/bash\nprintf '%d %s\\n' \"$#\" \"$*\" >> {ufw_log}\n[[ $1 == status ]] && echo 'Status: inactive'\n"
+                   "if [[ $1 == allow || $1 == deny ]] && (( $# < 4 )); then echo 'ERROR: Invalid syntax' >&2; exit 1; fi\nexit 0\n")
     ufw.chmod(0o755)
     env = {"KANIT_SSHD_CONFIG": str(tmp_path / "sshd_config"), "KANIT_SSHD_CONFIG_D": str(tmp_path / "d"), "KANIT_UFW": str(ufw)}
     r = run(["bash", str(DEPLOY / "setup-firewall.sh")], env=env)
@@ -673,10 +685,13 @@ def test_setup_firewall_plan_ve_uygula(tmp_path):
     assert not ufw_log.exists() or "enable" not in ufw_log.read_text()
     r = run(["bash", str(DEPLOY / "setup-firewall.sh"), "--uygula", "--plesk", "--posta-kapat", "--ssh-port", "22,2222"], env=env)
     assert r.returncode == 0 and "GUVENLIK_DUVARI_TAMAM" in r.stdout, r.stdout + r.stderr
-    cagrilar = [s for s in ufw_log.read_text().splitlines() if not s.startswith("status")]
-    assert cagrilar[:4] == ["default deny incoming", "default allow outgoing", "allow 22/tcp comment SSH", "allow 2222/tcp comment SSH"], cagrilar
-    assert "allow 8443/tcp comment Plesk" in cagrilar and not any("Posta" in c for c in cagrilar)
-    assert cagrilar[-1] == "--force enable" and "deny 18080/tcp comment Kanit-arka-uc-yalniz-loopback" in cagrilar
+    cagrilar = [s for s in ufw_log.read_text().splitlines() if not s.split(" ", 1)[1].startswith("status")]
+    # Kurallar 4 ayrı argümanla, SSH önce; varsayılan politikalar kurallardan SONRA ve enable'dan hemen önce.
+    assert cagrilar[:2] == ["4 allow 22/tcp comment SSH", "4 allow 2222/tcp comment SSH"], cagrilar
+    assert cagrilar[-3:] == ["3 default deny incoming", "3 default allow outgoing", "2 --force enable"], cagrilar
+    assert "4 allow 8443/tcp comment Plesk" in cagrilar and not any("Posta" in c for c in cagrilar)
+    assert "4 deny 18080/tcp comment Kanit-arka-uc-yalniz-loopback" in cagrilar
+    assert all(c.startswith("4 ") for c in cagrilar[:-3]), cagrilar
     # ufw yokken --uygula durur, plan yine yazılır
     r = run(["bash", str(DEPLOY / "setup-firewall.sh"), "--uygula"], env=dict(env, KANIT_UFW="/yok/ufw"))
     assert r.returncode == 1 and "ufw kurulu değil" in r.stderr
@@ -834,6 +849,7 @@ def test_apply_update_basarili_yukseltme_ve_birimler(guncelleme_ortami):
     r = run(["find", str(o["dest"] / "data"), "!", "-user", "kanit"])
     assert r.stdout.strip() == "", "ön kontrol data altında root sahipli dizin bırakmamalı: " + r.stdout
     assert not list(Path("/tmp").glob("kanit-update-preflight.*"))
+    assert not list((o["dest"] / "data").glob(".kanit-update-snapshot-*")), "snapshot -wal/-shm yan dosyası data/ kökünde kalmamalı"
     # ikinci çalıştırma: değişiklik yok
     r = run(["bash", str(o["kaynak"] / "deploy" / "apply-update.sh"), "--dry-run"], env=o["env"])
     assert "Bağımlılık beyanı aynı" in r.stdout and "Servis birim dosyaları güncel" in r.stdout

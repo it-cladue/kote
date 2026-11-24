@@ -255,7 +255,9 @@ if [[ -z "$COZUM" ]]; then
     uyar "$HOST şu an çözülmüyor (DNS yayılması sürüyor olabilir). Kurulum devam eder; Cloudflare DNS'te A kaydı panel -> $IP, bulut TURUNCU olmalı."
 else
     DNS_DURUM='cloudflare'
-    for adres in $COZUM; do
+    # COZUM boşlukla ayrılmış adres listesidir (2 A + 2 AAAA olağan); betiğin IFS'inde boşluk olmadığı için burada ayrılır.
+    IFS=' ' read -r -a ADRESLER <<<"$COZUM"
+    for adres in "${ADRESLER[@]}"; do
         case "$(adres_sinifi "$adres")" in
             cloudflare) bilgi "DNS: $HOST -> $adres (Cloudflare ucu; turuncu bulut ✓)" ;;
             sunucu) DNS_DURUM='sunucu'; uyar "$HOST doğrudan $adres adresine çözülüyor: bulut GRİ. Bu betik TURUNCU bulut içindir; ya Cloudflare'da bulutu turuncu yapın ya da setup-domain-https.sh (Let's Encrypt) kullanın. Kurulum yine de devam eder; gri bulutta ziyaretçiler 403 alır (--herkese-acik hariç)." ;;
@@ -398,6 +400,7 @@ conf_uret() {
     if (( HERKESE_ACIK )); then
         erisim_blok='    # --herkese-acik: Cloudflare dışından gelen istekler de kabul edilir.'
     else
+        # shellcheck disable=SC2016  # nginx değişkenleri ($kanit_cf_kaynak) bilinçli olarak genişletilmez
         erisim_blok='    # Cloudflare uçları (ve bu sunucunun kendisi) dışından gelen istek: Cloudflare atlanmış demektir -> 403.
     if ($kanit_cf_kaynak = 0) { return 403; }'
     fi

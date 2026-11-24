@@ -295,6 +295,8 @@ assert_env_unchanged() {
 
 cleanup_temporary() {
     rm -f -- "${TEMP_SNAPSHOT:-}" "${SNAPSHOT_HELPER:-}" "${HEALTH_BODY:-}" 2>/dev/null || true
+    # Snapshot WAL başlığıyla açılmış olsaydı kalabilecek yan dosyalar (data/ kökünde artık bırakmayız).
+    if [[ -n "${TEMP_SNAPSHOT:-}" ]]; then rm -f -- "$TEMP_SNAPSHOT-wal" "$TEMP_SNAPSHOT-shm" 2>/dev/null || true; fi
     if [[ -n "${STAGE_DIR:-}" && -d "$STAGE_DIR" ]]; then
         rm -rf -- "${STAGE_DIR:?}" 2>/dev/null || true
     fi
@@ -382,7 +384,9 @@ rollback_and_restore() {
 }
 
 on_unexpected_error() {
+    # shellcheck disable=SC2317  # trap ile dolaylı çağrılır
     local code="$?"
+    # shellcheck disable=SC2317
     rollback_and_restore "$code" 'Beklenmeyen işlem hatası.'
 }
 trap on_unexpected_error ERR
@@ -441,6 +445,7 @@ if ! mv -T -- "$TEMP_SNAPSHOT" "$BACKUP_DIR/panel.db" || \
    ! chown root:root "$BACKUP_DIR/panel.db" || ! chmod 600 "$BACKUP_DIR/panel.db"; then
     rollback_and_restore 32 'SQLite snapshot özel yedek alanına taşınamadı.'
 fi
+rm -f -- "$TEMP_SNAPSHOT-wal" "$TEMP_SNAPSHOT-shm" 2>/dev/null || true
 rm -f -- "${SNAPSHOT_HELPER:?}"
 
 # Yalnız güncelleme öncesinde aktif olan servisler durdurulur.
@@ -583,8 +588,15 @@ fi
 
 # Bot yalnızca güncelleme öncesinde aktif ise geri başlatılır; kullanıcı kapalı
 # bıraktıysa bu betik onu kesinlikle otomatik başlatmaz.
-if (( BOT_WAS_ACTIVE )) && ! "$SYSTEMCTL" start "$BOT_SERVICE"; then
-    rollback_and_restore 44 'Önceden aktif bot servisi yeniden başlatılamadı.'
+BOT_UYARI=0
+if (( BOT_WAS_ACTIVE )); then
+    if ! "$SYSTEMCTL" start "$BOT_SERVICE"; then
+        rollback_and_restore 44 'Önceden aktif bot servisi yeniden başlatılamadı.'
+    fi
+    # Type=simple 'start' hemen döner; sertleştirilmiş birimle açılamayan bot saniyeler sonra düşer. Geri alma yok
+    # (web sağlıklı), yalnız görünür uyarı; çıkış kodu değişmez.
+    sleep "${KANIT_BOT_BEKLE:-5}"
+    if ! service_is_active "$BOT_SERVICE"; then BOT_UYARI=1; fi
 fi
 if ! assert_env_unchanged; then
     rollback_and_restore 45 '.env içeriği veya izinleri son denetimde değişti; kod geri alındı.'
@@ -599,6 +611,9 @@ printf '%s\n' "GÜNCELLEME_TAMAM: /saglik yalnız loopback $HEALTH_URL üzerinde
 printf '%s\n' "Özel yedek: $BACKUP_DIR"
 if (( REQ_UPGRADE )); then printf '%s\n' "Bağımlılık yükseltmesi uygulandı (günlük: $BACKUP_DIR/pip-install.log; eski beyan: requirements.before)."; fi
 if (( UNITS_CHANGED )); then printf '%s\n' "Servis birim dosyaları güncellendi: $UNITS_LIST (eskileri: $BACKUP_DIR/units.before/)"; fi
+if (( BOT_UYARI )); then
+    printf 'UYARI: kanit-bot açılamadı veya başladıktan sonra durdu (web sağlıklı, güncelleme geri alınmadı). Bakın: journalctl -u kanit-bot -n 50; birim satırlarını şüpheliyse: systemctl cat kanit-bot\n'
+fi
 # data altında kanit dışı sahipli dosya kaldıysa sessiz bozulma olmasın diye uyar (ön kontrol artık data'ya yazmaz).
 if find "$DATA_DIR" ! -user "$SERVICE_USER" -print -quit 2>/dev/null | grep -q .; then
     printf 'UYARI: %s altında %s dışı sahipli dosya/dizin var; düzeltin: systemctl stop kanit-web kanit-bot; chown -R %s:%s %s; systemctl start kanit-web kanit-bot\n' "$DATA_DIR" "$SERVICE_USER" "$SERVICE_USER" "$SERVICE_USER" "$DATA_DIR"

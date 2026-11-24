@@ -204,6 +204,12 @@ saglik_https() {
 if (( SERVIS_GUNCELLE )); then
     [ -f "$UNIT" ] || fail "$UNIT yok; birim güncellemesi yalnız mevcut kurulumda çalışır. İlk kurulum için bayraksız çalıştırın."
     [ -f "$CONF" ] || fail "$CONF yok; mevcut kurulum eksik görünüyor."
+    # Bu yolda sağlık kontrolünün amacı birimin/nginx'in ayakta olmasıdır, sertifikanın geçerliliği değil: IP sertifikası
+    # dolmuş olabilir ve yenilenmez (bkz. başlık notu). Doğrulama kapalı (-k); gövde yine tam olarak 'OK' olmalıdır.
+    CURL_EXTRA="-k${CURL_EXTRA:+ $CURL_EXTRA}"
+    if [ -r "$CERT" ] && ! openssl x509 -in "$CERT" -checkend 0 -noout >/dev/null 2>&1; then
+        bilgi "Not: IP sertifikası dolmuş (bitiş: $(sertifika_bitis)); sağlık kontrolü sertifika doğrulaması olmadan yapılır. Kalıcı çözüm: deploy/setup-cloudflare-https.sh."
+    fi
     YENI_UNIT="$(mktemp)"
     trap 'rm -f -- "$YENI_UNIT"' EXIT
     unit_uret > "$YENI_UNIT"
@@ -243,7 +249,7 @@ if (( SERVIS_GUNCELLE )); then
 fi
 
 # ---------------------------------------------------------------- ilk kurulum
-[ -r "$CERT" ] && [ -r "$KEY" ] || fail 'IP sertifikası veya anahtar dosyası bulunamadı.'
+{ [ -r "$CERT" ] && [ -r "$KEY" ]; } || fail 'IP sertifikası veya anahtar dosyası bulunamadı.'
 [ -f "$ENVFILE" ] || fail 'Panelin .env dosyası bulunamadı.'
 for file in "$CONF" "$UNIT"; do
     [ ! -e "$file" ] || fail "$file zaten mevcut. Üzerine yazılmadı. Birim için --servis-guncelle, nginx.conf için deploy/nginx-giris-siniri.sh kullanın."
