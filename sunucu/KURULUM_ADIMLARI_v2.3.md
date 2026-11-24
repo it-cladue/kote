@@ -254,6 +254,19 @@ chown -R kanit:kanit /opt/kanit-paneli/data/telegram_gorseller
 runuser -u kanit -- /opt/kanit-paneli/.venv/bin/python -m app.cli arsiv-tara
 ```
 
+## 13. 2.3.1 güncellemesi (bildirim ve onay görünürlüğü)
+
+2.3.0 kuruluysa aynı yolla uygulanır; veritabanı değişmez, yalnız web servisi yeniden başlar:
+
+```bash
+cd /root/kanit-kurulum && rm -rf KanitPaneli_Sunucu_v2.3.1 && unzip -q KanitPaneli_Sunucu_v2.3.1.zip && cd KanitPaneli_Sunucu_v2.3.1 && sha256sum -c --quiet DOSYA_DOGRULAMA.sha256 && echo PAKET_DOGRU
+bash deploy/apply-update.sh --dry-run
+bash deploy/apply-update.sh
+curl -fsS http://127.0.0.1:18080/saglik; echo; systemctl is-active kanit-web kanit-bot
+```
+
+Beklenen: `PAKET_DOGRU`, `DRY-RUN_TAMAM`, `GÜNCELLEME_TAMAM`, `OK`, iki `active`. İsteğe bağlı: raporlama ekibi onaysız kayıtları hiç görmesin istiyorsanız `/opt/kanit-paneli/.env` dosyasına `ONAYSIZ_GORUNUM=gizle` satırını ekleyip `systemctl restart kanit-web` çalıştırın (yazılmazsa kırmızı uyarı modu geçerlidir). İlk hatırlatmaları beklemeden görmek için: `runuser -u kanit -- /opt/kanit-paneli/.venv/bin/python -m app.cli hatirlatma-uret`. Ayrıntı: `DEGISIKLIKLER_v2.3.1.md`.
+
 ## Sorun çıkarsa
 
 - Güncelleme hatası: betik kendisi geri alır; notu `/var/backups/kanit-paneli/<tarih>/GERI_DONUS_NOTU.txt`.

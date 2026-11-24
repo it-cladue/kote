@@ -1,6 +1,6 @@
 # Kanıt Paneli 2.3 — mevcut sunucuda güvenli güncelleme
 
-Bu paket Telegram botu ile web kontrol panelinin 2.3 kaynak sürümüdür. 2.3, 2.2 üzerine internete açılma öncesi güvenlik ve sağlamlık turudur; değişiklik listesi `DEGISIKLIKLER_v2.3.md` (2.2 ve öncesi için `DEGISIKLIKLER_v2.2.md`) dosyasındadır. Senin mevcut Ubuntu/Plesk kurulumun için hazırlanmıştır. Kanıt ekleme yalnız Telegram’dan yapılır; site inceleme, onay, yorum/soru, bildirim, kullanıcı ve katalog yönetimi içindir. Excel canlı kayıt kaynağı değildir.
+Bu paket Telegram botu ile web kontrol panelinin 2.3 kaynak sürümüdür. 2.3, 2.2 üzerine internete açılma öncesi güvenlik ve sağlamlık turudur; değişiklik listesi `DEGISIKLIKLER_v2.3.md` (2.2 ve öncesi için `DEGISIKLIKLER_v2.2.md`), 2.3.1 ekleri (hatırlatma bildirimleri, onaysız kayıt görünürlüğü, bildirimden kayda gitme, ekleyen profili özeti) `DEGISIKLIKLER_v2.3.1.md` dosyasındadır. Senin mevcut Ubuntu/Plesk kurulumun için hazırlanmıştır. Kanıt ekleme yalnız Telegram’dan yapılır; site inceleme, onay, yorum/soru, bildirim, kullanıcı ve katalog yönetimi içindir. Excel canlı kayıt kaynağı değildir.
 
 ## Mevcut kurulum
 
