@@ -63,6 +63,8 @@ Tarayıcıda `https://SUNUCU_IP:18443` açın (sertifika uyarısını geçin), `
 
 Servis açılmazsa (çok düşük ihtimal): `/etc/systemd/system/kanit-web.service` içinde önce `MemoryDenyWriteExecute`, olmadı `SystemCallFilter` satırını silip `systemctl daemon-reload && systemctl restart kanit-web`.
 
+Güncelleme bitince bir kez (eski güncellemelerden kalmış olabilecek artıklar için, zararsız): `rm -f /opt/kanit-paneli/data/.kanit-update-snapshot-*.db-wal /opt/kanit-paneli/data/.kanit-update-snapshot-*.db-shm`
+
 ## 3. Temiz veritabanı ve gerçek verinin aktarılması
 
 Sunucudaki deneme verisi kenara alınır, gerçek veri eski bot klasöründen bir kez içeri aktarılır.
@@ -121,6 +123,8 @@ python3 deploy/configure-bot.py --yonetici
 grep -E '^(ADMIN_IDS|MAX_DENEME|GYAZO_BAKIM)=' /opt/kanit-paneli/.env
 systemctl restart kanit-bot && sleep 5 && systemctl is-active kanit-bot && journalctl -u kanit-bot -n 15 --no-pager
 ```
+
+Beklenen: `YONETICI_AYARLARI_KAYDEDILDI`, sonra `active`. Birden fazla yönetici kimliği virgülle yazılır (`123456,987654`). Parolada `/`, `&`, `\` gibi karakterler sorun değildir. Bot parolaları (`BOT_PASSWORD`, `ADMIN_PASSWORD`) en az 8 karakter olsun; kısaysa bot açılışta uyarı yazar.
 
 Beklenen: `active`; günlükte hata yok. Telegram'dan bota `/start` yazıp şifreyle girin, bir deneme fotoğrafı gönderin; panelde Kayıtlar'da görünsün. Onaylı 153 kullanıcı yeni botta ilk mesajda şifreyi bir kez yazar. `GYAZO_TOKEN` boş kalır; görseller sunucuda saklanır.
 
