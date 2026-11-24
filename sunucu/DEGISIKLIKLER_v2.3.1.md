@@ -4,17 +4,19 @@
 
 ## Hatırlatma bildirimleri
 
-- Onay bekleyen bir kayıt **3 günü** geçince (`HATIRLATMA_GUN`) o projede onay yetkisi olan herkese "Bu ID'nin kontrolü N gündür bekliyor." bildirimi düşer; onaylanmadıkça **3 günde bir** (`HATIRLATMA_TEKRAR_GUN`) yinelenir, aynı kayıt için günde en çok bir.
-- Eski Excel'den aktarılan onaysız kayıtlar (gerçek veride 300) kişi başına yüzlerce bildirim üretmez: proje başına tek özet gelir ("GA: 126 kayıt 3 günden uzun süredir onay bekliyor (eski Excel'den)."). Ayrıca kullanıcı başına günde en çok 50 kayıt hatırlatması (`HATIRLATMA_GUNLUK_SINIR`); fazlası özete katlanır.
-- Üretim web sürecinde 30 dakikada bir yapılır (`HATIRLATMA_KONTROL_DK`; 0 = kapalı); anında üretmek için `python -m app.cli hatirlatma-uret`.
+- Onay bekleyen bir kayıt **3 günü** geçince (`HATIRLATMA_GUN`) o projede onay yetkisi olan herkese "Bu ID'nin kontrolü N gündür bekliyor." bildirimi düşer; onaylanmadıkça aynı kayıt için **3 günde bir** (`HATIRLATMA_TEKRAR_GUN`) yinelenir.
+- Kullanıcı başına **günde en çok 50** kayıt hatırlatması (`HATIRLATMA_GUNLUK_SINIR`); fazlası o günün proje özetine katlanır ve sonraki günlerde sırayla (en uzun süredir hatırlatılmamış önce) bildirilir. Sık kontrol gün içinde yeni bildirim üretmez.
+- Eski Excel'den aktarılan onaysız kayıtlar (gerçek veride 300) kişi başına yüzlerce bildirim üretmez: proje başına tek özet gelir ("GA: 126 kayıt 3 günden uzun süredir onay bekliyor (eski Excel'den)."); özetteki sayı, tıklayınca açılan listeyle aynıdır.
+- Onaylanan ya da silinen kaydın eski hatırlatması zilden düşer ve okundu sayılır.
+- Üretim web sürecinde 30 dakikada bir yapılır (`HATIRLATMA_KONTROL_DK`; 0 = kapalı, en çok 7 gün); anında üretmek için `python -m app.cli hatirlatma-uret` (`--tarih` yalnız bugün ya da geçmiş bir gün olabilir).
 - Ana sayfadaki proje kartlarında "3 gündür bekleyen: X" sayacı; Kayıtlar → Gelişmiş filtrelerde "En az … gündür bekleyen".
 
 ## Onaysız kayıtların raporlama ekibine görünümü
 
 `ONAYSIZ_GORUNUM` ayarı, projede **onay yetkisi olmayan** kullanıcılar için geçerlidir (takım liderleri her şeyi görür):
 
-- `uyar` (varsayılan): listede ve kartlarda kırmızı "ONAY YOK — raporlamada kullanmayın" rozeti; kayıt ayrıntısının üstünde kırmızı şerit; arama yalnız onaysız kayıt döndürüyorsa listenin üstünde uyarı kutusu; Excel çıktısında "Takım lideri onayı" sütunu (Onaylı / YOK; eski 0/1 değerli `KT` sütununun yerine) ve dosya adında onaysız sayısı.
-- `gizle`: onaysız ve silinmiş kayıtlar liste, arama, ayrıntı (403 "Bu kaydın onayı yok; yalnız onaylı kayıtlar gösterilir."), ekleyen profili, Kanıt Kontrolü ve çıktıda hiç görünmez; durum sekmelerinde yalnız Onaylı kalır.
+- `uyar` (varsayılan): listede ve kartlarda kırmızı "ONAY YOK — raporlamada kullanmayın" rozeti; kayıt ayrıntısının üstünde kırmızı şerit; arama yalnız onaysız kayıt döndürüyorsa listenin üstünde uyarı kutusu; Excel çıktısında "Takım lideri onayı" sütunu (Onaylı / YOK / Silindi; eski 0/1 değerli `KT` sütununun yerine, KT'ye bağlı formüller bu sütuna göre güncellenmeli) ve dosya adında onaysız sayısı; uyarı kutusu yalnız aramanın hiçbir sekmede onaylı sonucu yoksa çıkar, onaylısı başka sekmedeyse bağlantılı bilgi notu verilir.
+- `gizle`: onaysız ve silinmiş kayıtlar liste, arama, ayrıntı (403 "Bu kaydın onayı yok; yalnız onaylı kayıtlar gösterilir."), ekleyen profili, Kanıt Kontrolü, çıktı, İşlem Geçmişi, ana sayfadaki "Son işlemler" ve sayaçlar, bildirim akışı ve kategori listesinde hiç görünmez; durum sekmelerinde yalnız Onaylı kalır ve "Onay bekleyen kayıtlar size gösterilmez" notu çıkar.
 - Çıktı sayfasındaki onay durumu seçenekleri: **Hepsi / Onaylılar / Onaysızlar (onay bekleyen) / Silinenler**.
 
 ## Bildirime tıklayınca doğrudan hedefe gitme
@@ -35,4 +37,6 @@
 | `HATIRLATMA_GUN` | `3` | Hatırlatma eşiği (gün) |
 | `HATIRLATMA_TEKRAR_GUN` | `3` | Aynı kayıt için tekrar aralığı (gün) |
 | `HATIRLATMA_KONTROL_DK` | `30` | Web sürecinde kontrol sıklığı (dakika); `0` = kapalı, yalnız CLI |
-| `HATIRLATMA_GUNLUK_SINIR` | `50` | Kullanıcı başına günlük kayıt hatırlatması üst sınırı |
+| `HATIRLATMA_GUNLUK_SINIR` | `50` | Kullanıcı başına **günde** en çok kayıt hatırlatması; 0 ya da negatif değer varsayılana döner |
+
+Statik dosyalar artık `?v=<sürüm>` ile sürümlenir; yükseltmeden sonra tarayıcıda Ctrl+F5 gerekmez. Bu sürüm, dört bağımsız inceleyicinin (güvenlik, hatırlatma mantığı, arayüz, yükseltme uyumu) bulgularıyla düzeltilerek yayımlandı; ayrıntı `TEST_SONUCLARI.md`.
