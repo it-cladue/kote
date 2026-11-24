@@ -118,6 +118,19 @@ Beklenen (24 Kasım 2026'da gönderdiğiniz `telegramkan123t` arşiviyle provada
 
 Bundan sonra yeni kanıtlar Telegram botundan gelir ve Bekleyen listesine düşer; Excel dosyasına geri yazılmaz, Excel çıktısı panelden "Excel çıktısı" ile alınır.
 
+3e. Gyazo görsellerini sunucuya indirin (önerilir; 10-40 dakika, arka planda):
+
+Eski kayıtların görselleri Gyazo'da duruyor. Panel bir kaydı ilk açışta görseli Gyazo'dan indirip sunucuda saklar; ama bağlantılar Gyazo tarafında silinebilir. Bu komut tüm Gyazo bağlantılarını (yaklaşık 6.000) bir kerede indirir, açılamayanları listeler ve istenirse tekrar çalıştırılır (kaldığı yerden sürer):
+
+```bash
+cd /opt/kanit-paneli
+runuser -u kanit -- .venv/bin/python -m app.cli gyazo-onbellekle --en-cok 20
+runuser -u kanit -- nohup .venv/bin/python -m app.cli gyazo-onbellekle > /opt/kanit-paneli/data/gyazo-onbellek.log 2>&1 &
+tail -f /opt/kanit-paneli/data/gyazo-onbellek.log      # Ctrl+C ile izlemeyi bırakabilirsiniz, indirme sürer
+```
+
+Beklenen: ilk komutta `"indirilen": 20` civarı ve `GYAZO_ONBELLEK_TAMAM`; ikinci komut her 100 bağlantıda bir satır yazar, sonunda `GYAZO_ONBELLEK_TAMAM`. `"acilamayan"` sayısı Gyazo'da artık bulunmayan görsellerdir; listesi `/opt/kanit-paneli/data/gyazo-acilamayan.csv` dosyasındadır (kayıt numarası, proje, personel, bağlantı, sebep; Excel'de açılır). `GYAZO_ONBELLEK_YARIM` görürseniz Gyazo hız sınırı koymuştur; 15 dakika sonra aynı komutu tekrar çalıştırın. Çıktıda `"uyari"` satırı önbellek sınırına yaklaşıldığını söylerse `.env` içine `GYAZO_ONBELLEK_MB=5000` yazıp `systemctl restart kanit-web` yapın. İndirilen kopyalar yaşa göre silinmez; Gyazo bağlantısı sonradan ölse bile görsel panelde açılmaya devam eder.
+
 ## 4. Botu gerçek hesaba geçirme
 
 Önce Windows'taki eski botu **kapatın**; aynı anahtar iki yerde çalışmaz.

@@ -40,6 +40,10 @@ def main():
     old=_alt(sub,'ice-aktar','Eski klasörü/Exceli bir kez aktar; canlı Excel bağlantısı kurmaz')
     old.add_argument('kaynak',help='Eski Excel dosyası veya bot klasörü yolu')
     _alt(sub,'arsiv-tara','Sunucuya taşınmış telegram_gorseller klasörünü indeksle')
+    topla=_alt(sub,'gyazo-onbellekle','Kayıtlardaki Gyazo görsellerini sunucuya bir kez indir; açılamayanları raporla (yeniden çalıştırılabilir)')
+    topla.add_argument('--en-cok',type=int,default=0,metavar='N',help='Yalnız ilk N bağlantıyı dene (deneme için)')
+    topla.add_argument('--bekleme',type=float,default=0.15,metavar='SN',help='İki indirme arasındaki bekleme, saniye (varsayılan 0.15)')
+    topla.add_argument('--rapor',metavar='DOSYA',help='Açılamayan bağlantı listesi; varsayılan veri klasöründe gyazo-acilamayan.csv')
     backup=_alt(sub,'yedekle','Tutarlı SQLite yedeği ve isteğe bağlı görsel kopyası')
     backup.add_argument('hedef',help='Yedeklerin yazılacağı klasör (altına tarihli klasör açılır)');backup.add_argument('--gorseller',action='store_true',help='Görsel ve arşiv klasörlerini de kopyala')
     _alt(sub,'durum','Kayıt sayısı, dosya yolları ve bot gelen kutusu özeti');_alt(sub,'veritabani-kur','Veritabanı dosyasını ve şemayı oluştur')
@@ -70,6 +74,14 @@ def main():
             report=ice_aktar.calistir(AYAR,c,AYAR['ONBELLEK'],gorsel.GorselCozucu(AYAR,AYAR['ONBELLEK']),kaynak=args.kaynak)
             print(json.dumps(report,ensure_ascii=False,indent=2))
             if report.get('hata'): raise SystemExit(1)
+        elif args.command=='gyazo-onbellekle':
+            from . import gorsel
+            def ilerleme(i,n,s): print(f"{i}/{n} · indirilen {s['indirilen']} · zaten var {s['zaten_var']} · açılamayan {s['acilamayan']}",flush=True)
+            try:
+                r=gorsel.gyazo_toplu_indir(c,gorsel.GorselCozucu(AYAR,AYAR['ONBELLEK']),AYAR,en_cok=args.en_cok,bekleme_sn=args.bekleme,rapor_yolu=args.rapor,ilerleme=ilerleme)
+            except ValueError as e: raise SystemExit('Hata: '+str(e))
+            print(json.dumps(r,ensure_ascii=False,indent=2))
+            print('GYAZO_ONBELLEK_YARIM' if r.get('durduruldu') else 'GYAZO_ONBELLEK_TAMAM')
         elif args.command=='arsiv-tara':
             from . import gorsel
             print(json.dumps(gorsel.arsiv_tara(AYAR,c,gorsel.GorselCozucu(AYAR,AYAR['ONBELLEK'])),ensure_ascii=False,indent=2))

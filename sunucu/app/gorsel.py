@@ -271,6 +271,7 @@ class GorselCozucu:
         self.gyazo_hostlar = tuple(GYAZO_HOSTLAR)
         self.gyazo_kaynak = GYAZO_KAYNAK
         self._http = None
+        self._gyazo_son_durum = None  # son Gyazo isteğinin HTTP durumu (toplu indirme raporu için)
         self._gyazo_kilit = threading.Lock()
         self._gyazo_semafor = threading.BoundedSemaphore(4)
         # Önbellek sınırları (bayt / saniye); 0 = sınır yok. Temizlik kilidi tek iş parçacığında çalışır.
@@ -489,7 +490,8 @@ class GorselCozucu:
             if not self._gyazo_host_izinli(url):
                 return None
             r = http.get(url, stream=True, timeout=(5, GYAZO_ZAMAN_ASIMI), allow_redirects=False,
-                         headers={"User-Agent": "KanitPaneli/2.2", "Accept": "image/*"})
+                         headers={"User-Agent": "KanitPaneli/2.3", "Accept": "image/*"})
+            self._gyazo_son_durum = getattr(r, "status_code", None)
             try:
                 if r.status_code in (301, 302, 303, 307, 308):
                     hedef = r.headers.get("Location", "")
@@ -537,10 +539,12 @@ class GorselCozucu:
             yol = self._gyazo_onbellek(kimlik)
             if yol:
                 return yol
+            self._gyazo_son_durum = None
             try:
                 veri = self._gyazo_getir(self.gyazo_kaynak.format(id=kimlik))
             except Exception:
                 veri = None
+                self._gyazo_son_durum = "hata"
             if not veri:
                 self._gyazo_olumsuz_yaz(kimlik)
                 return None
@@ -840,3 +844,138 @@ def arsiv_tara(ayar, conn, cozucu):
             else:
                 rapor["eslesmeyen"] += 1
     return rapor
+
+
+# ------------------------------------------------------------------ Toplu Gyazo ön-indirme (CLI: gyazo-onbellekle)
+_GYAZO_SEBEP = {404: "Gyazo'da görsel yok (404)", 410: "Gyazo görseli kaldırmış (410)", 403: "Gyazo erişimi reddetti (403)",
+                429: "Gyazo hız sınırı (429)", "hata": "ağ hatası / zaman aşımı"}
+GYAZO_TOPLU_429_BEKLEME = (30, 60, 120, 300)
+
+
+def _gyazo_sebep(durum):
+    if durum in _GYAZO_SEBEP:
+        return _GYAZO_SEBEP[durum]
+    if isinstance(durum, int):
+        return f"sunucu hatası (HTTP {durum})" if durum >= 500 else ("indirilemedi (bozuk, çok büyük ya da görsel olmayan içerik)" if durum == 200 else f"HTTP {durum}")
+    return "indirilemedi (izinsiz bağlantı ya da meşgul)"
+
+
+def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, bekleme_sn=0.15, uyku=None, rapor_yolu=None, ilerleme=None):
+    """Kayıtlardaki tüm Gyazo bağlantılarını (ana ve ikinci görsel) sunucu önbelleğine bir kez indirir.
+
+    Amaç: eski Excel kayıtlarının tek kopyası Gyazo'da; bağlantı ölmeden sunucuya kopyalamak ve
+    açılamayanları raporlamak. Yeniden çalıştırılabilir: önbellekte olan kimlikler atlanır, her kimlik
+    bu çalıştırmada bir kez daha denenir (10 dakikalık olumsuz işaret yok sayılır). Hız sınırında (429)
+    30/60/120/300 s bekler; yine 429 ise durur ve sonraki çalıştırma kaldığı yerden sürer.
+    Kayıt satırları hiçbir zaman değiştirilmez; yalnız önbellek dosyaları ve rapor dosyası yazılır.
+    """
+    if not getattr(cozucu, "gyazo_acik", False):
+        raise ValueError("GYAZO_PROXY kapalı; önce .env içinde GYAZO_PROXY=1 yapın.")
+    uyku = uyku or time.sleep
+    t0 = time.monotonic()
+    sayac = {"baglanti": 0, "kimlik": 0, "zaten_var": 0, "indirilen": 0, "acilamayan": 0, "kimliksiz": 0,
+             "hiz_siniri_bekleme_sn": 0, "durduruldu": None}
+    acilamayan = []
+    gorulen = {}
+    cur = conn.execute("SELECT id, proje, personel, link, gorsel_dosya, gorsel2, gorsel2_dosya FROM kayitlar "
+                       "WHERE COALESCE(silindi,0)=0 AND (LOWER(COALESCE(link,'')) LIKE '%gyazo.com/%' "
+                       "OR LOWER(COALESCE(gorsel2,'')) LIKE '%gyazo.com/%') ORDER BY id")
+    sutunlar = [d[0] for d in cur.description]
+    adaylar = []
+    for satir in cur.fetchall():
+        r = dict(zip(sutunlar, satir))
+        for ikinci in (False, True):
+            link = (r.get("gorsel2") if ikinci else r.get("link")) or ""
+            dusuk = str(link).lower()
+            if "gyazo.com/" not in dusuk or "teamzone" in dusuk:  # teamzone.gyazo.com ayrı bir hizmet, Gyazo kimliği taşımaz
+                continue
+            k = dict(r)
+            k["_gorsel2"] = ikinci
+            adaylar.append((r, link, k))
+    if en_cok and en_cok > 0:
+        adaylar = adaylar[:en_cok]
+    sayac["baglanti"] = len(adaylar)
+
+    def _yok_sil(kimlik):
+        try:
+            os.unlink(os.path.join(cozucu.gyazo_klasor, kimlik + ".yok"))
+        except OSError:
+            pass
+
+    def _dene(k):
+        cozucu._gyazo_son_durum = None
+        yol = cozucu.gyazo_indir(k)
+        return yol, cozucu._gyazo_son_durum
+
+    toplam = len(adaylar)
+    for i, (r, link, k) in enumerate(adaylar, 1):
+        kimlik = cozucu.gyazo_kimlik(k)
+        if not kimlik:
+            sayac["kimliksiz"] += 1
+            acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, "Gyazo kimliği okunamadı"))
+        elif kimlik in gorulen:
+            if gorulen[kimlik]:
+                sayac["zaten_var"] += 1
+            else:
+                sayac["acilamayan"] += 1
+                acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, "aynı bağlantı bu çalıştırmada açılamadı"))
+        elif cozucu._gyazo_onbellek(kimlik):
+            sayac["kimlik"] += 1
+            gorulen[kimlik] = True
+            sayac["zaten_var"] += 1
+        else:
+            sayac["kimlik"] += 1
+            _yok_sil(kimlik)
+            yol, durum = _dene(k)
+            if not yol and (durum == "hata" or (isinstance(durum, int) and durum >= 500)):
+                uyku(5)
+                _yok_sil(kimlik)
+                yol, durum = _dene(k)
+            for bekle in GYAZO_TOPLU_429_BEKLEME:
+                if yol or durum != 429:
+                    break
+                sayac["hiz_siniri_bekleme_sn"] += bekle
+                uyku(bekle)
+                _yok_sil(kimlik)
+                yol, durum = _dene(k)
+            if yol:
+                gorulen[kimlik] = True
+                sayac["indirilen"] += 1
+            else:
+                gorulen[kimlik] = False
+                sayac["acilamayan"] += 1
+                acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, _gyazo_sebep(durum)))
+                if durum == 429:
+                    sayac["durduruldu"] = ("Gyazo hız sınırı sürüyor; %d/%d bağlantı işlendi. 15 dakika sonra aynı komutu yeniden çalıştırın "
+                                           "(kaldığı yerden devam eder)." % (i, toplam))
+            if bekleme_sn and i < toplam and not sayac["durduruldu"]:
+                uyku(bekleme_sn)
+        if ilerleme and (i % 100 == 0 or i == toplam):
+            ilerleme(i, toplam, dict(sayac))
+        if sayac["durduruldu"]:
+            break
+
+    if rapor_yolu is None and ayar and ayar.get("DB"):
+        rapor_yolu = os.path.join(os.path.dirname(os.path.abspath(str(ayar["DB"]))), "gyazo-acilamayan.csv")
+    if rapor_yolu:
+        import csv
+        gecici = str(rapor_yolu) + ".tmp"
+        with open(gecici, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f, delimiter=";")
+            w.writerow(["kayit_id", "proje", "personel", "link", "sebep"])
+            w.writerows(acilamayan)
+        os.replace(gecici, rapor_yolu)
+    sonuc = dict(sayac)
+    sonuc.update({"sure_sn": round(time.monotonic() - t0, 1), "rapor": rapor_yolu, "acilamayan_ornek": acilamayan[:20]})
+    try:
+        durum = cozucu.onbellek_durumu()
+        g = durum.get("gyazo") if isinstance(durum, dict) else None
+        if isinstance(g, dict):
+            sonuc["onbellek_gyazo_mb"] = g.get("mb")
+            sonuc["onbellek_sinir_mb"] = g.get("sinir_mb")
+            if g.get("sinir_mb") and g.get("mb") and g["mb"] > 0.8 * g["sinir_mb"]:
+                sonuc["uyari"] = ("Gyazo önbelleği sınırına yaklaştı (%s / %s MB); sınır dolunca en eski kopyalar silinir. "
+                                  ".env içinde GYAZO_ONBELLEK_MB değerini yükseltin (örn. 5000) ve kanit-web'i yeniden başlatın." % (g["mb"], g["sinir_mb"]))
+    except Exception:
+        pass
+    return sonuc

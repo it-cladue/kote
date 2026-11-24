@@ -81,6 +81,8 @@ Birleşik 2.3.0 kodu, düzeltmeleri yapan ekiplerden bağımsız dört inceleyic
 - Varsayılanlar: `GYAZO_ONBELLEK_GUN` 30 → **0** (Gyazo kopyaları yaşa göre silinmez; eski Excel kayıtlarının tek sunucu kopyası olabilir), `GYAZO_ONBELLEK_MB` 500 → **2000**, `CIKTI_SATIR_SINIRI` 100.000 → **30.000** (tek istek sunucuyu 20 saniye meşgul etmesin).
 - Kurulum: `apply-update.sh` SQLite anlık görüntüsü artık `data/` kökünde `-wal`/`-shm` artığı bırakmaz ve bot açıldıktan 5 saniye sonra hâlâ çalışıyor mu diye bakar (değilse uyarı yazar); `kanit-yedek.sh` ayna sırasında silinen bir dosyada (rsync 24) durmaz; `configure-bot.py --yonetici` yönetici kimliği ve parolasını `.env`'e güvenli yazar (kabuk komutunda parola geçmez); `DOSYA_DOGRULAMA.sha256` güncelliği `tests/test_paket_manifesti.py` ile kilitlendi (manifest eskiyse paket adım 0'daki `PAKET_DOGRU` denetimi başarısız oluyordu).
 
+- **Yeni komut `gyazo-onbellekle`:** eski kayıtların Gyazo görsellerini sunucuya bir kerede indirir (ikinci görsel dahil, aynı bağlantı bir kez), açılamayanları `data/gyazo-acilamayan.csv` dosyasına sebebiyle yazar (404/410 silinmiş, 429 hız sınırı, ağ hatası), hız sınırında 30/60/120/300 sn bekler ve yarım kaldıysa sonraki çalıştırmada kaldığı yerden sürer; kayıt satırlarına dokunmaz. Gerçek arşivle prova (yerel sahte Gyazo sunucusuyla): 6.043 bağlantı / 5.969 tekil kimlik 6,4 saniyede işlendi; ikinci çalıştırma yalnız önbelleği okudu (0,7 sn). Canlıda süre Gyazo'nun hızına bağlıdır (tahmini 10-40 dakika).
+
 ## Yeni `.env` anahtarları (hepsi isteğe bağlı; yazılmazsa varsayılan geçerli)
 
 | Anahtar | Varsayılan | Anlam |
