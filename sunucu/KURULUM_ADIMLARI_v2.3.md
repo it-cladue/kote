@@ -105,7 +105,18 @@ EOF2
 systemctl start kanit-web && curl -fsS http://127.0.0.1:18080/saglik; echo
 ```
 
-Beklenen (provada aynı dosyalarla çıkan değerler): raporda `"yeni": 5498`, `"onarilan": 114`, kullanıcılar `"onayli": 153, "engelli": 1`, kategoriler 11; sayımda `kayit: 5498`, `tg kullanici (154, 153, 1)`, `kategori: 11`, sonra `OK`. Tarayıcıda Kayıtlar sayfasında proje sekmelerini kontrol edin. Sorun yoksa `rm -rf /opt/kanit-paneli/eski-veri`.
+Beklenen (24 Kasım 2026'da gönderdiğiniz `telegramkan123t` arşiviyle provada çıkan değerler; bot o tarihten sonra da çalıştıysa sayılar biraz büyür): raporda `"sayfalar"` GA 1522, BETA 95, VI 709, HI 1260, PA 859, OF 1642, PP 841; `"yeni": 6928`, `"onarilan": 114` (bağlantısı Kategori sütununa kaymış satırlar düzeltilir), kullanıcılar `"onayli": 164, "engelli": 0`, kategoriler 11; sayımda `kayit: 6928`, `tg kullanici (164, 164, 0)`, `kategori: 11`, sonra `OK`. Excel'deki **KT edildi** sütunu panelde onay durumu olur: 6628 kayıt **Onaylı**, 300 kayıt **Bekleyen** (BETA 2, GA 126, HI 18, OF 7, PA 123, PP 2, VI 22). Excel'in **Açıklama** sütunu (127 satır: `M`, `Y`, serbest notlar) kaydın Açıklama alanına gelir; kayıt detayında görünür ve düzenlenebilir. Tarayıcıda Kayıtlar → Bekleyen listesinde bu 300 kaydı görürsünüz; proje sekmelerini kontrol edin. Sorun yoksa `rm -rf /opt/kanit-paneli/eski-veri`. Onaylama ve yorum akışı için 3d'ye bakın.
+
+3d. Aktarımdan sonra onay ve yorum nasıl çalışır (eski Excel'deki "KT edildi" sütununun yerini alır):
+
+1. **Onay durumu Excel'den gelir.** Excel'de `KT edildi` = True olan satırlar panelde **Onaylı**, boş/False olanlar **Bekleyen** olur. Kayıtlar sayfasının üstünde Bekleyen / Onaylı / Silinen / Hepsi sekmeleri ve proje seçimi vardır; "Bekleyen" sekmesi Excel'de işaretlenmemiş kayıtları listeler.
+2. **Tek kayıt onaylama:** Kayıtlar → satıra tıklayın → açılan pencerede kaydın bilgileri, görseli, Excel'den gelen **Açıklama** alanı ve onay özeti görünür ("Onay bekliyor" ya da "Eski kaynaktan onaylı aktarıldı"). **Onayla** düğmesi kaydı onaylar; onaylayan kişi ve saat kayda yazılır, İşlem Geçmişi'ne düşer. Yanlışsa aynı pencerede **Onayı kaldır**.
+3. **Toplu onay:** Bekleyen listesinde satırların başındaki kutuları işaretleyin; üstte beliren araç çubuğundan seçilenleri tek seferde onaylayın (onay sorusu çıkar).
+4. **Yorum / soru / yanıt:** Aynı pencerenin altındaki **Konuşma** bölümüne yorum yazılır. "Soru yönelt" ile projenin sorumlusuna (ya da tüm ilgili sorumlulara) soru gönderilir; soru gelen kişi panelde bildirim alır ve aynı yerden yanıtlar. Yorumlar kayda bağlı kalır, Excel çıktısında ve İşlem Geçmişi'nde görünür.
+5. **Excel'deki Açıklama sütunu** (`M`, `Y`, "link iletilen wp patladığı için…" gibi notlar) kaydın Açıklama alanında saklanır; **Düzenle** ile değiştirilebilir. Bu notlar yorum değildir; yorum olarak görünmesini isterseniz kaydı açıp Konuşma bölümüne yazın.
+6. **Yetki:** Onaylama ve yorum, kullanıcının o projede "kt" (onay) yetkisi varsa açılır; yalnız görüntüleme yetkisi olan kullanıcı düğmeleri görmez (Kullanıcılar sayfasından proje bazında verilir, örn. `GA:oku,kt`).
+
+Bundan sonra yeni kanıtlar Telegram botundan gelir ve Bekleyen listesine düşer; Excel dosyasına geri yazılmaz, Excel çıktısı panelden "Excel çıktısı" ile alınır.
 
 ## 4. Botu gerçek hesaba geçirme
 
