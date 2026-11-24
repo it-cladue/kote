@@ -13,7 +13,7 @@
 
 `ONAYSIZ_GORUNUM` ayarı, projede **onay yetkisi olmayan** kullanıcılar için geçerlidir (takım liderleri her şeyi görür):
 
-- `uyar` (varsayılan): listede ve kartlarda kırmızı "ONAY YOK — raporlamada kullanmayın" rozeti; kayıt ayrıntısının üstünde kırmızı şerit; arama yalnız onaysız kayıt döndürüyorsa listenin üstünde uyarı kutusu; Excel çıktısında "Takım lideri onayı" sütunu (Onaylı / YOK) ve dosya adında onaysız sayısı.
+- `uyar` (varsayılan): listede ve kartlarda kırmızı "ONAY YOK — raporlamada kullanmayın" rozeti; kayıt ayrıntısının üstünde kırmızı şerit; arama yalnız onaysız kayıt döndürüyorsa listenin üstünde uyarı kutusu; Excel çıktısında "Takım lideri onayı" sütunu (Onaylı / YOK; eski 0/1 değerli `KT` sütununun yerine) ve dosya adında onaysız sayısı.
 - `gizle`: onaysız ve silinmiş kayıtlar liste, arama, ayrıntı (403 "Bu kaydın onayı yok; yalnız onaylı kayıtlar gösterilir."), ekleyen profili, Kanıt Kontrolü ve çıktıda hiç görünmez; durum sekmelerinde yalnız Onaylı kalır.
 - Çıktı sayfasındaki onay durumu seçenekleri: **Hepsi / Onaylılar / Onaysızlar (onay bekleyen) / Silinenler**.
 
@@ -25,7 +25,7 @@
 
 ## Ekleyen profili özeti
 
-- Telegram ekleyen profilinde tarih aralığı (Son 7 gün / Son 30 gün / Bu ay / Tümü ya da elle) ve seçili aralık için özet: Toplam / Onaylı / Bekleyen / Silinen; kategori × tip (sessiz, telesekreter, diğer) çapraz tablosu; aynı görünümü Excel'e aktaran bağlantı. "Bu kişi bu ay kaç CVPS, kaç sessiz ekledi?" sorusu tek bakışta cevaplanır.
+- Telegram ekleyen profilinde tarih aralığı (Son 7 gün / Son 30 gün / Bu ay / Tümü kısayolları ya da elle) ve seçili aralık için "Bu aralıkta ne eklemiş?" özeti: Toplam / Onaylı / Bekleyen / Silinen; kategori × tip (Sessiz / Telesekreter / Diğer) çapraz tablosu, birden fazla projede proje alt toplamları; "Bu görünümü Excel'e aktar" bağlantısı Çıktı formunu aynı koşullarla (ekleyen, tarih, proje, durum) doldurur. Onay yetkisi olmayan kullanıcı `gizle` modundaysa özet de yalnız onaylıları sayar. "Bu kişi bu ay kaç CVPS, kaç sessiz ekledi?" sorusu tek bakışta cevaplanır.
 
 ## Yeni `.env` anahtarları (hepsi isteğe bağlı)
 
