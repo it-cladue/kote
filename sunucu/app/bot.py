@@ -2175,7 +2175,7 @@ class KanitBot:
         elif data == "confirm" and step == "summary":
             prepared = (self._outbox_context or {}).get("prepared_final")
             kid, created = self._commit_record(conn, user, session, prepared)
-            message_text = "<b>Kanıtınız eklendi, teşekkürler.</b>" if created else "Bu kaynak mesaj zaten kaydedilmişti; tekrar kayıt oluşturulmadı."
+            message_text = "<b>✅ Kanıtınız panele işlendi, teşekkürler.</b>" if created else "Bu kaynak mesaj zaten kaydedilmişti; tekrar kayıt oluşturulmadı."
             # A Gyazo submission has one durable terminal source: its queue
             # notice (success, honest failure, or ambiguity).  Sending this
             # normal confirmation too would produce a second final message and
@@ -2452,7 +2452,8 @@ class KanitBot:
             # crash. Unique action keys make this outbox handoff idempotent.
             for job in donusum_isleri.claim_notices(conn, limit=max(1, limit * 2), bot_id=self.bot_id):
                 if job.get("durum") == "tamam" and bool(job.get("record_applied")) and job.get("uygulama_durumu") == "uygulandi":
-                    text = f"<b>Gyazo bağlantısı kayda eklendi.</b>\nKayıt: <code>{int(job['record_id'])}</code>\n{_h(job.get('url'))}"
+                    # Ekleyene bağlantı gönderilmez (kullanıcı kararı): görsel panelde görünür, Telegram'da yalnız onay metni kalır.
+                    text = f"<b>✅ Kanıtınız panele işlendi, teşekkürler.</b>\nKayıt: <code>{int(job['record_id'])}</code>"
                 elif job.get("durum") == "tamam":
                     text = (f"<b>Görsel değişti; bağlantı kayda eklenmedi, yerel kanıt korunuyor.</b>\n"
                             f"Kayıt: <code>{int(job['record_id'])}</code>")

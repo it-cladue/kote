@@ -662,4 +662,4 @@ def test_gyazo_gorsel_degistiginde_baglanti_uygulandi_diye_bildirilmez(setup, mo
         conn.close()
     texts = [payload.get('text', '') for method, payload in fake.calls if method == 'sendMessage']
     assert any('Görsel değişti; bağlantı kayda eklenmedi, yerel kanıt korunuyor' in text for text in texts)
-    assert not any('Gyazo bağlantısı kayda eklendi' in text for text in texts)
+    assert not any('Kanıtınız panele işlendi' in text for text in texts)
