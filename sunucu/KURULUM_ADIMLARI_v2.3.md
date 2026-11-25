@@ -118,18 +118,25 @@ Beklenen (24 Kasım 2026'da gönderdiğiniz `telegramkan123t` arşiviyle provada
 
 Bundan sonra yeni kanıtlar Telegram botundan gelir ve Bekleyen listesine düşer; Excel dosyasına geri yazılmaz, Excel çıktısı panelden "Excel çıktısı" ile alınır.
 
-3e. Gyazo görsellerini sunucuya indirin (önerilir; 10-40 dakika, arka planda):
+3e. Gyazo görsellerini sunucuya kopyalama (2.3.1 ile; isteğe bağlı ama önerilir):
 
-Eski kayıtların görselleri Gyazo'da duruyor. Panel bir kaydı ilk açışta görseli Gyazo'dan indirip sunucuda saklar; ama bağlantılar Gyazo tarafında silinebilir. Bu komut tüm Gyazo bağlantılarını (yaklaşık 6.000) bir kerede indirir, açılamayanları listeler ve istenirse tekrar çalıştırılır (kaldığı yerden sürer):
+Eski kayıtların görselleri Gyazo'da duruyor; panel ilk açılışta indirip saklar, ama Gyazo tarafında silinen görsel kaybolur. 2.3.1'deki gece planı bunları mesai dışında sunucuya kopyalar. Önce 20 bağlantıyla deneme (her bağlantı için satır yazar; Gyazo'ya ulaşılamıyorsa hemen söyler, Ctrl+C gerekmez):
 
 ```bash
 cd /opt/kanit-paneli
 runuser -u kanit -- .venv/bin/python -m app.cli gyazo-onbellekle --en-cok 20
-runuser -u kanit -- nohup .venv/bin/python -m app.cli gyazo-onbellekle > /opt/kanit-paneli/data/gyazo-onbellek.log 2>&1 &
-tail -f /opt/kanit-paneli/data/gyazo-onbellek.log      # Ctrl+C ile izlemeyi bırakabilirsiniz, indirme sürer
 ```
 
-Beklenen: ilk komutta `"indirilen": 20` civarı ve `GYAZO_ONBELLEK_TAMAM`; ikinci komut her 100 bağlantıda bir satır yazar, sonunda `GYAZO_ONBELLEK_TAMAM`. `"acilamayan"` sayısı Gyazo'da artık bulunmayan görsellerdir; listesi `/opt/kanit-paneli/data/gyazo-acilamayan.csv` dosyasındadır (kayıt numarası, proje, personel, bağlantı, sebep; Excel'de açılır). `GYAZO_ONBELLEK_YARIM` görürseniz Gyazo hız sınırı koymuştur; 15 dakika sonra aynı komutu tekrar çalıştırın. Çıktıda `"uyari"` satırı önbellek sınırına yaklaşıldığını söylerse `.env` içine `GYAZO_ONBELLEK_MB=5000` yazıp `systemctl restart kanit-web` yapın. İndirilen kopyalar yaşa göre silinmez; Gyazo bağlantısı sonradan ölse bile görsel panelde açılmaya devam eder.
+Beklenen: `Gyazo erişimi: tamam`, ardından `1/20 … indirildi (123 KB)` satırları (birkaçı `açılamadı: Gyazo'da görsel yok (404)` olabilir), sonda `GYAZO_ONBELLEK_TAMAM`. `GYAZO_ONBELLEK_YARIM: Gyazo'ya ulaşılamıyor` çıkarsa sunucunun dış HTTPS erişimi engellidir; çıktıyı gönderin.
+
+Deneme iyiyse gece zamanlayıcısı (her gece TR 22:30'da başlar, gecede en çok 900 bağlantı indirir, en geç 07:30'da durur, kaldığı yerden sürer; gün içinde çalışmaz):
+
+```bash
+bash deploy/setup-gyazo-gece.sh --dry-run
+bash deploy/setup-gyazo-gece.sh
+```
+
+Beklenen: `DRY-RUN_TAMAM`, sonra `GYAZO_GECE_TAMAM` ve `list-timers` çıktısında bir sonraki çalışma saati. İzlemek: `journalctl -u kanit-gyazo -n 30 --no-pager` (her gece bir özet; `GYAZO_ONBELLEK_DEVAM` kalan sayıyı söyler, iş bitince `GYAZO_ONBELLEK_TAMAM`). Açılamayan bağlantılar `data/gyazo-acilamayan.csv` dosyasındadır. Saat/sayı değiştirmek: `bash deploy/setup-gyazo-gece.sh --saat 23:00 --bitis 07:00 --gecelik 600`; kaldırmak: `--kaldir`.
 
 ## 4. Botu gerçek hesaba geçirme
 
@@ -254,18 +261,32 @@ chown -R kanit:kanit /opt/kanit-paneli/data/telegram_gorseller
 runuser -u kanit -- /opt/kanit-paneli/.venv/bin/python -m app.cli arsiv-tara
 ```
 
-## 13. 2.3.1 güncellemesi (bildirim ve onay görünürlüğü)
+## 13. Güncellemeler GitHub'dan (2.3.1 ve sonrası)
 
-2.3.0 kuruluysa aynı yolla uygulanır; veritabanı değişmez, yalnız web servisi yeniden başlar:
+Zip taşımaya gerek yok: sunucu paketi doğrudan depodan alır. İlk kez (tek sefer):
 
 ```bash
-cd /root/kanit-kurulum && rm -rf KanitPaneli_Sunucu_v2.3.1 && unzip -q KanitPaneli_Sunucu_v2.3.1.zip && cd KanitPaneli_Sunucu_v2.3.1 && sha256sum -c --quiet DOSYA_DOGRULAMA.sha256 && echo PAKET_DOGRU
+command -v git >/dev/null || apt-get install -y git
+cd /root/kanit-kurulum && rm -rf kote && git clone -q --depth 1 -b claude/busy-feynman-cibo22 https://github.com/it-cladue/kote.git kote
+cd /root/kanit-kurulum/kote/sunucu && sha256sum -c --quiet DOSYA_DOGRULAMA.sha256 && echo PAKET_DOGRU && grep -n "^SURUM" app/panel.py
+```
+
+Beklenen: `PAKET_DOGRU` ve `SURUM = '2.3.1'` (ya da daha yenisi). Sonraki güncellemelerde yalnız:
+
+```bash
+cd /root/kanit-kurulum/kote && git pull -q && cd sunucu && sha256sum -c --quiet DOSYA_DOGRULAMA.sha256 && echo PAKET_DOGRU && grep -n "^SURUM" app/panel.py
+```
+
+Güncellemeyi uygulama (her sürümde aynı; veritabanı değişmez, yalnız panel servisleri kısa süre durur):
+
+```bash
+cd /root/kanit-kurulum/kote/sunucu
 bash deploy/apply-update.sh --dry-run
 bash deploy/apply-update.sh
 curl -fsS http://127.0.0.1:18080/saglik; echo; systemctl is-active kanit-web kanit-bot
 ```
 
-Beklenen: `PAKET_DOGRU`, `DRY-RUN_TAMAM`, `GÜNCELLEME_TAMAM`, `OK`, iki `active`. İsteğe bağlı: raporlama ekibi onaysız kayıtları hiç görmesin istiyorsanız `/opt/kanit-paneli/.env` dosyasına `ONAYSIZ_GORUNUM=gizle` satırını ekleyip `systemctl restart kanit-web` çalıştırın (yazılmazsa kırmızı uyarı modu geçerlidir). İlk hatırlatmaları beklemeden görmek için: `runuser -u kanit -- /opt/kanit-paneli/.venv/bin/python -m app.cli hatirlatma-uret`. Ayrıntı: `DEGISIKLIKLER_v2.3.1.md`.
+Beklenen: `DRY-RUN_TAMAM`, `GÜNCELLEME_TAMAM`, `OK`, iki `active`. 2.3.1'e özel isteğe bağlı ayar: raporlama ekibi onaysız kayıtları hiç görmesin istiyorsanız `/opt/kanit-paneli/.env` dosyasına `ONAYSIZ_GORUNUM=gizle` ekleyip `systemctl restart kanit-web`; yazılmazsa kırmızı uyarı modu geçerlidir. İlk hatırlatmaları beklemeden görmek için: `runuser -u kanit -- /opt/kanit-paneli/.venv/bin/python -m app.cli hatirlatma-uret`. Ayrıntı: `DEGISIKLIKLER_v2.3.1.md`.
 
 ## Sorun çıkarsa
 
