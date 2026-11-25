@@ -221,14 +221,16 @@ def test_uyar_arama_uyarisi_sekmeden_bagimsiz(web):
 
 
 # ---- 7. [ORTA, uyum] SURUM 2.3.1 ve statik dosya sürümü şablonlarda SURUM'dan
-def test_surum_231_ve_statik_surum_parametresi(web):
+def test_surum_ve_statik_surum_parametresi(web):
+    # 2.3.2-inc: sabit '2.3.1' yerine panel.SURUM (tek kaynak); sürüm atlatmalarında test kendiliğinden güncel kalır.
     from app import panel
     c, a = web; login(c)
-    assert panel.SURUM == '2.3.1' and c.get('/saglik').headers['X-Kanit-Paneli'] == '2.3.1'
-    for url, beklenen in (('/', ('stil.css?v=2.3.1', 'panel.js?v=2.3.1', 'tema.js?v=2.3.1')), ('/kayitlar?durum=hepsi', ('kayit.css?v=2.3.1',)), ('/yonetim/katalog', ('katalog.js?v=2.3.1',))):
+    S = panel.SURUM
+    assert re.fullmatch(r'2\.3\.\d+', S) and S != '2.3.1' and c.get('/saglik').headers['X-Kanit-Paneli'] == S
+    for url, beklenen in (('/', (f'stil.css?v={S}', f'panel.js?v={S}', f'tema.js?v={S}')), ('/kayitlar?durum=hepsi', (f'kayit.css?v={S}',)), ('/yonetim/katalog', (f'katalog.js?v={S}',))):
         html = c.get(url).data.decode()
         for b in beklenen: assert b in html and 'v=2.3.0' not in html, (url, b)
-    logout(c); giris = c.get('/giris').data.decode(); assert 'stil.css?v=2.3.1' in giris and 'tema.js?v=2.3.1' in giris
+    logout(c); giris = c.get('/giris').data.decode(); assert f'stil.css?v={S}' in giris and f'tema.js?v={S}' in giris
     for name in ('base.html', 'giris.html', 'katalog.html', 'kayitlar.html'):
         metin = (ROOT / 'app' / 'templates' / name).read_text(encoding='utf-8')
         assert "v='2.3" not in metin and 'v=SURUM' in metin, name

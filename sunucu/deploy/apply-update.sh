@@ -550,6 +550,7 @@ try:
         "tg_girisler", "tg_tema", "mesaj_bildirimleri", "schema_migrations",
         "projeler", "proje_kategorileri", "kategori_sorular", "donusum_isleri",
         "tg_giden", "tg_indirilen", "tg_donusum_cache",
+        "api_anahtarlari", "api_gunlugu",
     }
     existing = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type=\047table\047")}
     if not required.issubset(existing):

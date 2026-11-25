@@ -905,8 +905,11 @@ def _gorsel_yolu(kid,kucuk=False):
     r=_kayit_al(kid,'gorsel'); d={k:_metin(v) for k,v in dict(r).items()}
     if request.args.get('ikinci')=='1':
         d.update(gorsel_dosya=r['gorsel2_dosya'],link=r['gorsel2'],anahtar=str(r['anahtar'] or r['id'])+':2')
-    try: path,_=COZUCU.gorsel_yolu(d)
-    except Exception: path=None
+    # 2.3.2-inc: liste/galeri küçük resmi dış indirmeyi beklemez (arka planda başlatılır, yer tutucu döner);
+    # ayrıntı görseli indirme yuvası için en çok GORSEL_ISTEK_BEKLEME_SN bekler.
+    try: path,kaynak=COZUCU.gorsel_yolu(d,arka_plan=True) if kucuk else COZUCU.gorsel_yolu(d,bekle=gorsel.GORSEL_ISTEK_BEKLEME_SN)
+    except Exception: path,kaynak=None,'yok'
+    if not path and kaynak=='hazirlaniyor': return None,'hazirlaniyor'
     if not path: abort(404,'Bu kaydın yerel görseli eşleşmemiş.')
     if not kucuk: return path,not COZUCU.gecerli(path)
     thumb=COZUCU.kucuk(d,path)
@@ -928,6 +931,7 @@ def gorsel_goster(kid):
 @giris_gerekli
 def kucuk_goster(kid):
     path,bozuk=_gorsel_yolu(kid,True)
+    if bozuk=='hazirlaniyor': return _yer_tutucu_yaniti(True,'Görsel hazırlanıyor','Dış siteden alınıyor; birkaç saniye sonra sayfayı yenileyin','hazirlaniyor')
     if not path: abort(404)
     if bozuk: return _bozuk_gorsel_yaniti(True)
     def yeniden():

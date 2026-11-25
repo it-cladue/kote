@@ -148,7 +148,7 @@ def test_gecici_hata_bir_kez_daha_denenir_ve_en_cok_sinirlar(ortam):
 
 def test_vekil_kapaliysa_acik_hata(ortam):
     conn, c, ayar = ortam
-    c.gyazo_acik = False
+    c.gyazo_acik = False; c.dis_acik = False  # 2.3.2-inc: yalnız ikisi de kapalıysa hata (yalnız Gyazo kapalıysa dış kopyalama sürer)
     with pytest.raises(ValueError):
         gorsel.gyazo_toplu_indir(conn, c, ayar)
 

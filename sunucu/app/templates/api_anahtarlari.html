@@ -14,7 +14,7 @@
   <div class="kart-baslik"><div><p class="ust-etiket">Yeni API anahtarı</p><h2 id="yeni-anahtar-baslik"><b>{{ yeni.ad }}</b> için anahtar</h2></div><button type="button" class="btn birincil" data-kopyala="{{ yeni.anahtar }}">Anahtarı kopyala</button></div>
   <p class="sifre-deger"><code>{{ yeni.anahtar }}</code></p>
   <p class="kucukyazi">Bu anahtar yalnız şimdi görünür; panel yalnız özetini saklar. Sayfayı yenilemeyin, anahtarı karşı sistemin gizli ayarına güvenli bir yoldan yazın. Kaybolursa bu anahtarı iptal edip yenisini oluşturun.</p>
-  <p class="kucukyazi">Kullanım: <code>curl -H "Authorization: Bearer kp_…" {{ request.url_root }}api/v1/ozet</code> — ayrıntılar API_KULLANIM.md belgesinde.</p>
+  <p class="kucukyazi">Kullanım: <code>curl -H "Authorization: Bearer kp_…" {{ request.url_root }}api/v1/ozet</code> — ayrıntılar kurulum klasöründeki (git klonu) <code>sunucu/API_KULLANIM.md</code> belgesinde; karşı sisteme bu dosyayı iletin.</p>
 </section>
 {% endif %}
 <section class="kart" aria-labelledby="anahtar-listesi-baslik">

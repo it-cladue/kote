@@ -103,7 +103,7 @@ curl -s -H "Authorization: Bearer kp_…" -H "Content-Type: application/json" \
   "https://panel.ornek/api/v1/sorgu"
 ```
 
-Yanıt: `{sutunlar:[…], satirlar:[[…],…], satir_sayisi, kesildi, sure_ms}`.
+Yanıt: `{sutunlar:[…], satirlar:[[…],…], satir_sayisi, kesildi, sure_ms}`; kesildiyse ayrıca `neden: "satir"` ya da `neden: "boyut"`.
 
 **Kurallar**
 
@@ -115,12 +115,20 @@ Yanıt: `{sutunlar:[…], satirlar:[[…],…], satir_sayisi, kesildi, sure_ms}`
     "yalnız onaylı" anahtarda yalnız `kt=1`.
   - `yorumlar`: `id, kayit_id, kullanici, tur, metin, zaman, yanit_id` — yalnız kapsamdaki kayıtların yorumları.
   - `kategoriler`: `code, label, mode`.
-  - `tg_kullanicilar`: `id, username, first_name, onayli, engelli`.
+  - `tg_kullanicilar`: `id, username, first_name, onayli, engelli` — tüm projeleri gören ("Tümü", yalnız onaylı olmayan) anahtarda
+    tam liste; diğer anahtarlarda yalnız kapsamdaki kayıtları ekleyen Telegram kullanıcıları.
 - Başka her şey reddedilir (403): panel kullanıcıları, ayarlar, işlem geçmişi, Telegram kuyrukları, `sqlite_master`, `main.` ile
-  doğrudan tablo okuma, PRAGMA, ATTACH, her türlü yazma, `WITH RECURSIVE`, tablo döndüren işlevler (`json_each`, `pragma_*`).
-- En çok 5000 satır döner; fazlası kesilir ve `kesildi: true` olur. Daha fazlası için `LIMIT`/`OFFSET` ya da `WHERE id > ?` ile sayfalayın.
+  doğrudan tablo okuma, PRAGMA, ATTACH, her türlü yazma, `WITH RECURSIVE`, tablo döndüren işlevler (`json_each`, `pragma_*`),
+  `sqlite_` önekli bilgi işlevleri (`sqlite_version()` vb.). İzin verilmeyen tablo var olsa da olmasa da (sütun adı yanlış olsa bile) aynı 403 döner.
+- En çok **1000 satır** ve toplam **8 MB** değer döner; hangisi önce dolarsa orada kesilir, `kesildi: true` ve `neden: "satir"` ya da
+  `neden: "boyut"` olur. Daha fazlası için `LIMIT`/`OFFSET` ya da `WHERE id > ?` ile sayfalayın.
+- Tek bir değer (metin/blob) en çok **64 KB** olabilir; aşan değer üreten sorgu 400 `neden: "boyut"` alır.
 - Sorgu en çok 5 saniye çalışır; aşarsa durdurulur (400, `neden: "sure"`).
+- Sunucu genelinde aynı anda en çok `API_SORGU_ESZAMANLI` (varsayılan 2) sorgu çalışır, bir anahtarla aynı anda yalnız 1 sorgu.
+  Fazlası beklemeden 429 alır (`neden: "es_zamanli"` ya da `"es_zamanli_anahtar"`, `Retry-After: 2`); birkaç saniye sonra yeniden deneyin.
+- Sonuçtaki sonsuz/NaN sayılar (ör. `1e999`) JSON'da geçerli olmadığı için `null` döner.
 - Parametreler `?` ile verilir (en çok 100; metin, sayı ya da null). Değerleri SQL metnine eklemek yerine parametre kullanın.
+  64 bit aralığı dışındaki tam sayı, NaN/sonsuz ve geçersiz Unicode (eşi olmayan vekil karakter) 400 `neden: "girdi"` alır.
 - Hata yanıtlarında `neden` alanı: `yetki`, `sure`, `sutun`, `sozdizimi`, `parametre`, `tek_ifade`, `yalniz_select`, `girdi`, `boyut`, `diger`.
 
 **Örnek sorgular**
@@ -179,7 +187,7 @@ GROUP BY k.proje
 | `link`, `link_turu` | aynı | Kanıt bağlantısı ve türü (ör. gyazo). |
 | `aciklama` | `aciklama` | Açıklama metni. |
 | `yorum_sayisi` | — | Kayıttaki yorum sayısı. |
-| `gorsel_url` | — | Yalnız görsel izinli anahtarda: `/api/v1/gorsel/<id>` (görsel yoksa null). |
+| `gorsel_url` | — | Yalnız görsel izinli anahtarda: `/api/v1/gorsel/<id>` (görsel yoksa null). Yerel dosya, Gyazo, Snappark ve Teamzone kayıtlarında doludur; dış sitedeki görsel ilk istekte sunucuya kopyalanır. |
 
 ## 5. Hata kodları
 
@@ -191,20 +199,25 @@ Tüm hatalar `{"ok": false, "hata": "<Türkçe açıklama>", "kod": <HTTP kodu>}
 | 401 | Anahtar yok, biçimi yanlış, geçersiz, iptal edilmiş ya da süresi dolmuş. |
 | 403 | Kapsam dışı proje istendi; SQL ya da görsel izni yok; SQL sorgusu izin verilmeyen bir tabloya/işleme erişiyor. |
 | 404 | Kayıt yok ya da kapsam dışı; görsel yok; bilinmeyen uç; API kapalı (`API_ACIK=0`). |
+| 422 | Kaydın görsel dosyası bozuk ya da görsel değil (`/api/v1/gorsel`). |
 | 405 | Uç bu yöntemle çağrılamaz (ör. `GET /api/v1/sorgu`). |
 | 413 | Gövde 64 KB'den büyük. |
-| 429 | Hız sınırı aşıldı; `Retry-After` başlığı kaç saniye beklenmesi gerektiğini söyler. |
+| 429 | Hız sınırı aşıldı ya da SQL sorgu kuyruğu dolu; `Retry-After` başlığı kaç saniye beklenmesi gerektiğini söyler. |
 | 500 | Beklenmeyen hata; yanıttaki `kayit_no`'yu panel yöneticisine iletin. |
 
 ## 6. Hız sınırı ve günlük
 
 - Anahtar başına dakikada en çok `API_DAKIKA_SINIRI` istek (varsayılan 120; kayan 60 saniyelik pencere). Aşılınca 429 ve `Retry-After`.
-- Aynı IP'den dakikada 30'dan fazla geçersiz anahtar denemesi de 429 alır.
-- Her istek panelde günlüğe yazılır (anahtar, zaman, uç, IP, durum kodu, süre, satır sayısı); günlük 90 gün saklanır.
+- Aynı IP'den dakikada 30'dan fazla geçersiz anahtar denemesi (64 KB'den büyük gövdeli kimliksiz istekler dahil) de 429 alır.
+- `/sorgu` ucunda ayrıca eşzamanlılık sınırı vardır (bkz. §3 SQL kuralları: en çok 2 sorgu, anahtar başına 1).
+- Her istek panelde günlüğe yazılır (anahtar, zaman, uç, IP, durum kodu, süre, satır sayısı); günlük 90 gün saklanır (eski satırlar
+  saatte bir budanır).
+- "Yalnız onaylı" anahtarda `durum=bekleyen`/`hepsi` istenirse yok sayılır ve yanıtta `uyari` alanı bunu söyler.
 
 ## 7. Sunucu ayarları (.env)
 
 | Anahtar | Varsayılan | Anlamı |
 |---|---|---|
-| `API_ACIK` | `1` | `0` ise tüm `/api/v1` adresleri 404 döner (anahtarlar silinmez). |
+| `API_ACIK` | `1` | `1`/`evet`/`acik`/`on`/`true`/boş: açık. Başka her değer (`0`, `kapali`, yazım hatası…) kapalı: tüm `/api/v1` adresleri 404 döner (anahtarlar silinmez). |
+| `API_SORGU_ESZAMANLI` | `2` | `/api/v1/sorgu` için sunucu genelinde aynı anda çalışabilecek sorgu (1–6; geçersiz değer 2 sayılır). |
 | `API_DAKIKA_SINIRI` | `120` | Anahtar başına dakikalık istek sınırı (1'den küçük ya da geçersiz değer 120 sayılır). |

@@ -7,7 +7,10 @@ PIL doğrulamasıyla sunucu önbelleğine indirilir; kayıt satırı asla deği�
 """
 import csv
 import hashlib
+import ipaddress
+import logging
 import os
+import socket
 from datetime import datetime, timedelta
 import re
 import tempfile
@@ -16,7 +19,7 @@ import time
 import unicodedata
 import warnings
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlsplit
 
 from .excel_oku import link_turu_ve_kimlik
 
@@ -27,7 +30,14 @@ MAX_IMAGE_PIXELS = 25_000_000
 GYAZO_HOSTLAR = ("gyazo.com", "i.gyazo.com")
 GYAZO_KAYNAK = "https://i.gyazo.com/{id}.jpg"
 GYAZO_MAX_BYTES = 20 * 1024 * 1024
-GYAZO_ZAMAN_ASIMI = 15
+GYAZO_ZAMAN_ASIMI = 15              # okuma zaman aşımı (sn); bağlantı zaman aşımı BAGLANTI_ZAMAN_ASIMI
+BAGLANTI_ZAMAN_ASIMI = 5
+DIS_TOPLAM_SURE_SN = 30             # 2.3.2-inc: tek indirmenin (yönlendirmeler + gövde) toplam süre üst sınırı
+GORSEL_ISTEK_BEKLEME_SN = 10        # /gorsel isteği indirme yuvası için en çok bu kadar bekler
+TOPLU_BEKLEME_SN = 20               # toplu/gece kopyalamada yuva beklemesi
+ARKA_PLAN_ESZAMANLI = 2             # /kucuk isteklerinin arka planda başlattığı en çok eşzamanlı dış indirme
+YONLENDIRME_SINIRI = 5
+ERISIM_ATLAMA_ESIGI = 3             # bir dış servis art arda bu kadar FARKLI bağlantıda bağlantı kuramazsa çalıştırmada atlanır
 GYAZO_OLUMSUZ_SN = 600
 GYAZO_BICIMLER = {"JPEG": ".jpg", "PNG": ".png"}
 # Önbellek sınırları (AYAR'da yoksa bu varsayılanlar) ve temizlik davranışı.
@@ -51,16 +61,122 @@ _SNAPPARK_YOL_RX = re.compile(r"^/s/([A-Za-z0-9_-]{3,64})(?:/raw)?/?$")
 _TEST_HOST_RX = re.compile(r"^(127\.0\.0\.1|localhost):(\d{2,5})$")
 
 
-def _host_izinli(url, hostlar):
-    """http(s) ve host tam eşleşme ya da izinli hostun alt alan adı (``evil-gyazo.com`` / ``gyazo.com.evil`` reddedilir)."""
+_GUVENSIZ_URL_KARAKTER = re.compile(r"[^\x21-\x7e]|[\\@]")  # boşluk, kontrol, ASCII dışı, ters bölü, '@' (userinfo)
+_logger = logging.getLogger(__name__)
+
+
+def _guvenli_url(url, izinli_hostlar, test_host=None):
+    """2.3.2-inc: ortak URL/yönlendirme denetimi (SSRF). True yalnız şu durumda:
+
+    * metin, en çok 2048 karakter; boşluk, kontrol karakteri, ASCII dışı karakter, ters bölü ya da '@' YOK
+      (``http://İÇ-IP\\@img.snappark.net/`` gibi ayrıştırıcı farkı yükleri baştan reddedilir);
+    * şema https; host ``urlsplit`` ile okunur ve izinli listedeki bir hostla TAM eşleşir (sonek/alt alan adı değil);
+      port yok ya da 443; IPv6/IP değişmezi izinli listede olmadığı için reddedilir;
+    * ``urllib3.util.parse_url`` aynı hostu okumalıdır (iki ayrıştırıcı aynı sonucu vermezse ret);
+    * istisna: ``test_host`` ("127.0.0.1:PORT", yalnız DIS_GORSEL_TEST_HOST) ile netloc birebir aynıysa http/https kabul.
+    """
+    if not isinstance(url, str) or not url or len(url) > 2048 or _GUVENSIZ_URL_KARAKTER.search(url):
+        return False
     try:
-        parts = urlparse(url)
+        parts = urlsplit(url)
+        port = parts.port
+        host = (parts.hostname or "").lower()
     except ValueError:
         return False
-    if parts.scheme not in ("http", "https") or not parts.hostname:
+    if not host or parts.username is not None or parts.password is not None:
         return False
-    host = parts.hostname.lower()
-    return any(host == h or host.endswith("." + h) for h in hostlar)
+    try:
+        from urllib3.util import parse_url
+        u3 = parse_url(url)
+        if (u3.host or "").lower().strip("[]") != host or u3.auth:
+            return False
+    except Exception:
+        return False
+    if test_host and parts.scheme in ("http", "https") and parts.netloc.lower() == str(test_host).lower():
+        return True
+    if parts.scheme != "https" or port not in (None, 443):
+        return False
+    return host in {str(h).lower() for h in izinli_hostlar}
+
+
+def _host_izinli(url, hostlar):
+    """Geriye uyum adı: ``_guvenli_url`` (test hostu yok)."""
+    return _guvenli_url(url, hostlar)
+
+
+class IcAdresHatasi(Exception):
+    """Hostun çözüldüğü adres özel/loopback/link-local vb. (SSRF koruması): bağlantı kurulmadı."""
+
+
+def _ic_adres_mi(ip_metni):
+    try:
+        ip = ipaddress.ip_address(str(ip_metni).split("%", 1)[0])
+    except ValueError:
+        return True
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return (not ip.is_global) or ip.is_multicast or ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved \
+        or ip.is_unspecified
+
+
+def _adres_denetle(host, port, test_host=None):
+    """Bağlanmadan önce hostun çözüldüğü TÜM adresleri denetler. Test hostu (yalnız DIS_GORSEL_TEST_HOST) birebir eşleşirse muaf."""
+    import requests
+    if test_host and ("%s:%s" % (host, port)).lower() == str(test_host).lower():
+        return
+    try:
+        adresler = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError, OSError) as e:
+        hata = requests.exceptions.ConnectionError("DNS çözümlenemedi: %s (%s)" % (host, type(e).__name__))
+        hata.kanit_erisim = True
+        raise hata
+    if not adresler:
+        hata = requests.exceptions.ConnectionError("DNS çözümlenemedi: %s" % host)
+        hata.kanit_erisim = True
+        raise hata
+    for adres in adresler:
+        if _ic_adres_mi(adres[4][0]):
+            raise IcAdresHatasi("%s iç ağ adresine çözülüyor; bağlanılmadı" % host)
+
+
+def _guvenli_adaptor(test_host_al):
+    """requests HTTPAdapter: her istekten önce hedef hostun çözüldüğü IP'leri denetler (vekil kullanılıyorsa vekil denetler)."""
+    from requests.adapters import HTTPAdapter
+    from requests.utils import select_proxy
+
+    class GuvenliAdaptor(HTTPAdapter):
+        def send(self, request, **kw):
+            parts = urlsplit(request.url)
+            proxy = select_proxy(request.url, kw.get("proxies") or {})
+            if not proxy:
+                _adres_denetle(parts.hostname or "", parts.port or (443 if parts.scheme == "https" else 80), test_host_al())
+            return super().send(request, **kw)
+    return GuvenliAdaptor(max_retries=0)
+
+
+def _hata_turu(e):
+    """İndirme istisnasını sınıflar: 'ic_adres' | 'erisim' (DNS, bağlantı reddi, bağlantı zaman aşımı) | 'hata' (bağlantıya özgü)."""
+    if isinstance(e, IcAdresHatasi):
+        return "ic_adres"
+    try:
+        import requests
+        from urllib3.exceptions import ConnectTimeoutError, MaxRetryError, NewConnectionError
+    except Exception:  # pragma: no cover
+        return "hata"
+    if getattr(e, "kanit_erisim", False) or isinstance(e, requests.exceptions.ConnectTimeout):
+        return "erisim"
+    if isinstance(e, requests.exceptions.ConnectionError):
+        ic = e.args[0] if e.args else None
+        if isinstance(ic, MaxRetryError):
+            ic = ic.reason
+        if isinstance(ic, (NewConnectionError, ConnectTimeoutError)):
+            return "erisim"
+        return "hata"
+    if isinstance(e, requests.exceptions.RequestException):
+        return "hata"
+    if isinstance(e, (socket.gaierror, ConnectionRefusedError)) or (isinstance(e, OSError) and type(e) is OSError):
+        return "erisim"
+    return "hata"
 
 
 def dis_gorsel_cozumle(link):
@@ -339,9 +455,16 @@ class GorselCozucu:
         self.dis_hostlar = {k: tuple(v) for k, v in DIS_GORSEL_HOSTLAR.items()}
         self._dis_son_durum = None
         self._dis_semafor = threading.BoundedSemaphore(4)
+        # 2.3.2-inc: /kucuk isteği dış indirmeyi beklemez; arka planda en çok ARKA_PLAN_ESZAMANLI indirme başlatır.
+        self._arka_semafor = threading.BoundedSemaphore(ARKA_PLAN_ESZAMANLI)
+        self._arka_kilit = threading.Lock()
+        self._arka_aktif = set()
         # Yalnız yerel uçtan uca test: dış adayların hepsi bu loopback sunucuya yönlendirilir (127.0.0.1/localhost dışı yok sayılır).
         m = _TEST_HOST_RX.match(str(ayar.get("DIS_GORSEL_TEST_HOST") or "").strip())
         self.dis_test_host = m.group(0) if m else None
+        if self.dis_test_host:
+            _logger.warning("DIS_GORSEL_TEST_HOST etkin (%s): dış görseller bu yerel test sunucusundan alınır. "
+                            "Canlı sunucuda .env'den bu satırı silin.", self.dis_test_host)
         # Önbellek sınırları (bayt / saniye); 0 = sınır yok. Temizlik kilidi tek iş parçacığında çalışır.
         self.gyazo_sinir_bayt = _onbellek_siniri(ayar, "GYAZO_ONBELLEK_MB", 1024 * 1024)
         self.gyazo_yas_sn = _onbellek_siniri(ayar, "GYAZO_ONBELLEK_GUN", 86400)
@@ -502,7 +625,7 @@ class GorselCozucu:
         return bool(self._gyazo_onbellek(kimlik)) or not self._gyazo_olumsuz(kimlik)
 
     def _gyazo_host_izinli(self, url):
-        return _host_izinli(url, self.gyazo_hostlar)
+        return _guvenli_url(url, self.gyazo_hostlar, self.dis_test_host)
 
     def _gyazo_onbellek(self, kimlik):
         return self._onbellekte(self.gyazo_klasor, kimlik)
@@ -555,7 +678,11 @@ class GorselCozucu:
     def _gyazo_http(self):
         if self._http is None:
             import requests
-            self._http = requests.Session()
+            oturum = requests.Session()
+            adaptor = _guvenli_adaptor(lambda: self.dis_test_host)
+            oturum.mount("https://", adaptor)
+            oturum.mount("http://", adaptor)
+            self._http = oturum
         return self._http
 
     def _gyazo_getir(self, url):
@@ -565,26 +692,41 @@ class GorselCozucu:
         return self._sinirli_getir(url, self._gyazo_host_izinli, GYAZO_MAX_BYTES, durum)
 
     def _sinirli_getir(self, url, izinli, en_cok_bayt, durum_yaz, sadece_gorsel=False):
-        """Ortak indirici: en çok 5 yönlendirme, her adımda host allowlist, Content-Length ve akış boyut sınırı.
+        """Ortak indirici: en çok 5 yönlendirme, her adımda ``_guvenli_url`` denetimi, Content-Length ve akış boyut sınırı,
+        bağlantı 5 sn / okuma 15 sn / toplam DIS_TOPLAM_SURE_SN zaman sınırı.
 
         ``sadece_gorsel``: 200 yanıtı ``Content-Type: image/*`` değilse reddedilir (giriş sayfası / HTML).
+        Durumlar: HTTP kodu ya da 'izinsiz' (izin verilmeyen adres/yönlendirme), 'zaman_asimi', 'gorsel_degil', 'buyuk', 'yonlendirme'.
         """
         http = self._gyazo_http()
-        for _ in range(5):
+        bitis = time.monotonic() + DIS_TOPLAM_SURE_SN
+        for _ in range(YONLENDIRME_SINIRI + 1):
             if not izinli(url):
+                durum_yaz("izinsiz")
                 return None
-            r = http.get(url, stream=True, timeout=(5, GYAZO_ZAMAN_ASIMI), allow_redirects=False,
+            kalan = bitis - time.monotonic()
+            if kalan <= 0:
+                durum_yaz("zaman_asimi")
+                return None
+            r = http.get(url, stream=True, timeout=(min(BAGLANTI_ZAMAN_ASIMI, kalan), min(GYAZO_ZAMAN_ASIMI, kalan)), allow_redirects=False,
                          headers={"User-Agent": "KanitPaneli/2.3", "Accept": "image/*"})
             durum_yaz(getattr(r, "status_code", None))
             try:
                 if r.status_code in (301, 302, 303, 307, 308):
                     hedef = r.headers.get("Location", "")
-                    if not hedef:
+                    if not hedef or not isinstance(hedef, str) or _GUVENSIZ_URL_KARAKTER.search(hedef):
+                        _logger.warning("Dış görsel yönlendirmesi reddedildi (geçersiz Location).")
+                        durum_yaz("izinsiz")
                         return None
-                    if sadece_gorsel:
-                        url = urljoin(url, hedef)
-                    else:
-                        url = hedef if "://" in hedef else urlparse(url)._replace(path=hedef, query="").geturl()
+                    url = urljoin(url, hedef)  # göreli Location güvenle birleştirilir; sonuç döngü başında yeniden denetlenir
+                    if not izinli(url):
+                        try:
+                            host = urlsplit(url).hostname
+                        except ValueError:
+                            host = None
+                        _logger.warning("Dış görsel yönlendirmesi izinli olmayan adrese reddedildi: %s", str(host or "?")[:100])
+                        durum_yaz("izinsiz")
+                        return None
                     continue
                 if r.status_code != 200:
                     return None
@@ -600,7 +742,10 @@ class GorselCozucu:
                     return None
                 parcalar = []
                 toplam = 0
-                for parca in r.iter_content(65536):
+                for parca in self._parcalar(r):
+                    if time.monotonic() > bitis:
+                        durum_yaz("zaman_asimi")
+                        return None
                     toplam += len(parca)
                     if toplam > en_cok_bayt:
                         if sadece_gorsel:
@@ -613,6 +758,21 @@ class GorselCozucu:
         if sadece_gorsel:
             durum_yaz("yonlendirme")
         return None
+
+    @staticmethod
+    def _parcalar(r, boyut=65536):
+        """Gövde parçaları. Gerçek urllib3 yanıtında ``read1`` (gelen kadarını hemen verir): damlatan sunucuda bile toplam süre
+        denetimi her parçada çalışır. Sahte/eski yanıtlarda ``iter_content``."""
+        ham = getattr(r, "raw", None)
+        oku = getattr(ham, "read1", None)
+        if callable(oku) and hasattr(ham, "_fp"):
+            while True:
+                parca = oku(boyut, decode_content=True)
+                if not parca:
+                    return
+                yield parca
+        else:
+            yield from r.iter_content(boyut)
 
     @staticmethod
     def _gorsel_dogrula(veri):
@@ -662,7 +822,7 @@ class GorselCozucu:
             return None
         return hedef
 
-    def gyazo_indir(self, kayit):
+    def gyazo_indir(self, kayit, bekle=TOPLU_BEKLEME_SN):
         """Gyazo bağlantısını sunucu tarafında indirir, doğrular ve önbellekler.
 
         Dönüş: yerel önbellek yolu ya da None. Başarısız kimlikler 10 dakika
@@ -679,7 +839,7 @@ class GorselCozucu:
             return yol
         if self._gyazo_olumsuz(kimlik):
             return None
-        if not self._gyazo_semafor.acquire(timeout=20):
+        if not self._gyazo_semafor.acquire(timeout=max(0, bekle)):
             return None
         try:
             yol = self._gyazo_onbellek(kimlik)
@@ -688,9 +848,9 @@ class GorselCozucu:
             self._gyazo_son_durum = None
             try:
                 veri = self._gyazo_getir(self.gyazo_kaynak.format(id=kimlik))
-            except Exception:
+            except Exception as e:
                 veri = None
-                self._gyazo_son_durum = "hata"
+                self._gyazo_son_durum = "hata" if _hata_turu(e) != "ic_adres" else "ic_adres"
             if not veri:
                 self._gyazo_olumsuz_yaz(kimlik)
                 return None
@@ -746,11 +906,10 @@ class GorselCozucu:
 
     def _dis_izinli(self, tur):
         hostlar = tuple(self.dis_hostlar.get(tur, ()))
-        if self.dis_test_host:
-            hostlar += (self.dis_test_host.rsplit(":", 1)[0],)
-        return lambda url: _host_izinli(url, hostlar)
+        test_host = self.dis_test_host  # 2.3.2-inc: yalnız tam host:port (önceden portsuz 127.0.0.1 / localhost'un her portu)
+        return lambda url: _guvenli_url(url, hostlar, test_host)
 
-    def dis_indir(self, kayit):
+    def dis_indir(self, kayit, bekle=TOPLU_BEKLEME_SN):
         """Snappark/Teamzone görselini Gyazo ile aynı sınırlarla indirir ve ``tmp/dis/<sha1>.(jpg|png)`` olarak saklar.
 
         Teamzone için adaylar sırayla denenir (i.gyazo.com .png → .jpg → Teamzone adresi); yalnız image/* yanıt kabul edilir.
@@ -768,7 +927,7 @@ class GorselCozucu:
             return yol
         if self._olumsuz_mu(self.dis_klasor, anahtar):
             return None
-        if not self._dis_semafor.acquire(timeout=20):
+        if not self._dis_semafor.acquire(timeout=max(0, bekle)):
             return None
         try:
             yol = self._onbellekte(self.dis_klasor, anahtar)
@@ -784,9 +943,10 @@ class GorselCozucu:
                     son["d"] = kod
                 try:
                     veri = self._sinirli_getir(self._dis_test_url(aday), izinli, DIS_MAX_BYTES, yaz, sadece_gorsel=True)
-                except Exception:
+                except Exception as e:
+                    # 2.3.2-inc: bağlantı düzeyi ('erisim': DNS/ret/bağlantı zaman aşımı) ile bağlantıya özgü hata ('hata') ayrılır.
                     veri = None
-                    son["d"] = "hata"
+                    son["d"] = _hata_turu(e)
                 if veri:
                     dogru = self._gorsel_dogrula(veri)
                     if dogru:
@@ -795,12 +955,15 @@ class GorselCozucu:
                     veri = None
                     son["d"] = "bozuk"
                 durumlar.append(son["d"])
-                if son["d"] in (429, "hata"):
-                    break  # hız sınırı / ağ hatası: diğer adaylarla sunucuyu yüklemeyiz
+                if son["d"] in (429, "erisim"):
+                    break  # hız sınırı / servise bağlanılamıyor: diğer adaylarla sunucuyu yüklemeyiz
             if not veri:
-                # Raporlanacak durum: 429 > ağ hatası > ilk anlamlı HTTP durumu (ör. .png 404 iken son aday 'gorsel_degil').
-                self._dis_son_durum = next((d for d in durumlar if d == 429), None) or next((d for d in durumlar if d == "hata"), None) \
-                    or next((d for d in durumlar if d not in (None, 404)), None) or (durumlar[0] if durumlar else None)
+                # Raporlanacak durum: 429 > bağlantı kurulamadı > iç adres > (yalnız TÜM adaylar hata verdiyse) 'hata' >
+                # ilk anlamlı HTTP durumu (ör. .png 404 iken son aday 'gorsel_degil').
+                self._dis_son_durum = next((d for d in durumlar if d == 429), None) or next((d for d in durumlar if d == "erisim"), None) \
+                    or next((d for d in durumlar if d == "ic_adres"), None) \
+                    or ("hata" if durumlar and all(d == "hata" for d in durumlar) else None) \
+                    or next((d for d in durumlar if d not in (None, 404, "hata")), None) or (durumlar[0] if durumlar else None)
                 self._olumsuz_yaz(self.dis_klasor, anahtar)
                 return None
             self._dis_son_durum = 200
@@ -877,20 +1040,71 @@ class GorselCozucu:
         durum["son_temizlik_raporu"] = son["rapor"] if son else None
         return durum
 
-    def gorsel_yolu(self, kayit):
-        """Ana (veya ``_gorsel2``) görselin yolu ve kaynağı: yerel, gyazo, snappark, teamzone veya yok."""
+    def gorsel_yolu(self, kayit, bekle=TOPLU_BEKLEME_SN, arka_plan=False):
+        """Ana (veya ``_gorsel2``) görselin yolu ve kaynağı: yerel, gyazo, snappark, teamzone, hazirlaniyor veya yok.
+
+        ``bekle``: indirme yuvası için en çok bekleme (sn). ``arka_plan=True`` (liste/galeri küçük resmi): önbellekte yoksa
+        istek BEKLEMEZ; indirme arka planda başlatılır (yuva doluysa başlatılmaz) ve ``(None, "hazirlaniyor")`` döner.
+        """
         yol, kaynak = self.yerel_dosya(kayit)
         if yol:
             return yol, kaynak
-        yol = self.gyazo_indir(kayit)
+        if arka_plan:
+            kimlik = self.gyazo_kimlik(kayit) if self.gyazo_acik else None
+            yol = self._gyazo_onbellek(kimlik) if kimlik else None
+            if yol:
+                return yol, "gyazo"
+            coz = self.dis_cozum(kayit) if self.dis_acik else None
+            yol = self._onbellekte(self.dis_klasor, coz["anahtar"]) if coz else None
+            if yol:
+                return yol, coz["tur"]
+            if self.gyazo_mumkun(kayit) or self.dis_mumkun(kayit):
+                self.arka_planda_indir(kayit)
+                return None, "hazirlaniyor"
+            return None, "yok"
+        yol = self.gyazo_indir(kayit, bekle=bekle)
         if yol:
             return yol, "gyazo"
         coz = self.dis_cozum(kayit)
         if coz:
-            yol = self.dis_indir(kayit)
+            yol = self.dis_indir(kayit, bekle=bekle)
             if yol:
                 return yol, coz["tur"]
         return None, "yok"
+
+    def arka_planda_indir(self, kayit):
+        """Dış/Gyazo görselini arka plan iş parçacığında indirir (en çok ARKA_PLAN_ESZAMANLI). Başlatıldıysa ya da zaten
+        sürüyorsa True; yuva doluysa False (istek yine hemen yer tutucu alır, sonraki açılışta yeniden denenir)."""
+        kimlik = self.gyazo_kimlik(kayit) if self.gyazo_acik else None
+        coz = None if kimlik else self.dis_cozum(kayit)
+        anahtar = ("g:" + kimlik) if kimlik else (("d:" + coz["anahtar"]) if coz else None)
+        if not anahtar:
+            return False
+        with self._arka_kilit:
+            if anahtar in self._arka_aktif:
+                return True
+            if not self._arka_semafor.acquire(blocking=False):
+                return False
+            self._arka_aktif.add(anahtar)
+        kopya = dict(kayit)
+
+        def is_():
+            try:
+                self.gorsel_yolu(kopya, bekle=GORSEL_ISTEK_BEKLEME_SN)
+            except Exception:  # arka plan işi hiçbir isteği düşürmez
+                pass
+            finally:
+                with self._arka_kilit:
+                    self._arka_aktif.discard(anahtar)
+                self._arka_semafor.release()
+        try:
+            threading.Thread(target=is_, name="kanit-gorsel-arka", daemon=True).start()
+        except Exception:
+            with self._arka_kilit:
+                self._arka_aktif.discard(anahtar)
+            self._arka_semafor.release()
+            return False
+        return True
 
     def gecerli(self, yol):
         """Dosya gerçekten açılabilir bir görsel mi? (bozuk/kesik/aşırı büyük → False)
@@ -1077,14 +1291,18 @@ def arsiv_tara(ayar, conn, cozucu):
 
 # ------------------------------------------------------------------ Toplu Gyazo ön-indirme (CLI: gyazo-onbellekle)
 _GYAZO_SEBEP = {404: "Gyazo'da görsel yok (404)", 410: "Gyazo görseli kaldırmış (410)", 403: "Gyazo erişimi reddetti (403)",
-                429: "Gyazo hız sınırı (429)", "hata": "ağ hatası / zaman aşımı"}
+                429: "Gyazo hız sınırı (429)", "hata": "ağ hatası / zaman aşımı",
+                "erisim": "bağlantı kurulamadı (DNS / bağlantı reddi / zaman aşımı)", "ic_adres": "iç ağ adresine çözülüyor (güvenlik nedeniyle indirilmedi)",
+                "izinsiz": "izin verilmeyen adrese yönlendirme (güvenlik nedeniyle izlenmedi)", "zaman_asimi": "indirme 30 sn'de bitmedi"}
 GYAZO_TOPLU_429_BEKLEME = (30, 60, 120, 300)
 
 
 _SERVIS_EKI = {"Gyazo": "'da", "Snappark": "'ta", "Teamzone": "'da"}
 _DIS_SEBEP = {"gorsel_degil": "görsel değil (giriş sayfası ya da oturum gerekiyor olabilir)",
               "bozuk": "indirilen dosya bozuk ya da görsel değil", "buyuk": "görsel çok büyük (20 MB sınırı)",
-              "yonlendirme": "çok fazla yönlendirme"}
+              "yonlendirme": "çok fazla yönlendirme", "erisim": "bağlantı kurulamadı (DNS / bağlantı reddi / zaman aşımı)",
+              "ic_adres": "iç ağ adresine çözülüyor (güvenlik nedeniyle indirilmedi)",
+              "izinsiz": "izin verilmeyen adrese yönlendirme (güvenlik nedeniyle izlenmedi)", "zaman_asimi": "indirme 30 sn'de bitmedi"}
 
 
 def _gyazo_sebep(durum, servis="Gyazo"):
@@ -1122,8 +1340,9 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
     30/60/120/300 s bekler; yine 429 ise durur ve sonraki çalıştırma kaldığı yerden sürer.
     Kayıt satırları hiçbir zaman değiştirilmez; yalnız önbellek dosyaları ve rapor dosyası yazılır.
     """
-    if not getattr(cozucu, "gyazo_acik", False):
-        raise ValueError("GYAZO_PROXY kapalı; önce .env içinde GYAZO_PROXY=1 yapın.")
+    gyazo_acik = bool(getattr(cozucu, "gyazo_acik", False))
+    if not gyazo_acik and not getattr(cozucu, "dis_acik", False):
+        raise ValueError("GYAZO_PROXY ve DIS_GORSEL_PROXY kapalı; önce .env içinde GYAZO_PROXY=1 (ya da DIS_GORSEL_PROXY=1) yapın.")
     uyku = uyku or time.sleep
     log = log or (lambda metin: None)
     simdi = simdi or (lambda: datetime.now(getattr(bitis, "tzinfo", None)))
@@ -1133,7 +1352,7 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
     turler = {t: {"baglanti": 0, "indirilen": 0, "zaten_var": 0, "acilamayan": 0, "taninmayan": 0} for t in ("gyazo", "snappark", "teamzone")}
     acilamayan = []
     gorulen = {}
-    if on_kontrol:
+    if on_kontrol and gyazo_acik:
         try:
             r = cozucu._gyazo_http().get(cozucu.gyazo_kaynak.format(id="0" * 32), stream=True, timeout=(5, 10), allow_redirects=False,
                                          headers={"User-Agent": "KanitPaneli/2.3", "Accept": "image/*"})
@@ -1168,6 +1387,9 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
             k = dict(r)
             k["_gorsel2"] = ikinci
             if "gyazo.com/" in dusuk and "teamzone" not in dusuk:  # teamzone.gyazo.com ayrı bir hizmet, Gyazo kimliği taşımaz
+                if not gyazo_acik:  # GYAZO_PROXY=0: Gyazo bağlantıları bu çalıştırmada denenmez, dış servisler yine kopyalanır
+                    turler["gyazo"]["taninmayan"] += 1
+                    continue
                 adaylar.append((r, link, k, "gyazo", None))
                 continue
             if "snappark" not in dusuk and "teamzone.gyazo" not in dusuk:
@@ -1207,7 +1429,9 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
         toplam, turler["gyazo"]["baglanti"], turler["snappark"]["baglanti"], turler["teamzone"]["baglanti"],
         "; bu çalıştırmada en çok %d yeni indirme" % yeni_en_cok if yeni_en_cok else ""))
     islenen = 0
-    erisim_yok = set()   # ilk denemesi ağ hatasıyla biten dış servisler (bu çalıştırmada atlanır)
+    erisim_yok = set()   # art arda ERISIM_ATLAMA_ESIGI farklı bağlantıda bağlantı kuramayan dış servisler (bu çalıştırmada atlanır)
+    hiz_siniri = set()   # 429'u sürdüğü için bu çalıştırmada durdurulan dış servisler (Gyazo ve diğer servisler sürer)
+    ardisik = {}         # tür -> art arda 'erisim' veren farklı bağlantı sayısı (başka her sonuçta sıfırlanır)
     basarili = set()     # bu çalıştırmada en az bir indirmesi başarılı olan servisler
     for i, (r, link, k, tur, coz) in enumerate(adaylar, 1):
         servis = DIS_GORSEL_ADLARI[tur]
@@ -1218,13 +1442,15 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
         else:
             kimlik = tur + ":" + coz["anahtar"]
             onbellekte = kimlik not in gorulen and bool(cozucu.dis_onbellek(coz))
-            if not onbellekte and kimlik not in gorulen and tur in erisim_yok:
+            if not onbellekte and kimlik not in gorulen and (tur in erisim_yok or tur in hiz_siniri):
                 islenen = i
                 gorulen[kimlik] = False
                 sayac["kimlik"] += 1
                 sayac["acilamayan"] += 1
                 t["acilamayan"] += 1
-                acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, "%s'a ulaşılamıyor (bu çalıştırmada denenmedi)" % servis))
+                sebep = ("%s'a ulaşılamıyor (art arda %d bağlantı kurulamadı; bu çalıştırmada denenmedi)" % (servis, ERISIM_ATLAMA_ESIGI)
+                         if tur in erisim_yok else "%s hız sınırı sürüyor (bu çalıştırmada denenmedi)" % servis)
+                acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, sebep))
                 if ilerleme and (i % 100 == 0 or i == toplam):
                     ilerleme(i, toplam, dict(sayac))
                 continue
@@ -1260,7 +1486,7 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
             sayac["denenen"] += 1
             _yok_sil(kimlik, tur)
             yol, durum = _dene(k, tur)
-            if not yol and (durum == "hata" or (isinstance(durum, int) and durum >= 500)):
+            if not yol and (durum in ("hata", "erisim") or (isinstance(durum, int) and durum >= 500)):
                 log("%d/%d %s… geçici hata (%s); 5 sn sonra bir kez daha" % (i, toplam, etiket, _gyazo_sebep(durum, servis)))
                 uyku(5)
                 _yok_sil(kimlik, tur)
@@ -1268,11 +1494,15 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
             for bekle in GYAZO_TOPLU_429_BEKLEME:
                 if yol or durum != 429:
                     break
+                if bitis is not None and simdi() + timedelta(seconds=bekle) >= bitis:
+                    break  # bekleme gece penceresini aşardı: aşağıda 429 olarak raporlanır
                 sayac["hiz_siniri_bekleme_sn"] += bekle
                 log("%d/%d %s hız sınırı (429); %d sn bekleniyor…" % (i, toplam, servis, bekle))
                 uyku(bekle)
                 _yok_sil(kimlik, tur)
                 yol, durum = _dene(k, tur)
+            if tur != "gyazo":
+                ardisik[tur] = ardisik.get(tur, 0) + 1 if (not yol and durum == "erisim") else 0
             if yol:
                 gorulen[kimlik] = True
                 basarili.add(tur)
@@ -1289,12 +1519,18 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
                 t["acilamayan"] += 1
                 acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, _gyazo_sebep(durum, servis)))
                 log("%d/%d %s… açılamadı: %s" % (i, toplam, etiket, _gyazo_sebep(durum, servis)))
-                if tur != "gyazo" and durum == "hata" and tur not in basarili:
+                if tur != "gyazo" and ardisik.get(tur, 0) >= ERISIM_ATLAMA_ESIGI:
+                    # 2.3.2-inc: yalnız bağlantı düzeyi hatalar (DNS, bağlantı reddi/zaman aşımı) art arda 3 farklı bağlantıda
+                    # görülünce servis atlanır; HTTP 4xx/5xx, yönlendirme ve gövde hataları yalnız o bağlantıyı açılamayan sayar.
                     erisim_yok.add(tur)
-                    log("%s'a ulaşılamıyor (ağ hatası); kalan %s bağlantıları bu çalıştırmada denenmeyecek. "
+                    log("%s'a art arda %d bağlantıda ulaşılamadı; kalan %s bağlantıları bu çalıştırmada denenmeyecek. "
                         "Sunucunun dış HTTPS erişimini kontrol edin: curl -sS -o /dev/null -w '%%{http_code}\\n' --max-time 20 %s"
-                        % (servis, servis, coz["adaylar"][0]))
-                if durum == 429:
+                        % (servis, ERISIM_ATLAMA_ESIGI, servis, coz["adaylar"][0]))
+                if durum == 429 and tur != "gyazo":
+                    hiz_siniri.add(tur)
+                    log("%s hız sınırı (429) sürüyor; kalan %s bağlantıları bu çalıştırmada denenmeyecek, diğer servisler sürüyor."
+                        % (servis, servis))
+                elif durum == 429:
                     sayac["bitis_nedeni"] = "hiz_siniri"
                     sayac["durduruldu"] = ("%s hız sınırı sürüyor; %d/%d bağlantı işlendi. 15 dakika sonra aynı komutu yeniden çalıştırın "
                                            "(kaldığı yerden devam eder)." % (servis, i, toplam))
@@ -1320,15 +1556,21 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
     sonuc.update({"sure_sn": round(time.monotonic() - t0, 1), "rapor": rapor_yolu, "acilamayan_ornek": acilamayan[:20], "turler": turler})
     if erisim_yok:
         sonuc["dis_erisim_yok"] = sorted(DIS_GORSEL_ADLARI[t] for t in erisim_yok)
+    if hiz_siniri:
+        sonuc["dis_hiz_siniri"] = sorted(DIS_GORSEL_ADLARI[t] for t in hiz_siniri)
     try:
         durum = cozucu.onbellek_durumu()
-        g = durum.get("gyazo") if isinstance(durum, dict) else None
-        if isinstance(g, dict):
-            sonuc["onbellek_gyazo_mb"] = g.get("mb")
-            sonuc["onbellek_sinir_mb"] = g.get("sinir_mb")
-            if g.get("sinir_mb") and g.get("mb") and g["mb"] > 0.8 * g["sinir_mb"]:
-                sonuc["uyari"] = ("Gyazo önbelleği sınırına yaklaştı (%s / %s MB); sınır dolunca en eski kopyalar silinir. "
-                                  ".env içinde GYAZO_ONBELLEK_MB değerini yükseltin (örn. 5000) ve kanit-web'i yeniden başlatın." % (g["mb"], g["sinir_mb"]))
+        for ad, etiket in (("gyazo", "Gyazo"), ("dis", "Dış görsel (Snappark/Teamzone)")):
+            g = durum.get(ad) if isinstance(durum, dict) else None
+            if not isinstance(g, dict):
+                continue
+            sonuc["onbellek_%s_mb" % ad] = g.get("mb")
+            if ad == "gyazo":
+                sonuc["onbellek_sinir_mb"] = g.get("sinir_mb")
+            if g.get("sinir_mb") and g.get("mb") and g["mb"] > 0.8 * g["sinir_mb"] and "uyari" not in sonuc:
+                sonuc["uyari"] = ("%s önbelleği sınırına yaklaştı (%s / %s MB); sınır dolunca en eski kopyalar silinir. "
+                                  ".env içinde GYAZO_ONBELLEK_MB değerini yükseltin (örn. 5000; Gyazo ve dış görsel kopyalarına ayrı ayrı "
+                                  "uygulanır) ve kanit-web'i yeniden başlatın." % (etiket, g["mb"], g["sinir_mb"]))
     except Exception:
         pass
     return sonuc

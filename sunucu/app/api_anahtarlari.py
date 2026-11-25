@@ -6,7 +6,6 @@ import hashlib
 import hmac
 import json
 import math
-import random
 import re
 import secrets
 import string
@@ -21,7 +20,9 @@ ONEK = 'kp_'
 _ALFABE = string.ascii_letters + string.digits
 ANAHTAR_RX = re.compile(r'^kp_[A-Za-z0-9]{40}$')
 PROJE_RX = re.compile(r'^[A-Z0-9_]{1,24}$')
-GUNLUK_SAKLAMA_GUN = 90  # api_gunlugu satırları bu kadar gün tutulur (ara ara budanır)
+GUNLUK_SAKLAMA_GUN = 90  # api_gunlugu satırları bu kadar gün tutulur
+GUNLUK_BUDAMA_ARALIGI_SN = 3600  # budama süreç başına en çok saatte bir (ilk yazmada hemen)
+_SON_BUDAMA = -1e9
 
 
 def uret():
@@ -159,9 +160,21 @@ def gunluk_yaz(conn, anahtar_id, uc, ip, durum_kodu, sure_ms, satir):
         if anahtar_id:
             conn.execute('UPDATE api_anahtarlari SET son_kullanim=?,son_ip=?,istek_sayisi=istek_sayisi+1 WHERE id=?',
                          (db.simdi(), str(ip or '')[:45], anahtar_id))
-        if random.random() < 0.005:
-            esik = (datetime.now() - timedelta(days=GUNLUK_SAKLAMA_GUN)).strftime('%Y-%m-%d %H:%M:%S')
-            conn.execute('DELETE FROM api_gunlugu WHERE zaman<?', (esik,))
+    # 2.3.2-inc: budama rastgele değil, süreç başına en çok saatte bir ve 5000 satırlık partilerle (tek istek uzun kilitlenmez).
+    global _SON_BUDAMA
+    simdi_sn = time.monotonic()
+    if simdi_sn - _SON_BUDAMA >= GUNLUK_BUDAMA_ARALIGI_SN:
+        _SON_BUDAMA = simdi_sn
+        esik = (datetime.now() - timedelta(days=GUNLUK_SAKLAMA_GUN)).strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            for _ in range(20):
+                with db.transaction(conn):
+                    n = conn.execute('DELETE FROM api_gunlugu WHERE id IN (SELECT id FROM api_gunlugu WHERE zaman<? ORDER BY zaman LIMIT 5000)',
+                                     (esik,)).rowcount
+                if n < 5000:
+                    break
+        except Exception:
+            pass
 
 
 class HizSiniri:

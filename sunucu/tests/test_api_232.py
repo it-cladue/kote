@@ -261,6 +261,8 @@ def test_sql_izinli_select_ve_kapsam(web):
     assert sorgu(c, k, 'SELECT count(*) FROM kayitlar WHERE proje=?', ['PA']).json['satirlar'] == [[0]]
     assert sorgu(c, k, 'SELECT metin FROM yorumlar').json['satirlar'] == [['OF yorumu']]  # PA yorumu görünmez
     assert sorgu(c, k, "SELECT label FROM kategoriler WHERE code='cvpsz'").json['satirlar'] == [['CVPS']]
+    assert sorgu(c, k, 'SELECT id, username FROM tg_kullanicilar').json['satirlar'] == []  # 2.3.2-inc: kapsamla süzülür
+    con = db.baglan(a['DB']); con.execute("UPDATE kayitlar SET ekleyen_id='77' WHERE id=?", (ids['of_onay'],)); con.close()
     assert sorgu(c, k, 'SELECT id, username FROM tg_kullanicilar').json['satirlar'] == [['77', 'tguser']]
     r = sorgu(c, k, 'WITH x AS (SELECT personel FROM kayitlar) SELECT personel, count(*) n FROM x GROUP BY personel')
     assert r.status_code == 200 and r.json['satirlar'] == [['ayse', 1]]
@@ -351,15 +353,17 @@ def test_sql_izni_kapali_403(web):
     assert c.get('/api/v1/sorgu', headers=B(k2)).status_code == 405
 
 
-def test_sql_5000_satir_kesme(web):
+def test_sql_satir_siniri_kesme(web):
+    # 2.3.2-inc: satır sınırı 5000 → 1000 (api.SQL_EN_COK_SATIR); toplam boyut sınırı test_inceleme_232'de.
     c, a = web
+    n = api.SQL_EN_COK_SATIR
     con = db.baglan(a['DB'])
     with db.transaction(con):
-        con.executemany('INSERT INTO kayitlar(anahtar,proje,kt,personel) VALUES(?,?,?,?)', [('k%d' % i, 'OF', 1, 'p') for i in range(5003)])
+        con.executemany('INSERT INTO kayitlar(anahtar,proje,kt,personel) VALUES(?,?,?,?)', [('k%d' % i, 'OF', 1, 'p') for i in range(n + 3)])
     con.close()
     _, k = anahtar(a, ['OF'], sql_izni=True)
     r = sorgu(c, k, 'SELECT id FROM kayitlar')
-    assert r.status_code == 200 and r.json['kesildi'] is True and r.json['satir_sayisi'] == 5000 and len(r.json['satirlar']) == 5000
+    assert r.status_code == 200 and r.json['kesildi'] is True and r.json['satir_sayisi'] == n == 1000 and len(r.json['satirlar']) == n
     r = sorgu(c, k, 'SELECT id FROM kayitlar LIMIT 10')
     assert r.json['kesildi'] is False and r.json['satir_sayisi'] == 10
 

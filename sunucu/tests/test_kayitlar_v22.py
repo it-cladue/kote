@@ -196,6 +196,7 @@ def fake_gyazo(web):
     cozucu = panel.COZUCU
     cozucu.gyazo_kaynak = 'http://127.0.0.1:%d/{id}.jpg' % server.port
     cozucu.gyazo_hostlar = ('127.0.0.1',)
+    cozucu.dis_test_host = '127.0.0.1:%d' % server.port  # 2.3.2-inc: loopback/http yalnız tam test host:port ile izinli
     session = requests.Session(); session.trust_env = False; cozucu._http = session
     yield server, cozucu
     server.close()
@@ -230,7 +231,7 @@ def test_gyazo_proxy_refuses_other_hosts_sizes_and_negative_caches(web, fake_gya
     assert detail['gorsel_kaynak'] == 'yok' and not detail['gorsel_var'] and detail['gorsel_url'] is None and detail['dis_link']
     assert cozucu.gyazo_indir({'link': 'https://teamzone.gyazo.com/x/' + GID}) is None
     assert cozucu.gyazo_indir({'link': 'https://example.com/' + GID}) is None
-    cozucu.gyazo_hostlar = ('gyazo.com', 'i.gyazo.com')
+    cozucu.gyazo_hostlar = ('gyazo.com', 'i.gyazo.com'); cozucu.dis_test_host = None
     assert cozucu._gyazo_host_izinli('https://i.gyazo.com/' + GID + '.jpg') and cozucu._gyazo_host_izinli('https://gyazo.com/' + GID)
     for bad in ('https://gyazo.com.evil.example/' + GID, 'https://evil.example/gyazo.com/' + GID, 'ftp://gyazo.com/x', 'http://127.0.0.1/x', ''):
         assert not cozucu._gyazo_host_izinli(bad), bad
