@@ -169,7 +169,7 @@ def test_her_sayfada_csp_ve_nonce(web):
     # Hata sayfaları ve görsel yanıtları da başlık taşır; bozuk görsel yer tutucusunun kendi CSP'si korunur.
     r = c.get('/olmayan-sayfa'); assert r.status_code == 404; _csp_kontrol(r)
     r = c.get(f'/kucuk/{kid}'); assert r.status_code == 200 and 'Content-Security-Policy' in r.headers
-    r = c.get('/static/panel.js?v=2.3.1'); assert r.status_code == 200 and 'Content-Security-Policy' in r.headers
+    r = c.get('/static/panel.js?v=2.3.2'); assert r.status_code == 200 and 'Content-Security-Policy' in r.headers
     assert 'includeSubDomains' not in r.headers.get('Strict-Transport-Security', '')
 
 

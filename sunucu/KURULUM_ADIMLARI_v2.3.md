@@ -288,6 +288,8 @@ curl -fsS http://127.0.0.1:18080/saglik; echo; systemctl is-active kanit-web kan
 
 Beklenen: `DRY-RUN_TAMAM`, `GÜNCELLEME_TAMAM`, `OK`, iki `active`. 2.3.1'e özel isteğe bağlı ayar: raporlama ekibi onaysız kayıtları hiç görmesin istiyorsanız `/opt/kanit-paneli/.env` dosyasına `ONAYSIZ_GORUNUM=gizle` ekleyip `systemctl restart kanit-web`; yazılmazsa kırmızı uyarı modu geçerlidir. İlk hatırlatmaları beklemeden görmek için: `runuser -u kanit -- /opt/kanit-paneli/.venv/bin/python -m app.cli hatirlatma-uret`. Ayrıntı: `DEGISIKLIKLER_v2.3.1.md`.
 
+2.3.2 ile gelenler (aynı `git pull` + güncelleme yolu): Snappark/Teamzone görselleri panelde içeride açılır ve gece planı onları da kopyalar; sunucudan kontrol: `curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' --max-time 20 https://img.snappark.net/s/MduBQ4TiGc/raw/` → `200 image/png`. API anahtarları: Yönetim → API anahtarları; kullanım `API_KULLANIM.md`; API'yi kapatmak için `.env`'e `API_ACIK=0`. Ayrıntı: `DEGISIKLIKLER_v2.3.2.md`.
+
 ## Sorun çıkarsa
 
 - Güncelleme hatası: betik kendisi geri alır; notu `/var/backups/kanit-paneli/<tarih>/GERI_DONUS_NOTU.txt`.
