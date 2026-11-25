@@ -567,13 +567,21 @@ def kayit_sozluk(row):
     d['silindi']=1 if d.get('silindi') else 0; d['kt']=1 if d.get('kt') else 0
     try: path,source=COZUCU.yerel_dosya(d)
     except Exception: path,source=None,'yok'
+    # 2.3.2: gorsel_kaynak = yerel | gyazo | snappark | teamzone (sunucu üzerinden getirilir) | onedrive (kopyası yok) | kayip | yok
+    try: link_kaynak=gorsel.link_turu_ve_kimlik(d.get('link') or '')[0]
+    except Exception: link_kaynak='bos'
     if not path and COZUCU.gyazo_mumkun(d): source='gyazo'
+    elif not path:
+        try: source=COZUCU.dis_mumkun(d) or source
+        except Exception: pass
     dosya=d.get('gorsel_dosya') or ''
     kayip=bool(str(dosya).strip()) and not path
-    if kayip and source!='gyazo': source='kayip'
-    try: ikinci=COZUCU.ikinci_dosya(d)[0] or COZUCU.gyazo_mumkun(dict(d,_gorsel2=True))
+    uzak=source in ('gyazo','snappark','teamzone')
+    if kayip and not uzak: source='kayip'
+    elif source=='yok' and link_kaynak=='onedrive': source='onedrive'
+    try: ikinci=COZUCU.ikinci_dosya(d)[0] or COZUCU.gyazo_mumkun(dict(d,_gorsel2=True)) or COZUCU.dis_mumkun(dict(d,_gorsel2=True))
     except Exception: ikinci=None
-    d.update(gorsel_var=bool(path) or source=='gyazo',gorsel_yerel=bool(path),gorsel_kaynak=source,gorsel2_var=bool(ikinci),renk=renk(d['proje']),
+    d.update(gorsel_var=bool(path) or uzak,gorsel_yerel=bool(path),gorsel_kaynak=source,link_kaynak=link_kaynak,gorsel2_var=bool(ikinci),renk=renk(d['proje']),
              gorsel_kayip=kayip,gorsel_dosya_adi=(os.path.basename(str(dosya).replace('\\','/').rstrip('/')) or None) if kayip else None,
              izin_gyazo=kayit_izin(d,'kt') and kayit_izin(d,'gorsel') and bool(path) and not d['silindi'],izin_kt=kayit_izin(d,'kt'),izin_yorum=kayit_izin(d,'kt'),izin_duzenle=kayit_izin(d,'duzenle'),izin_sil=kayit_izin(d,'sil'),geri_al_olur=bool(d['silindi']))
     # 2.3.1: kt yetkisi olmayan kullanıcı için onaysız kayıt 'uyar' modunda kırmızı rozet/şeritle işaretlenir.

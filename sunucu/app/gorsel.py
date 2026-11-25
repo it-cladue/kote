@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Yerel, erişim denetimli görsel çözümleme.
 
-Bu modül Gyazo'ya istek yapmaz ve indirme yapmaz. Bağlantı yalnızca güvenli
-yerel indeks/isim eşlemesi için kimlik kaynağıdır.
+Yerel dosyalar izinli kökler altında çözülür. Gyazo (2.3.0) ve 2.3.2'den
+itibaren Snappark/Teamzone bağlantıları yalnız izinli hostlardan, boyut ve
+PIL doğrulamasıyla sunucu önbelleğine indirilir; kayıt satırı asla değişmez.
 """
 import csv
 import hashlib
@@ -15,7 +16,7 @@ import time
 import unicodedata
 import warnings
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from .excel_oku import link_turu_ve_kimlik
 
@@ -35,9 +36,65 @@ ONBELLEK_TEMIZLIK_ARALIGI_SN = 600   # gerçek tarama en fazla 10 dakikada bir (
 ONBELLEK_HEDEF_ORAN = 0.9            # sınır aşılınca bu orana inilir
 ONBELLEK_TAZE_SN = 60                # son 60 sn içinde yazılan ya da okunan dosya silinmez (yarış koruması)
 GECICI_DOSYA_YAS_SN = 3600           # yarım kalan .part/.tmp dosyaları bir saat sonra silinir
-_ONBELLEK_GORSEL_RX = re.compile(r"^[0-9a-f]{32}\.(jpg|png)$")
-_ONBELLEK_YOK_RX = re.compile(r"^[0-9a-f]{32}\.yok$")
-_ONBELLEK_GECICI_RX = re.compile(r"^(gyazo|thumb)-.*\.(tmp|part)$")
+# 32 hex: Gyazo kimliği / küçük resim; 40 hex: dış görsel (sha1(normalize URL), 2.3.2).
+_ONBELLEK_GORSEL_RX = re.compile(r"^(?:[0-9a-f]{32}|[0-9a-f]{40})\.(jpg|png)$")
+_ONBELLEK_YOK_RX = re.compile(r"^(?:[0-9a-f]{32}|[0-9a-f]{40})\.yok$")
+_ONBELLEK_GECICI_RX = re.compile(r"^(gyazo|thumb|dis)-.*\.(tmp|part)$")
+# 2.3.2 — Dış görsel servisleri: yalnız bu hostlar (alt alan adları dahil), yönlendirme de yalnız bunlara.
+DIS_GORSEL_HOSTLAR = {
+    "snappark": ("img.snappark.net", "snappark.net"),
+    "teamzone": ("teamzone.gyazo.com", "i.gyazo.com"),  # i.gyazo.com: Gyazo Teams görselinin doğrudan dosya yedeği
+}
+DIS_GORSEL_ADLARI = {"gyazo": "Gyazo", "snappark": "Snappark", "teamzone": "Teamzone"}
+DIS_MAX_BYTES = GYAZO_MAX_BYTES
+_SNAPPARK_YOL_RX = re.compile(r"^/s/([A-Za-z0-9_-]{3,64})(?:/raw)?/?$")
+_TEST_HOST_RX = re.compile(r"^(127\.0\.0\.1|localhost):(\d{2,5})$")
+
+
+def _host_izinli(url, hostlar):
+    """http(s) ve host tam eşleşme ya da izinli hostun alt alan adı (``evil-gyazo.com`` / ``gyazo.com.evil`` reddedilir)."""
+    try:
+        parts = urlparse(url)
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return False
+    host = parts.hostname.lower()
+    return any(host == h or host.endswith("." + h) for h in hostlar)
+
+
+def dis_gorsel_cozumle(link):
+    """Snappark/Teamzone bağlantısını normalize eder; ağ isteği yapmaz.
+
+    Dönüş: ``{"tur", "url" (normalize), "anahtar" (sha1 hex), "adaylar" [denenecek URL'ler]}`` ya da None.
+    Snappark: ``*.snappark.net/s/<id>`` ve ``/s/<id>/raw/`` → ``https://img.snappark.net/s/<id>/raw/`` (kimlik büyük/küçük harf duyarlı).
+    Teamzone: ``teamzone.gyazo.com/<32hex>`` → önce ``i.gyazo.com/<id>.png``, sonra ``.jpg``, sonra Teamzone adresinin kendisi.
+    """
+    s = str(link or "").strip()
+    if not s or len(s) > 2048:
+        return None
+    try:
+        parts = urlparse(s)
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    host = parts.hostname.lower()
+    if host == "snappark.net" or host.endswith(".snappark.net"):
+        m = _SNAPPARK_YOL_RX.match(parts.path or "")
+        if not m:
+            return None
+        url = "https://img.snappark.net/s/%s/raw/" % m.group(1)
+        return {"tur": "snappark", "url": url, "anahtar": hashlib.sha1(url.encode("utf-8")).hexdigest(), "adaylar": [url]}
+    if host == "teamzone.gyazo.com":
+        son = (parts.path or "").rstrip("/").rsplit("/", 1)[-1]
+        kimlik = son.split(".", 1)[0].lower()
+        if not KIMLIK_RX.fullmatch(kimlik):
+            return None
+        url = "https://teamzone.gyazo.com/" + kimlik
+        adaylar = ["https://i.gyazo.com/%s.png" % kimlik, "https://i.gyazo.com/%s.jpg" % kimlik, url]
+        return {"tur": "teamzone", "url": url, "anahtar": hashlib.sha1(url.encode("utf-8")).hexdigest(), "adaylar": adaylar}
+    return None
 
 
 def _baslik(adi):
@@ -266,8 +323,10 @@ class GorselCozucu:
         self.onbellek = os.path.abspath(onbellek)
         self.thumbs = os.path.join(self.onbellek, "thumbs")
         self.gyazo_klasor = os.path.join(self.onbellek, "gyazo")
+        self.dis_klasor = os.path.join(self.onbellek, "dis")
         os.makedirs(self.thumbs, exist_ok=True)
         os.makedirs(self.gyazo_klasor, exist_ok=True)
+        os.makedirs(self.dis_klasor, exist_ok=True)
         self.gyazo_acik = str(ayar.get("GYAZO_PROXY", "1")).strip().lower() in ("1", "true", "evet")
         self.gyazo_hostlar = tuple(GYAZO_HOSTLAR)
         self.gyazo_kaynak = GYAZO_KAYNAK
@@ -275,6 +334,14 @@ class GorselCozucu:
         self._gyazo_son_durum = None  # son Gyazo isteğinin HTTP durumu (toplu indirme raporu için)
         self._gyazo_kilit = threading.Lock()
         self._gyazo_semafor = threading.BoundedSemaphore(4)
+        # 2.3.2 — Snappark/Teamzone: ayrı anahtar (varsayılan GYAZO_PROXY ile aynı), ayrı semafor, aynı güvenlik sınırları.
+        self.dis_acik = str(ayar.get("DIS_GORSEL_PROXY", ayar.get("GYAZO_PROXY", "1"))).strip().lower() in ("1", "true", "evet")
+        self.dis_hostlar = {k: tuple(v) for k, v in DIS_GORSEL_HOSTLAR.items()}
+        self._dis_son_durum = None
+        self._dis_semafor = threading.BoundedSemaphore(4)
+        # Yalnız yerel uçtan uca test: dış adayların hepsi bu loopback sunucuya yönlendirilir (127.0.0.1/localhost dışı yok sayılır).
+        m = _TEST_HOST_RX.match(str(ayar.get("DIS_GORSEL_TEST_HOST") or "").strip())
+        self.dis_test_host = m.group(0) if m else None
         # Önbellek sınırları (bayt / saniye); 0 = sınır yok. Temizlik kilidi tek iş parçacığında çalışır.
         self.gyazo_sinir_bayt = _onbellek_siniri(ayar, "GYAZO_ONBELLEK_MB", 1024 * 1024)
         self.gyazo_yas_sn = _onbellek_siniri(ayar, "GYAZO_ONBELLEK_GUN", 86400)
@@ -435,18 +502,15 @@ class GorselCozucu:
         return bool(self._gyazo_onbellek(kimlik)) or not self._gyazo_olumsuz(kimlik)
 
     def _gyazo_host_izinli(self, url):
-        try:
-            parts = urlparse(url)
-        except ValueError:
-            return False
-        if parts.scheme not in ("http", "https") or not parts.hostname:
-            return False
-        host = parts.hostname.lower()
-        return any(host == h or host.endswith("." + h) for h in self.gyazo_hostlar)
+        return _host_izinli(url, self.gyazo_hostlar)
 
     def _gyazo_onbellek(self, kimlik):
+        return self._onbellekte(self.gyazo_klasor, kimlik)
+
+    @staticmethod
+    def _onbellekte(klasor, ad):
         for uz in (".jpg", ".png"):
-            yol = os.path.join(self.gyazo_klasor, kimlik + uz)
+            yol = os.path.join(klasor, ad + uz)
             try:
                 st = os.stat(yol)
             except OSError:
@@ -457,23 +521,33 @@ class GorselCozucu:
         return None
 
     def _gyazo_onbellek_dosyasi(self, yol):
-        """Yol Gyazo önbellek klasörünün altında mı? (içerik kimliğe bağlı, değişmez)"""
-        try:
-            kok = os.path.realpath(self.gyazo_klasor)
-            return os.path.commonpath((os.path.realpath(yol), kok)) == kok
-        except (OSError, ValueError):
-            return False
+        """Yol Gyazo ya da dış görsel önbelleğinin altında mı? (içerik kimliğe/URL'ye bağlı, değişmez)"""
+        for klasor in (self.gyazo_klasor, self.dis_klasor):
+            try:
+                kok = os.path.realpath(klasor)
+                if os.path.commonpath((os.path.realpath(yol), kok)) == kok:
+                    return True
+            except (OSError, ValueError):
+                continue
+        return False
 
     def _gyazo_olumsuz(self, kimlik):
-        isaret = os.path.join(self.gyazo_klasor, kimlik + ".yok")
+        return self._olumsuz_mu(self.gyazo_klasor, kimlik)
+
+    def _gyazo_olumsuz_yaz(self, kimlik):
+        self._olumsuz_yaz(self.gyazo_klasor, kimlik)
+
+    @staticmethod
+    def _olumsuz_mu(klasor, ad):
         try:
-            return time.time() - os.path.getmtime(isaret) < GYAZO_OLUMSUZ_SN
+            return time.time() - os.path.getmtime(os.path.join(klasor, ad + ".yok")) < GYAZO_OLUMSUZ_SN
         except OSError:
             return False
 
-    def _gyazo_olumsuz_yaz(self, kimlik):
+    @staticmethod
+    def _olumsuz_yaz(klasor, ad):
         try:
-            with open(os.path.join(self.gyazo_klasor, kimlik + ".yok"), "w") as f:
+            with open(os.path.join(klasor, ad + ".yok"), "w") as f:
                 f.write(str(int(time.time())))
         except OSError:
             pass
@@ -486,36 +560,107 @@ class GorselCozucu:
 
     def _gyazo_getir(self, url):
         """Yalnız izinli hostlar arasında yönlendirmeyi izler; gövdeyi sınırla okur."""
+        def durum(kod):
+            self._gyazo_son_durum = kod
+        return self._sinirli_getir(url, self._gyazo_host_izinli, GYAZO_MAX_BYTES, durum)
+
+    def _sinirli_getir(self, url, izinli, en_cok_bayt, durum_yaz, sadece_gorsel=False):
+        """Ortak indirici: en çok 5 yönlendirme, her adımda host allowlist, Content-Length ve akış boyut sınırı.
+
+        ``sadece_gorsel``: 200 yanıtı ``Content-Type: image/*`` değilse reddedilir (giriş sayfası / HTML).
+        """
         http = self._gyazo_http()
         for _ in range(5):
-            if not self._gyazo_host_izinli(url):
+            if not izinli(url):
                 return None
             r = http.get(url, stream=True, timeout=(5, GYAZO_ZAMAN_ASIMI), allow_redirects=False,
                          headers={"User-Agent": "KanitPaneli/2.3", "Accept": "image/*"})
-            self._gyazo_son_durum = getattr(r, "status_code", None)
+            durum_yaz(getattr(r, "status_code", None))
             try:
                 if r.status_code in (301, 302, 303, 307, 308):
                     hedef = r.headers.get("Location", "")
                     if not hedef:
                         return None
-                    url = hedef if "://" in hedef else urlparse(url)._replace(path=hedef, query="").geturl()
+                    if sadece_gorsel:
+                        url = urljoin(url, hedef)
+                    else:
+                        url = hedef if "://" in hedef else urlparse(url)._replace(path=hedef, query="").geturl()
                     continue
                 if r.status_code != 200:
                     return None
+                if sadece_gorsel:
+                    tur = str((r.headers or {}).get("Content-Type", "") or "").split(";", 1)[0].strip().lower()
+                    if not tur.startswith("image/"):
+                        durum_yaz("gorsel_degil")
+                        return None
                 uzunluk = r.headers.get("Content-Length")
-                if uzunluk and uzunluk.isdigit() and int(uzunluk) > GYAZO_MAX_BYTES:
+                if uzunluk and uzunluk.isdigit() and int(uzunluk) > en_cok_bayt:
+                    if sadece_gorsel:
+                        durum_yaz("buyuk")
                     return None
                 parcalar = []
                 toplam = 0
                 for parca in r.iter_content(65536):
                     toplam += len(parca)
-                    if toplam > GYAZO_MAX_BYTES:
+                    if toplam > en_cok_bayt:
+                        if sadece_gorsel:
+                            durum_yaz("buyuk")
                         return None
                     parcalar.append(parca)
                 return b"".join(parcalar)
             finally:
                 r.close()
+        if sadece_gorsel:
+            durum_yaz("yonlendirme")
         return None
+
+    @staticmethod
+    def _gorsel_dogrula(veri):
+        """PIL ile doğrular (decompression bomb dahil); JPEG/PNG dışını JPEG'e çevirir. -> (bayt, uzanti) ya da None."""
+        try:
+            from PIL import Image
+            import io
+            Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with Image.open(io.BytesIO(veri)) as im:
+                    bicim = str(im.format or "").upper()
+                    im.verify()
+            uz = GYAZO_BICIMLER.get(bicim)
+            if not uz:
+                # WEBP/GIF gibi biçimler JPEG'e çevrilerek saklanır.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", Image.DecompressionBombWarning)
+                    with Image.open(io.BytesIO(veri)) as im:
+                        im.load()
+                        cikti = io.BytesIO()
+                        im.convert("RGB").save(cikti, format="JPEG", quality=90)
+                        veri = cikti.getvalue()
+                        uz = ".jpg"
+            return veri, uz
+        except Exception:
+            return None
+
+    @staticmethod
+    def _atomik_yaz(klasor, ad, veri, onek):
+        """Geçici dosya + os.replace; hata olursa None (yarım .part temizlenir)."""
+        hedef = os.path.join(klasor, ad)
+        try:
+            os.makedirs(klasor, exist_ok=True)
+            fd, gecici = tempfile.mkstemp(prefix=onek, suffix=".part", dir=klasor)
+        except OSError:
+            return None
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(veri)
+            os.replace(gecici, hedef)
+        except OSError:
+            try:
+                os.unlink(gecici)
+            except OSError:
+                pass
+            return None
+        return hedef
 
     def gyazo_indir(self, kayit):
         """Gyazo bağlantısını sunucu tarafında indirir, doğrular ve önbellekler.
@@ -549,43 +694,14 @@ class GorselCozucu:
             if not veri:
                 self._gyazo_olumsuz_yaz(kimlik)
                 return None
-            try:
-                from PIL import Image
-                import io
-                Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
-                with warnings.catch_warnings():
-                    warnings.simplefilter("error", Image.DecompressionBombWarning)
-                    with Image.open(io.BytesIO(veri)) as im:
-                        bicim = str(im.format or "").upper()
-                        im.verify()
-                uz = GYAZO_BICIMLER.get(bicim)
-                if not uz:
-                    # Gyazo WEBP/GIF gibi biçimleri JPEG'e çevirerek sakla.
-                    with Image.open(io.BytesIO(veri)) as im:
-                        im.load()
-                        cikti = io.BytesIO()
-                        im.convert("RGB").save(cikti, format="JPEG", quality=90)
-                        veri = cikti.getvalue()
-                        uz = ".jpg"
-            except Exception:
+            dogru = self._gorsel_dogrula(veri)
+            if not dogru:
                 self._gyazo_olumsuz_yaz(kimlik)
                 return None
-            hedef = os.path.join(self.gyazo_klasor, kimlik + uz)
-            try:
-                os.makedirs(self.gyazo_klasor, exist_ok=True)
-                fd, gecici = tempfile.mkstemp(prefix="gyazo-", suffix=".part", dir=self.gyazo_klasor)
-            except OSError:
-                return None
-            try:
-                with os.fdopen(fd, "wb") as f:
-                    f.write(veri)
-                os.replace(gecici, hedef)
-            except OSError:
-                # Yarım kalan .part dosyası hemen; süreç çökerse periyodik temizlikle silinir.
-                try:
-                    os.unlink(gecici)
-                except OSError:
-                    pass
+            veri, uz = dogru
+            # Yarım kalan .part dosyası hemen; süreç çökerse periyodik temizlikle silinir.
+            hedef = self._atomik_yaz(self.gyazo_klasor, kimlik + uz, veri, "gyazo-")
+            if not hedef:
                 return None
             try:
                 os.unlink(os.path.join(self.gyazo_klasor, kimlik + ".yok"))
@@ -595,9 +711,116 @@ class GorselCozucu:
         finally:
             self._gyazo_semafor.release()
 
+    # ------------------------------------------------- Dış görsel (Snappark / Teamzone), 2.3.2
+    def dis_cozum(self, kayit):
+        """Kayıttaki (ana veya ``_gorsel2``) bağlantı Snappark/Teamzone ise normalize çözüm; değilse None."""
+        _, link = self._dosya_alani(kayit, bool(kayit.get("_gorsel2")))
+        if not isinstance(link, str) or not link.strip():
+            return None
+        tur, _ = link_turu_ve_kimlik(link)
+        if tur not in ("snappark", "teamzone"):
+            return None
+        return dis_gorsel_cozumle(link)
+
+    def dis_onbellek(self, kayit_ya_da_cozum):
+        coz = kayit_ya_da_cozum if "anahtar" in kayit_ya_da_cozum and "adaylar" in kayit_ya_da_cozum else self.dis_cozum(kayit_ya_da_cozum)
+        return self._onbellekte(self.dis_klasor, coz["anahtar"]) if coz else None
+
+    def dis_mumkun(self, kayit):
+        """Dış görsel gösterilebilir mi? Dönüş: 'snappark' | 'teamzone' | None (kapalı, tanınmayan ya da 10 dk olumsuz işaretli)."""
+        if not self.dis_acik:
+            return None
+        coz = self.dis_cozum(kayit)
+        if not coz:
+            return None
+        if self._onbellekte(self.dis_klasor, coz["anahtar"]) or not self._olumsuz_mu(self.dis_klasor, coz["anahtar"]):
+            return coz["tur"]
+        return None
+
+    def _dis_test_url(self, url):
+        """DIS_GORSEL_TEST_HOST (yalnız loopback) verilmişse adayı ``http://<test>/<host><yol>`` adresine çevirir."""
+        if not self.dis_test_host:
+            return url
+        parts = urlparse(url)
+        return "http://%s/%s%s" % (self.dis_test_host, parts.hostname or "", parts.path or "/")
+
+    def _dis_izinli(self, tur):
+        hostlar = tuple(self.dis_hostlar.get(tur, ()))
+        if self.dis_test_host:
+            hostlar += (self.dis_test_host.rsplit(":", 1)[0],)
+        return lambda url: _host_izinli(url, hostlar)
+
+    def dis_indir(self, kayit):
+        """Snappark/Teamzone görselini Gyazo ile aynı sınırlarla indirir ve ``tmp/dis/<sha1>.(jpg|png)`` olarak saklar.
+
+        Teamzone için adaylar sırayla denenir (i.gyazo.com .png → .jpg → Teamzone adresi); yalnız image/* yanıt kabul edilir.
+        Başarısızlık 10 dk olumsuz işaretlenir. ``_dis_son_durum``: son HTTP durumu ya da 'hata'/'gorsel_degil'/'bozuk'/...
+        """
+        if not self.dis_acik:
+            return None
+        coz = self.dis_cozum(kayit)
+        if not coz:
+            return None
+        self._temizlik_gerekirse()
+        anahtar = coz["anahtar"]
+        yol = self._onbellekte(self.dis_klasor, anahtar)
+        if yol:
+            return yol
+        if self._olumsuz_mu(self.dis_klasor, anahtar):
+            return None
+        if not self._dis_semafor.acquire(timeout=20):
+            return None
+        try:
+            yol = self._onbellekte(self.dis_klasor, anahtar)
+            if yol:
+                return yol
+            izinli = self._dis_izinli(coz["tur"])
+            veri = None
+            durumlar = []
+            for aday in coz["adaylar"]:
+                son = {"d": None}
+
+                def yaz(kod, son=son):
+                    son["d"] = kod
+                try:
+                    veri = self._sinirli_getir(self._dis_test_url(aday), izinli, DIS_MAX_BYTES, yaz, sadece_gorsel=True)
+                except Exception:
+                    veri = None
+                    son["d"] = "hata"
+                if veri:
+                    dogru = self._gorsel_dogrula(veri)
+                    if dogru:
+                        veri = dogru
+                        break
+                    veri = None
+                    son["d"] = "bozuk"
+                durumlar.append(son["d"])
+                if son["d"] in (429, "hata"):
+                    break  # hız sınırı / ağ hatası: diğer adaylarla sunucuyu yüklemeyiz
+            if not veri:
+                # Raporlanacak durum: 429 > ağ hatası > ilk anlamlı HTTP durumu (ör. .png 404 iken son aday 'gorsel_degil').
+                self._dis_son_durum = next((d for d in durumlar if d == 429), None) or next((d for d in durumlar if d == "hata"), None) \
+                    or next((d for d in durumlar if d not in (None, 404)), None) or (durumlar[0] if durumlar else None)
+                self._olumsuz_yaz(self.dis_klasor, anahtar)
+                return None
+            self._dis_son_durum = 200
+            veri, uz = veri
+            hedef = self._atomik_yaz(self.dis_klasor, anahtar + uz, veri, "dis-")
+            if not hedef:
+                return None
+            try:
+                os.unlink(os.path.join(self.dis_klasor, anahtar + ".yok"))
+            except OSError:
+                pass
+            return hedef
+        finally:
+            self._dis_semafor.release()
+
     # --------------------------------------------------------------- Önbellek
     def _onbellek_dizinleri(self):
+        # "dis": Snappark/Teamzone kopyaları; Gyazo kopyalarıyla aynı MB/gün sınırları (ayrı bütçe).
         return (("gyazo", self.gyazo_klasor, self.gyazo_sinir_bayt, self.gyazo_yas_sn),
+                ("dis", self.dis_klasor, self.gyazo_sinir_bayt, self.gyazo_yas_sn),
                 ("thumbs", self.thumbs, self.kucuk_sinir_bayt, 0))
 
     def _temizlik_gerekirse(self):
@@ -608,9 +831,9 @@ class GorselCozucu:
     def onbellek_temizle(self, zorla=False):
         """Gyazo ve küçük resim önbelleklerini boyut/yaş sınırlarının altına çeker.
 
-        Dönüş: ``{"gyazo": rapor, "thumbs": rapor}`` ya da ``None`` (süre dolmadı
+        Dönüş: ``{"gyazo": rapor, "dis": rapor, "thumbs": rapor}`` ya da ``None`` (süre dolmadı
         veya başka bir iş parçacığı temizliyor; ``zorla=True`` bekler ve çalışır).
-        Hiçbir istisna dışarı sızmaz. Yalnız önbellek kökü altındaki iki klasöre,
+        Hiçbir istisna dışarı sızmaz. Yalnız önbellek kökü altındaki üç klasöre (gyazo, dis, thumbs),
         orada da yalnız bu modülün ürettiği adlara dokunur; sembolik bağla başka
         yere giden klasör ve kullanıcı görsel kökleri (gorseller, telegram_gorseller)
         atlanır.
@@ -655,13 +878,18 @@ class GorselCozucu:
         return durum
 
     def gorsel_yolu(self, kayit):
-        """Ana (veya ``_gorsel2``) görselin yolu ve kaynağı: yerel, gyazo veya yok."""
+        """Ana (veya ``_gorsel2``) görselin yolu ve kaynağı: yerel, gyazo, snappark, teamzone veya yok."""
         yol, kaynak = self.yerel_dosya(kayit)
         if yol:
             return yol, kaynak
         yol = self.gyazo_indir(kayit)
         if yol:
             return yol, "gyazo"
+        coz = self.dis_cozum(kayit)
+        if coz:
+            yol = self.dis_indir(kayit)
+            if yol:
+                return yol, coz["tur"]
         return None, "yok"
 
     def gecerli(self, yol):
@@ -690,7 +918,7 @@ class GorselCozucu:
         döner; asla rastgele/orijinal dosya yolunu geri vermez. Önbellek
         klasörü çalışma anında silinmişse her üretimde yeniden oluşturulur.
         """
-        if not _guvenli_altinda(yol, list(self.kokler) + [self.gyazo_klasor]):
+        if not _guvenli_altinda(yol, list(self.kokler) + [self.gyazo_klasor, self.dis_klasor]):
             return None
         try:
             from PIL import Image
@@ -853,9 +1081,23 @@ _GYAZO_SEBEP = {404: "Gyazo'da görsel yok (404)", 410: "Gyazo görseli kaldırm
 GYAZO_TOPLU_429_BEKLEME = (30, 60, 120, 300)
 
 
-def _gyazo_sebep(durum):
-    if durum in _GYAZO_SEBEP:
+_SERVIS_EKI = {"Gyazo": "'da", "Snappark": "'ta", "Teamzone": "'da"}
+_DIS_SEBEP = {"gorsel_degil": "görsel değil (giriş sayfası ya da oturum gerekiyor olabilir)",
+              "bozuk": "indirilen dosya bozuk ya da görsel değil", "buyuk": "görsel çok büyük (20 MB sınırı)",
+              "yonlendirme": "çok fazla yönlendirme"}
+
+
+def _gyazo_sebep(durum, servis="Gyazo"):
+    if servis == "Gyazo" and durum in _GYAZO_SEBEP:
         return _GYAZO_SEBEP[durum]
+    if servis != "Gyazo":
+        ek = _SERVIS_EKI.get(servis, "'da")
+        sablon = {404: f"{servis}{ek} görsel yok (404)", 410: f"{servis} görseli kaldırmış (410)", 403: f"{servis} erişimi reddetti (403)",
+                  401: f"{servis} oturum istiyor (401)", 429: f"{servis} hız sınırı (429)", "hata": "ağ hatası / zaman aşımı"}
+        if durum in sablon:
+            return sablon[durum]
+        if durum in _DIS_SEBEP:
+            return _DIS_SEBEP[durum]
     if isinstance(durum, int):
         return f"sunucu hatası (HTTP {durum})" if durum >= 500 else ("indirilemedi (bozuk, çok büyük ya da görsel olmayan içerik)" if durum == 200 else f"HTTP {durum}")
     return "indirilemedi (izinsiz bağlantı ya da meşgul)"
@@ -863,7 +1105,11 @@ def _gyazo_sebep(durum):
 
 def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis=None, bekleme_sn=0.15, uyku=None,
                       rapor_yolu=None, ilerleme=None, log=None, on_kontrol=False, simdi=None):
-    """Kayıtlardaki tüm Gyazo bağlantılarını (ana ve ikinci görsel) sunucu önbelleğine bir kez indirir.
+    """Kayıtlardaki tüm Gyazo, Snappark ve Teamzone bağlantılarını (ana ve ikinci görsel) sunucu önbelleğine bir kez indirir.
+
+    2.3.2: raporda ``turler`` = {gyazo|snappark|teamzone: {baglanti, indirilen, zaten_var, acilamayan, taninmayan}}.
+    Ön kontrol (on_kontrol) yalnız Gyazo içindir; bir dış servisin ilk denemesi ağ hatasıyla (iki kez) biterse
+    o servisin kalan bağlantıları bu çalıştırmada istek atılmadan "ulaşılamıyor" diye raporlanır.
 
     yeni_en_cok: bu çalıştırmada en çok bu kadar YENİ indirme denenir (gece planı; kalanı sonraki çalıştırmaya).
     bitis: bu zamana (datetime) gelince durur. log(metin): isteğe bağlı ayrıntılı satır çıktısı.
@@ -884,6 +1130,7 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
     t0 = time.monotonic()
     sayac = {"baglanti": 0, "kimlik": 0, "zaten_var": 0, "indirilen": 0, "acilamayan": 0, "kimliksiz": 0,
              "hiz_siniri_bekleme_sn": 0, "durduruldu": None, "bitis_nedeni": "tamam", "denenen": 0, "kalan": 0}
+    turler = {t: {"baglanti": 0, "indirilen": 0, "zaten_var": 0, "acilamayan": 0, "taninmayan": 0} for t in ("gyazo", "snappark", "teamzone")}
     acilamayan = []
     gorulen = {}
     if on_kontrol:
@@ -904,44 +1151,83 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
                                    "curl -sS -o /dev/null -w '%%{http_code}\\n' --max-time 20 https://i.gyazo.com/" % (type(hata).__name__, str(hata)[:160]))
             log(sayac["durduruldu"])
             sonuc = dict(sayac)
-            sonuc.update({"sure_sn": round(time.monotonic() - t0, 1), "rapor": None, "acilamayan_ornek": []})
+            sonuc.update({"sure_sn": round(time.monotonic() - t0, 1), "rapor": None, "acilamayan_ornek": [], "turler": turler})
             return sonuc
     cur = conn.execute("SELECT id, proje, personel, link, gorsel_dosya, gorsel2, gorsel2_dosya FROM kayitlar "
                        "WHERE COALESCE(silindi,0)=0 AND (LOWER(COALESCE(link,'')) LIKE '%gyazo.com/%' "
-                       "OR LOWER(COALESCE(gorsel2,'')) LIKE '%gyazo.com/%') ORDER BY id")
+                       "OR LOWER(COALESCE(gorsel2,'')) LIKE '%gyazo.com/%' OR LOWER(COALESCE(link,'')) LIKE '%snappark%' "
+                       "OR LOWER(COALESCE(gorsel2,'')) LIKE '%snappark%') ORDER BY id")
     sutunlar = [d[0] for d in cur.description]
+    dis_acik = bool(getattr(cozucu, "dis_acik", False))
     adaylar = []
     for satir in cur.fetchall():
         r = dict(zip(sutunlar, satir))
         for ikinci in (False, True):
             link = (r.get("gorsel2") if ikinci else r.get("link")) or ""
             dusuk = str(link).lower()
-            if "gyazo.com/" not in dusuk or "teamzone" in dusuk:  # teamzone.gyazo.com ayrı bir hizmet, Gyazo kimliği taşımaz
-                continue
             k = dict(r)
             k["_gorsel2"] = ikinci
-            adaylar.append((r, link, k))
+            if "gyazo.com/" in dusuk and "teamzone" not in dusuk:  # teamzone.gyazo.com ayrı bir hizmet, Gyazo kimliği taşımaz
+                adaylar.append((r, link, k, "gyazo", None))
+                continue
+            if "snappark" not in dusuk and "teamzone.gyazo" not in dusuk:
+                continue
+            tur = link_turu_ve_kimlik(link)[0]
+            if tur not in ("snappark", "teamzone"):
+                continue
+            coz = dis_gorsel_cozumle(link)
+            if not coz or not dis_acik:  # tanınmayan biçim (ör. /s/<id> yok) ya da DIS_GORSEL_PROXY=0: hiç denenmez
+                turler[tur]["taninmayan"] += 1
+                continue
+            adaylar.append((r, link, k, coz["tur"], coz))
     if en_cok and en_cok > 0:
         adaylar = adaylar[:en_cok]
     sayac["baglanti"] = len(adaylar)
+    for a in adaylar:
+        turler[a[3]]["baglanti"] += 1
 
-    def _yok_sil(kimlik):
+    def _yok_sil(kimlik, tur="gyazo"):
+        klasor, ad = (cozucu.gyazo_klasor, kimlik) if tur == "gyazo" else (cozucu.dis_klasor, kimlik.split(":", 1)[-1])
         try:
-            os.unlink(os.path.join(cozucu.gyazo_klasor, kimlik + ".yok"))
+            os.unlink(os.path.join(klasor, ad + ".yok"))
         except OSError:
             pass
 
-    def _dene(k):
-        cozucu._gyazo_son_durum = None
-        yol = cozucu.gyazo_indir(k)
-        return yol, cozucu._gyazo_son_durum
+    def _dene(k, tur="gyazo"):
+        if tur == "gyazo":
+            cozucu._gyazo_son_durum = None
+            yol = cozucu.gyazo_indir(k)
+            return yol, cozucu._gyazo_son_durum
+        cozucu._dis_son_durum = None
+        yol = cozucu.dis_indir(k)
+        return yol, cozucu._dis_son_durum
 
     toplam = len(adaylar)
-    log("%d Gyazo bağlantısı taranıyor%s" % (toplam, "; bu çalıştırmada en çok %d yeni indirme" % yeni_en_cok if yeni_en_cok else ""))
+    log("%d bağlantı taranıyor (Gyazo %d, Snappark %d, Teamzone %d)%s" % (
+        toplam, turler["gyazo"]["baglanti"], turler["snappark"]["baglanti"], turler["teamzone"]["baglanti"],
+        "; bu çalıştırmada en çok %d yeni indirme" % yeni_en_cok if yeni_en_cok else ""))
     islenen = 0
-    for i, (r, link, k) in enumerate(adaylar, 1):
-        kimlik = cozucu.gyazo_kimlik(k)
-        onbellekte = bool(kimlik) and kimlik not in gorulen and bool(cozucu._gyazo_onbellek(kimlik))
+    erisim_yok = set()   # ilk denemesi ağ hatasıyla biten dış servisler (bu çalıştırmada atlanır)
+    basarili = set()     # bu çalıştırmada en az bir indirmesi başarılı olan servisler
+    for i, (r, link, k, tur, coz) in enumerate(adaylar, 1):
+        servis = DIS_GORSEL_ADLARI[tur]
+        t = turler[tur]
+        if tur == "gyazo":
+            kimlik = cozucu.gyazo_kimlik(k)
+            onbellekte = bool(kimlik) and kimlik not in gorulen and bool(cozucu._gyazo_onbellek(kimlik))
+        else:
+            kimlik = tur + ":" + coz["anahtar"]
+            onbellekte = kimlik not in gorulen and bool(cozucu.dis_onbellek(coz))
+            if not onbellekte and kimlik not in gorulen and tur in erisim_yok:
+                islenen = i
+                gorulen[kimlik] = False
+                sayac["kimlik"] += 1
+                sayac["acilamayan"] += 1
+                t["acilamayan"] += 1
+                acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, "%s'a ulaşılamıyor (bu çalıştırmada denenmedi)" % servis))
+                if ilerleme and (i % 100 == 0 or i == toplam):
+                    ilerleme(i, toplam, dict(sayac))
+                continue
         yeni_gerek = bool(kimlik) and kimlik not in gorulen and not onbellekte
         if yeni_gerek and yeni_en_cok and sayac["denenen"] >= yeni_en_cok:
             sayac["bitis_nedeni"] = "sinir"
@@ -958,48 +1244,60 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
         elif kimlik in gorulen:
             if gorulen[kimlik]:
                 sayac["zaten_var"] += 1
+                t["zaten_var"] += 1
             else:
                 sayac["acilamayan"] += 1
+                t["acilamayan"] += 1
                 acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, "aynı bağlantı bu çalıştırmada açılamadı"))
         elif onbellekte:
             sayac["kimlik"] += 1
             gorulen[kimlik] = True
             sayac["zaten_var"] += 1
+            t["zaten_var"] += 1
         else:
+            etiket = kimlik[:8] if tur == "gyazo" else "%s %s" % (servis, coz["anahtar"][:8])
             sayac["kimlik"] += 1
             sayac["denenen"] += 1
-            _yok_sil(kimlik)
-            yol, durum = _dene(k)
+            _yok_sil(kimlik, tur)
+            yol, durum = _dene(k, tur)
             if not yol and (durum == "hata" or (isinstance(durum, int) and durum >= 500)):
-                log("%d/%d %s… geçici hata (%s); 5 sn sonra bir kez daha" % (i, toplam, kimlik[:8], _gyazo_sebep(durum)))
+                log("%d/%d %s… geçici hata (%s); 5 sn sonra bir kez daha" % (i, toplam, etiket, _gyazo_sebep(durum, servis)))
                 uyku(5)
-                _yok_sil(kimlik)
-                yol, durum = _dene(k)
+                _yok_sil(kimlik, tur)
+                yol, durum = _dene(k, tur)
             for bekle in GYAZO_TOPLU_429_BEKLEME:
                 if yol or durum != 429:
                     break
                 sayac["hiz_siniri_bekleme_sn"] += bekle
-                log("%d/%d Gyazo hız sınırı (429); %d sn bekleniyor…" % (i, toplam, bekle))
+                log("%d/%d %s hız sınırı (429); %d sn bekleniyor…" % (i, toplam, servis, bekle))
                 uyku(bekle)
-                _yok_sil(kimlik)
-                yol, durum = _dene(k)
+                _yok_sil(kimlik, tur)
+                yol, durum = _dene(k, tur)
             if yol:
                 gorulen[kimlik] = True
+                basarili.add(tur)
                 sayac["indirilen"] += 1
+                t["indirilen"] += 1
                 try:
                     boyut_kb = os.path.getsize(yol) // 1024
                 except OSError:
                     boyut_kb = 0
-                log("%d/%d %s… indirildi (%d KB)" % (i, toplam, kimlik[:8], boyut_kb))
+                log("%d/%d %s… indirildi (%d KB)" % (i, toplam, etiket, boyut_kb))
             else:
                 gorulen[kimlik] = False
                 sayac["acilamayan"] += 1
-                acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, _gyazo_sebep(durum)))
-                log("%d/%d %s… açılamadı: %s" % (i, toplam, kimlik[:8], _gyazo_sebep(durum)))
+                t["acilamayan"] += 1
+                acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, _gyazo_sebep(durum, servis)))
+                log("%d/%d %s… açılamadı: %s" % (i, toplam, etiket, _gyazo_sebep(durum, servis)))
+                if tur != "gyazo" and durum == "hata" and tur not in basarili:
+                    erisim_yok.add(tur)
+                    log("%s'a ulaşılamıyor (ağ hatası); kalan %s bağlantıları bu çalıştırmada denenmeyecek. "
+                        "Sunucunun dış HTTPS erişimini kontrol edin: curl -sS -o /dev/null -w '%%{http_code}\\n' --max-time 20 %s"
+                        % (servis, servis, coz["adaylar"][0]))
                 if durum == 429:
                     sayac["bitis_nedeni"] = "hiz_siniri"
-                    sayac["durduruldu"] = ("Gyazo hız sınırı sürüyor; %d/%d bağlantı işlendi. 15 dakika sonra aynı komutu yeniden çalıştırın "
-                                           "(kaldığı yerden devam eder)." % (i, toplam))
+                    sayac["durduruldu"] = ("%s hız sınırı sürüyor; %d/%d bağlantı işlendi. 15 dakika sonra aynı komutu yeniden çalıştırın "
+                                           "(kaldığı yerden devam eder)." % (servis, i, toplam))
             if bekleme_sn and i < toplam and not sayac["durduruldu"]:
                 uyku(bekleme_sn)
         if ilerleme and (i % 100 == 0 or i == toplam):
@@ -1019,7 +1317,9 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
             w.writerows(acilamayan)
         os.replace(gecici, rapor_yolu)
     sonuc = dict(sayac)
-    sonuc.update({"sure_sn": round(time.monotonic() - t0, 1), "rapor": rapor_yolu, "acilamayan_ornek": acilamayan[:20]})
+    sonuc.update({"sure_sn": round(time.monotonic() - t0, 1), "rapor": rapor_yolu, "acilamayan_ornek": acilamayan[:20], "turler": turler})
+    if erisim_yok:
+        sonuc["dis_erisim_yok"] = sorted(DIS_GORSEL_ADLARI[t] for t in erisim_yok)
     try:
         durum = cozucu.onbellek_durumu()
         g = durum.get("gyazo") if isinstance(durum, dict) else None

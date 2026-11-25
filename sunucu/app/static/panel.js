@@ -216,11 +216,18 @@ window.Panel = (function () {
       var mesaj=e.message||'Kayıt açılamadı.';if(proje&&mesaj.indexOf(proje)<0)mesaj+=' Kayıt '+proje+' projesine ait.';
       document.getElementById('m-alanlar').innerHTML='<div class="genis"><dt>'+esc(baslik)+'</dt><dd>'+esc(mesaj)+(e.status===403&&!(e.veri&&e.veri.neden==='onay_yok')?'<br><small>Gerekirse süperadminden bu proje için yetki isteyin.</small>':'')+'</dd></div>';
     }
-    function gorselPlaceholder(k,hata){var yok=document.getElementById('m-gorsel-yok');var gyazo=/gyazo\.com/i.test(k.dis_link||'');var html;
+    /* 2.3.2: yer tutucu, görselin geldiği dış siteyi söyler (link_kaynak: gyazo|snappark|teamzone|onedrive|dosya|diger) */
+    var DIS_SITE={snappark:'Snappark',teamzone:'Teamzone',onedrive:'OneDrive'};
+    function linkAc(k){return k.dis_link?'<br><a href="'+esc(k.dis_link)+'" target="_blank" rel="noopener">Linki yeni sekmede aç</a>':'';}
+    function disHataMetni(k){var ad=DIS_SITE[k.link_kaynak];return ad?'Görsel dış sitede ('+ad+'); açılamadı.'+(k.dis_link?' <a href="'+esc(k.dis_link)+'" target="_blank" rel="noopener">Linki yeni sekmede aç</a>':''):null;}
+    function gorselPlaceholder(k,hata){var yok=document.getElementById('m-gorsel-yok');var lk=k.link_kaynak;var gyazo=lk?lk==='gyazo':(/gyazo\.com/i.test(k.dis_link||'')&&!/teamzone\./i.test(k.dis_link||''));var dis=lk==='snappark'||lk==='teamzone';var html;
       if(k.gorsel_bozuk)html='<b>Görsel açılamadı</b>Dosya sunucuda var ama bozuk ya da okunamıyor. Dosyayı indirip bilgisayarınızda deneyebilir veya Arşiv sayfasından yeni görsel ilişkilendirebilirsiniz.'+(k.dis_link?'<br><a href="'+esc(k.dis_link)+'" target="_blank" rel="noopener">Linki yeni sekmede aç</a>':'');
       else if(hata&&k.gorsel_kaynak==='gyazo'||(!hata&&!k.gorsel_var&&gyazo))html='<b>Görsel yok (eski Gyazo linki açılamadı)</b>Bağlantı artık yanıt vermiyor ya da sunucudan erişilemiyor.'+(k.dis_link?'<br><a href="'+esc(k.dis_link)+'" target="_blank" rel="noopener">Linki yeni sekmede aç</a>':'');
+      else if(dis&&(hata||(!k.gorsel_var&&!k.gorsel_kayip)))html='<b>Görsel dış sitede ('+DIS_SITE[lk]+'); açılamadı</b>Sunucu görseli getiremedi: bağlantı kaldırılmış ya da site oturum istiyor olabilir.'+linkAc(k);
       else if(hata)html='<b>Görsel şu an açılamadı</b>Dosya sunucuda bulunamadı ya da bozuk.'+(k.dis_link?'<br><a href="'+esc(k.dis_link)+'" target="_blank" rel="noopener">Linki yeni sekmede aç</a>':'');
       else if(k.gorsel_kayip)html='<b>Görsel dosyası sunucuda bulunamadı</b>Dosya silinmiş veya taşınmış olabilir'+(k.gorsel_dosya_adi?' ('+esc(k.gorsel_dosya_adi)+')':'')+'. Arşiv\'den yeniden ilişkilendirebilirsiniz.'+(k.dis_link?'<br><a href="'+esc(k.dis_link)+'" target="_blank" rel="noopener">Linki yeni sekmede aç</a>':'');
+      else if(k.dis_link&&lk==='onedrive')html='<b>Görsel dış sitede (OneDrive)</b>Sunucuda kopyası yok; görmek için bağlantıyı açın.'+linkAc(k);
+      else if(k.dis_link&&lk!=='dosya')html='<b>Görsel dış bağlantıda</b>Sunucuda kopyası yok; görmek için bağlantıyı açın.'+linkAc(k);
       else if(k.dis_link)html='<b>Yerel görsel yok</b><a href="'+esc(k.dis_link)+'" target="_blank" rel="noopener">Linki yeni sekmede aç</a>';
       else html='<b>Görsel yok</b>Bu kayıtla ilişkili bir kanıt görseli bulunmuyor.';
       yok.innerHTML=html;yok.classList.remove('gizli');}
@@ -256,7 +263,7 @@ window.Panel = (function () {
       var state=[];if(k.silindi)state.push('<span class="etiket-kucuk kirmizi-arka">Silindi'+(k.silen?' ('+esc(k.silen)+')':'')+'</span>');else if(k.excel_durum==='silinmis')state.push('<span class="etiket-kucuk gri-arka">Eski kaynakta yok</span>');if(k.bekleyen_hata)state.push('<span class="etiket-kucuk kirmizi-arka">İşlem hatası</span>');else if(k.bekleyen_islem)state.push('<span class="etiket-kucuk turuncu-arka">İşleniyor</span>');document.getElementById('m-durum').innerHTML=state.join(' ');
       /* Görseller */
       gorseller=[];var v='?v='+encodeURIComponent(k.guncelleme||k.surum||'');
-      if(k.gorsel_url&&!k.gorsel_bozuk)gorseller.push({url:k.gorsel_url+v,ham:k.gorsel_url,kucuk:k.kucuk_url,indir:k.indir_url,etiket:'Görsel 1',hataMetni:k.gorsel_kaynak==='gyazo'?'Görsel yok (eski Gyazo linki açılamadı).'+(k.dis_link?' <a href="'+esc(k.dis_link)+'" target="_blank" rel="noopener">Linki yeni sekmede aç</a>':''):'Görsel şu an açılamadı.'});
+      if(k.gorsel_url&&!k.gorsel_bozuk)gorseller.push({url:k.gorsel_url+v,ham:k.gorsel_url,kucuk:k.kucuk_url,indir:k.indir_url,etiket:'Görsel 1',hataMetni:k.gorsel_kaynak==='gyazo'?'Görsel yok (eski Gyazo linki açılamadı).'+(k.dis_link?' <a href="'+esc(k.dis_link)+'" target="_blank" rel="noopener">Linki yeni sekmede aç</a>':''):(disHataMetni(k)||'Görsel şu an açılamadı.')});
       if(k.gorsel2_url)gorseller.push({url:k.gorsel2_url+v,ham:k.gorsel2_url,kucuk:k.kucuk2_url,indir:k.gorsel2_url+'&indir=1',etiket:'Görsel 2',hataMetni:'İkinci görsel şu an açılamadı.'});
       document.getElementById('m-kucukler').innerHTML=gorseller.length>1?gorseller.map(function(it,i){return '<button type="button" data-gorsel-idx="'+i+'" aria-label="'+esc(it.etiket)+'" title="'+esc(it.etiket)+'"><img src="'+esc(it.kucuk||it.url)+'" alt=""><span>'+esc(it.etiket)+'</span></button>';}).join(''):'';
       var buyutBtn=document.getElementById('m-buyut'),yeniSekme=document.getElementById('m-yeni-sekme'),indirBtn=document.getElementById('m-indir');
