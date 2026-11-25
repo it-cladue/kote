@@ -1,0 +1,10 @@
+[Unit]
+Description=Kanit Paneli gece Gyazo kopyalama zamanlayicisi
+
+[Timer]
+OnCalendar=*-*-* @BASLANGIC@:00 @DILIM@
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

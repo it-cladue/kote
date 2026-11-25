@@ -1,0 +1,33 @@
+[Unit]
+Description=Kanit Paneli gece Gyazo kopyalama (eski kayitlarin gorselleri sunucuya)
+After=network-online.target kanit-web.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=kanit
+Group=kanit
+WorkingDirectory=@KANIT_DIR@
+EnvironmentFile=@KANIT_DIR@/.env
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ExecStart=@KANIT_DIR@/.venv/bin/python -m app.cli gyazo-onbellekle --yeni-en-cok @GECELIK@ --pencere @BASLANGIC@-@BITIS@ --saat-dilimi @DILIM@ --bekleme 0.3
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=10h
+SyslogIdentifier=kanit-gyazo
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=@KANIT_DIR@/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native

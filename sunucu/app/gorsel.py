@@ -7,6 +7,7 @@ yerel indeks/isim eşlemesi için kimlik kaynağıdır.
 import csv
 import hashlib
 import os
+from datetime import datetime, timedelta
 import re
 import tempfile
 import threading
@@ -860,8 +861,14 @@ def _gyazo_sebep(durum):
     return "indirilemedi (izinsiz bağlantı ya da meşgul)"
 
 
-def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, bekleme_sn=0.15, uyku=None, rapor_yolu=None, ilerleme=None):
+def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis=None, bekleme_sn=0.15, uyku=None,
+                      rapor_yolu=None, ilerleme=None, log=None, on_kontrol=False, simdi=None):
     """Kayıtlardaki tüm Gyazo bağlantılarını (ana ve ikinci görsel) sunucu önbelleğine bir kez indirir.
+
+    yeni_en_cok: bu çalıştırmada en çok bu kadar YENİ indirme denenir (gece planı; kalanı sonraki çalıştırmaya).
+    bitis: bu zamana (datetime) gelince durur. log(metin): isteğe bağlı ayrıntılı satır çıktısı.
+    on_kontrol: başta Gyazo'ya tek bir deneme isteği atar; ulaşılamıyorsa hiçbir bağlantı denenmeden döner.
+    Dönüşteki bitis_nedeni: tamam | sinir | sure | hiz_siniri | erisim.
 
     Amaç: eski Excel kayıtlarının tek kopyası Gyazo'da; bağlantı ölmeden sunucuya kopyalamak ve
     açılamayanları raporlamak. Yeniden çalıştırılabilir: önbellekte olan kimlikler atlanır, her kimlik
@@ -872,11 +879,33 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, bekleme_sn=0.15, uyk
     if not getattr(cozucu, "gyazo_acik", False):
         raise ValueError("GYAZO_PROXY kapalı; önce .env içinde GYAZO_PROXY=1 yapın.")
     uyku = uyku or time.sleep
+    log = log or (lambda metin: None)
+    simdi = simdi or (lambda: datetime.now(getattr(bitis, "tzinfo", None)))
     t0 = time.monotonic()
     sayac = {"baglanti": 0, "kimlik": 0, "zaten_var": 0, "indirilen": 0, "acilamayan": 0, "kimliksiz": 0,
-             "hiz_siniri_bekleme_sn": 0, "durduruldu": None}
+             "hiz_siniri_bekleme_sn": 0, "durduruldu": None, "bitis_nedeni": "tamam", "denenen": 0, "kalan": 0}
     acilamayan = []
     gorulen = {}
+    if on_kontrol:
+        try:
+            r = cozucu._gyazo_http().get(cozucu.gyazo_kaynak.format(id="0" * 32), stream=True, timeout=(5, 10), allow_redirects=False,
+                                         headers={"User-Agent": "KanitPaneli/2.3", "Accept": "image/*"})
+            try:
+                durum_kodu = getattr(r, "status_code", None)
+            finally:
+                try:
+                    r.close()
+                except Exception:
+                    pass
+            log("Gyazo erişimi: tamam (deneme isteği HTTP %s)" % durum_kodu)
+        except Exception as hata:
+            sayac["bitis_nedeni"] = "erisim"
+            sayac["durduruldu"] = ("Gyazo'ya ulaşılamıyor (%s: %s). Sunucunun dış HTTPS erişimini kontrol edin: "
+                                   "curl -sS -o /dev/null -w '%%{http_code}\\n' --max-time 20 https://i.gyazo.com/" % (type(hata).__name__, str(hata)[:160]))
+            log(sayac["durduruldu"])
+            sonuc = dict(sayac)
+            sonuc.update({"sure_sn": round(time.monotonic() - t0, 1), "rapor": None, "acilamayan_ornek": []})
+            return sonuc
     cur = conn.execute("SELECT id, proje, personel, link, gorsel_dosya, gorsel2, gorsel2_dosya FROM kayitlar "
                        "WHERE COALESCE(silindi,0)=0 AND (LOWER(COALESCE(link,'')) LIKE '%gyazo.com/%' "
                        "OR LOWER(COALESCE(gorsel2,'')) LIKE '%gyazo.com/%') ORDER BY id")
@@ -908,8 +937,21 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, bekleme_sn=0.15, uyk
         return yol, cozucu._gyazo_son_durum
 
     toplam = len(adaylar)
+    log("%d Gyazo bağlantısı taranıyor%s" % (toplam, "; bu çalıştırmada en çok %d yeni indirme" % yeni_en_cok if yeni_en_cok else ""))
+    islenen = 0
     for i, (r, link, k) in enumerate(adaylar, 1):
         kimlik = cozucu.gyazo_kimlik(k)
+        onbellekte = bool(kimlik) and kimlik not in gorulen and bool(cozucu._gyazo_onbellek(kimlik))
+        yeni_gerek = bool(kimlik) and kimlik not in gorulen and not onbellekte
+        if yeni_gerek and yeni_en_cok and sayac["denenen"] >= yeni_en_cok:
+            sayac["bitis_nedeni"] = "sinir"
+            log("Bu çalıştırmanın yeni indirme sınırı (%d) doldu; kalan bağlantılar sonraki çalıştırmada." % yeni_en_cok)
+            break
+        if yeni_gerek and bitis is not None and simdi() >= bitis:
+            sayac["bitis_nedeni"] = "sure"
+            log("Bitiş saatine gelindi (%s); kalan bağlantılar sonraki çalıştırmada." % bitis.strftime("%H:%M"))
+            break
+        islenen = i
         if not kimlik:
             sayac["kimliksiz"] += 1
             acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, "Gyazo kimliği okunamadı"))
@@ -919,15 +961,17 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, bekleme_sn=0.15, uyk
             else:
                 sayac["acilamayan"] += 1
                 acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, "aynı bağlantı bu çalıştırmada açılamadı"))
-        elif cozucu._gyazo_onbellek(kimlik):
+        elif onbellekte:
             sayac["kimlik"] += 1
             gorulen[kimlik] = True
             sayac["zaten_var"] += 1
         else:
             sayac["kimlik"] += 1
+            sayac["denenen"] += 1
             _yok_sil(kimlik)
             yol, durum = _dene(k)
             if not yol and (durum == "hata" or (isinstance(durum, int) and durum >= 500)):
+                log("%d/%d %s… geçici hata (%s); 5 sn sonra bir kez daha" % (i, toplam, kimlik[:8], _gyazo_sebep(durum)))
                 uyku(5)
                 _yok_sil(kimlik)
                 yol, durum = _dene(k)
@@ -935,17 +979,25 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, bekleme_sn=0.15, uyk
                 if yol or durum != 429:
                     break
                 sayac["hiz_siniri_bekleme_sn"] += bekle
+                log("%d/%d Gyazo hız sınırı (429); %d sn bekleniyor…" % (i, toplam, bekle))
                 uyku(bekle)
                 _yok_sil(kimlik)
                 yol, durum = _dene(k)
             if yol:
                 gorulen[kimlik] = True
                 sayac["indirilen"] += 1
+                try:
+                    boyut_kb = os.path.getsize(yol) // 1024
+                except OSError:
+                    boyut_kb = 0
+                log("%d/%d %s… indirildi (%d KB)" % (i, toplam, kimlik[:8], boyut_kb))
             else:
                 gorulen[kimlik] = False
                 sayac["acilamayan"] += 1
                 acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, _gyazo_sebep(durum)))
+                log("%d/%d %s… açılamadı: %s" % (i, toplam, kimlik[:8], _gyazo_sebep(durum)))
                 if durum == 429:
+                    sayac["bitis_nedeni"] = "hiz_siniri"
                     sayac["durduruldu"] = ("Gyazo hız sınırı sürüyor; %d/%d bağlantı işlendi. 15 dakika sonra aynı komutu yeniden çalıştırın "
                                            "(kaldığı yerden devam eder)." % (i, toplam))
             if bekleme_sn and i < toplam and not sayac["durduruldu"]:
@@ -954,6 +1006,7 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, bekleme_sn=0.15, uyk
             ilerleme(i, toplam, dict(sayac))
         if sayac["durduruldu"]:
             break
+    sayac["kalan"] = max(0, toplam - islenen)
 
     if rapor_yolu is None and ayar and ayar.get("DB"):
         rapor_yolu = os.path.join(os.path.dirname(os.path.abspath(str(ayar["DB"]))), "gyazo-acilamayan.csv")
@@ -979,3 +1032,40 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, bekleme_sn=0.15, uyk
     except Exception:
         pass
     return sonuc
+
+
+def gyazo_pencere(pencere, dilim="Europe/Istanbul", simdi=None):
+    """'22:30-07:30' biçimindeki saat penceresini çözer.
+
+    Dönüş: (icinde, bitis, aciklama). Gece yarısını aşan pencere desteklenir. Saat dilimi bulunamazsa
+    sunucunun yerel saati kullanılır (aciklama bunu söyler). Geçersiz biçimde ValueError.
+    """
+    import re as _re
+    m = _re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*", str(pencere or ""))
+    if not m:
+        raise ValueError("Pencere biçimi SS:DD-SS:DD olmalı, örn. 22:30-07:30")
+    bs, bd, es, ed = (int(x) for x in m.groups())
+    if not (0 <= bs < 24 and 0 <= bd < 60 and 0 <= es < 24 and 0 <= ed < 60):
+        raise ValueError("Pencere saatleri 00:00-23:59 arasında olmalı")
+    tz = None
+    not_ = ""
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(dilim)
+    except Exception:
+        not_ = " (saat dilimi bulunamadı, sunucu yerel saati kullanıldı)"
+    now = simdi() if simdi else datetime.now(tz)
+    if tz is not None and now.tzinfo is None:
+        now = now.replace(tzinfo=tz)
+    bugun_bas = now.replace(hour=bs, minute=bd, second=0, microsecond=0)
+    bugun_bit = now.replace(hour=es, minute=ed, second=0, microsecond=0)
+    if bugun_bit <= bugun_bas:  # gece yarısını aşan pencere
+        if now >= bugun_bas:
+            return True, bugun_bit + timedelta(days=1), "pencere %s-%s içinde%s" % (m.group(1).zfill(2) + ":" + m.group(2), m.group(3).zfill(2) + ":" + m.group(4), not_)
+        if now < bugun_bit:
+            return True, bugun_bit, "pencere içinde (gece yarısından sonra)%s" % not_
+        return False, bugun_bas, "pencere dışı; sonraki başlangıç %s%s" % (bugun_bas.strftime("%H:%M"), not_)
+    if bugun_bas <= now < bugun_bit:
+        return True, bugun_bit, "pencere içinde%s" % not_
+    sonraki = bugun_bas if now < bugun_bas else bugun_bas + timedelta(days=1)
+    return False, sonraki, "pencere dışı; sonraki başlangıç %s%s" % (sonraki.strftime("%d.%m %H:%M"), not_)

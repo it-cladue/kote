@@ -44,6 +44,11 @@ def main():
     topla.add_argument('--en-cok',type=int,default=0,metavar='N',help='Yalnız ilk N bağlantıyı dene (deneme için)')
     topla.add_argument('--bekleme',type=float,default=0.15,metavar='SN',help='İki indirme arasındaki bekleme, saniye (varsayılan 0.15)')
     topla.add_argument('--rapor',metavar='DOSYA',help='Açılamayan bağlantı listesi; varsayılan veri klasöründe gyazo-acilamayan.csv')
+    topla.add_argument('--yeni-en-cok',type=int,default=0,metavar='N',help='Bu çalıştırmada en çok N yeni indirme (gece planı); kalanı sonraki çalıştırmaya')
+    topla.add_argument('--pencere',metavar='BAS-BIT',help='Yalnız bu saat aralığında çalış ve bitişte dur, örn. 22:30-07:30 (gece yarısını aşabilir)')
+    topla.add_argument('--saat-dilimi',default='Europe/Istanbul',metavar='BOLGE',help='--pencere için saat dilimi (varsayılan Europe/Istanbul)')
+    topla.add_argument('--ayrintili',action='store_true',help='Her bağlantı için satır yaz (--en-cok 100 ve altında kendiliğinden açık)')
+    topla.add_argument('--on-kontrol-atla',action='store_true',help='Başlangıçtaki Gyazo erişim denemesini atla')
     backup=_alt(sub,'yedekle','Tutarlı SQLite yedeği ve isteğe bağlı görsel kopyası')
     backup.add_argument('hedef',help='Yedeklerin yazılacağı klasör (altına tarihli klasör açılır)');backup.add_argument('--gorseller',action='store_true',help='Görsel ve arşiv klasörlerini de kopyala')
     hat=_alt(sub,'hatirlatma-uret','Onay bekleyen kayıtlar için hatırlatma bildirimlerini hemen üret (JSON rapor). Günlük kullanıcı sınırı ve günde bir kuralı nedeniyle aynı gün tekrar çalıştırmak yeni satır eklemez')
@@ -79,11 +84,26 @@ def main():
         elif args.command=='gyazo-onbellekle':
             from . import gorsel
             def ilerleme(i,n,s): print(f"{i}/{n} · indirilen {s['indirilen']} · zaten var {s['zaten_var']} · açılamayan {s['acilamayan']}",flush=True)
+            def log(metin): print(metin,flush=True)
+            bitis=None
+            if args.pencere:
+                try: icinde,bitis,aciklama=gorsel.gyazo_pencere(args.pencere,args.saat_dilimi)
+                except ValueError as e: raise SystemExit('Hata: '+str(e))
+                if not icinde:
+                    print('GYAZO_ONBELLEK_PENCERE_DISI: '+aciklama+' ('+args.saat_dilimi+'); hiçbir şey yapılmadı.');return
+                print('Pencere: '+aciklama+'; bitiş '+bitis.strftime('%H:%M')+' ('+args.saat_dilimi+')',flush=True)
+            ayrintili=args.ayrintili or (0<args.en_cok<=100)
             try:
-                r=gorsel.gyazo_toplu_indir(c,gorsel.GorselCozucu(AYAR,AYAR['ONBELLEK']),AYAR,en_cok=args.en_cok,bekleme_sn=args.bekleme,rapor_yolu=args.rapor,ilerleme=ilerleme)
+                r=gorsel.gyazo_toplu_indir(c,gorsel.GorselCozucu(AYAR,AYAR['ONBELLEK']),AYAR,en_cok=args.en_cok,yeni_en_cok=args.yeni_en_cok,bitis=bitis,
+                                           bekleme_sn=args.bekleme,rapor_yolu=args.rapor,ilerleme=ilerleme,log=log if ayrintili else (lambda m: print(m,flush=True) if ('bekleniyor' in m or 'ulaşılamıyor' in m or 'sınırı' in m or 'Bitiş' in m or 'erişimi' in m or 'taranıyor' in m) else None),
+                                           on_kontrol=not args.on_kontrol_atla)
             except ValueError as e: raise SystemExit('Hata: '+str(e))
             print(json.dumps(r,ensure_ascii=False,indent=2))
-            print('GYAZO_ONBELLEK_YARIM' if r.get('durduruldu') else 'GYAZO_ONBELLEK_TAMAM')
+            neden=r.get('bitis_nedeni','tamam')
+            if neden=='tamam': print('GYAZO_ONBELLEK_TAMAM')
+            elif neden in ('sinir','sure'): print(f"GYAZO_ONBELLEK_DEVAM: kalan {r.get('kalan',0)} bağlantı sonraki çalıştırmada sürer.")
+            elif neden=='erisim': print('GYAZO_ONBELLEK_YARIM: '+str(r.get('durduruldu') or ''));raise SystemExit(1)
+            else: print('GYAZO_ONBELLEK_YARIM: '+str(r.get('durduruldu') or ''))
         elif args.command=='arsiv-tara':
             from . import gorsel
             print(json.dumps(gorsel.arsiv_tara(AYAR,c,gorsel.GorselCozucu(AYAR,AYAR['ONBELLEK'])),ensure_ascii=False,indent=2))
