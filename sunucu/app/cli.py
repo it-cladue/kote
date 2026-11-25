@@ -40,7 +40,7 @@ def main():
     old=_alt(sub,'ice-aktar','Eski klasörü/Exceli bir kez aktar; canlı Excel bağlantısı kurmaz')
     old.add_argument('kaynak',help='Eski Excel dosyası veya bot klasörü yolu')
     _alt(sub,'arsiv-tara','Sunucuya taşınmış telegram_gorseller klasörünü indeksle')
-    topla=_alt(sub,'gyazo-onbellekle','Kayıtlardaki Gyazo görsellerini sunucuya bir kez indir; açılamayanları raporla (yeniden çalıştırılabilir)')
+    topla=_alt(sub,'gyazo-onbellekle','Kayıtlardaki Gyazo/Snappark/Teamzone görsellerini sunucuya bir kez indir; açılamayanları raporla (yeniden çalıştırılabilir)')
     topla.add_argument('--en-cok',type=int,default=0,metavar='N',help='Yalnız ilk N bağlantıyı dene (deneme için)')
     topla.add_argument('--bekleme',type=float,default=0.15,metavar='SN',help='İki indirme arasındaki bekleme, saniye (varsayılan 0.15)')
     topla.add_argument('--rapor',metavar='DOSYA',help='Açılamayan bağlantı listesi; varsayılan veri klasöründe gyazo-acilamayan.csv')
@@ -99,6 +99,9 @@ def main():
                                            on_kontrol=not args.on_kontrol_atla)
             except ValueError as e: raise SystemExit('Hata: '+str(e))
             print(json.dumps(r,ensure_ascii=False,indent=2))
+            turler=r.get('turler') or {}
+            if turler:
+                print('Türler: '+' · '.join(f"{ad} {t.get('baglanti',0)} bağlantı (indirilen {t.get('indirilen',0)}, zaten var {t.get('zaten_var',0)}, açılamayan {t.get('acilamayan',0)}"+(f", tanınmayan {t['taninmayan']}" if t.get('taninmayan') else '')+')' for ad,t in (('Gyazo',turler.get('gyazo',{})),('Snappark',turler.get('snappark',{})),('Teamzone',turler.get('teamzone',{})))),flush=True)
             neden=r.get('bitis_nedeni','tamam')
             if neden=='tamam': print('GYAZO_ONBELLEK_TAMAM')
             elif neden in ('sinir','sure'): print(f"GYAZO_ONBELLEK_DEVAM: kalan {r.get('kalan',0)} bağlantı sonraki çalıştırmada sürer.")

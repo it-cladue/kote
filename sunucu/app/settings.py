@@ -38,6 +38,11 @@ def settings():
         'PROJELER': ['PP', 'PA', 'OF', 'HI', 'VI', 'GA', 'BETA'], 'SAYFA_BOYU': 48,
         'PROJE_RENK': {'PP': '#A6A6A6', 'PA': '#4472C4', 'OF': '#FFFF00', 'HI': '#FF0000', 'VI': '#7030A0', 'GA': '#00B050', 'BETA': '#FFA500'},
         'GYAZO_PROXY': os.getenv('GYAZO_PROXY', '1'), 'MAX_GORSEL_BYTES': 10 * 1024 * 1024,
+        # 2.3.2 — Snappark/Teamzone görsellerini sunucu üzerinden getir ve kopyala (varsayılan GYAZO_PROXY ile aynı; 0 = kapalı).
+        'DIS_GORSEL_PROXY': os.getenv('DIS_GORSEL_PROXY', os.getenv('GYAZO_PROXY', '1')),
+        # Yalnız yerel uçtan uca test: dış görsel adaylarını bu loopback adrese yönlendirir (127.0.0.1:PORT ya da localhost:PORT;
+        # başka değer yok sayılır). Canlı sunucuda TANIMLAMAYIN.
+        'DIS_GORSEL_TEST_HOST': os.getenv('DIS_GORSEL_TEST_HOST', ''),
         # Görsel önbelleği sınırları: tmp/gyazo için MB ve gün, tmp/thumbs için MB. 0 = sınır yok.
         # Gyazo kopyaları tek kaynağı Gyazo olan kayıtların sunucudaki tek kopyasıdır: varsayılan yaş sınırı yok (0), boyut 2000 MB;
         # boyut dolunca yine en eski (en uzun süre görüntülenmeyen) silinir.

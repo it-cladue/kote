@@ -161,7 +161,9 @@ def link_turu_ve_kimlik(link):
         except Exception:
             return "onedrive", low
     if "snappark" in low:
-        return "snappark", low.rstrip("/").rsplit("/", 1)[-1]
+        # 2.3.2: kimlik /s/<id> parçası (büyük/küçük harf duyarlı; ham bağlantıda eskiden "raw" çıkıyordu).
+        m = re.search(r"/s/([A-Za-z0-9_-]+)", s)
+        return "snappark", (m.group(1) if m else low.rstrip("/").rsplit("/", 1)[-1])
     if "teamzone.gyazo" in low:
         return "teamzone", low.rstrip("/").rsplit("/", 1)[-1]
     if re.match(r"^[a-z]:\\", low) or low.startswith("\\\\"):
