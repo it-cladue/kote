@@ -47,7 +47,7 @@ fi
 for f in kanit-gyazo.service kanit-gyazo.timer; do [[ -r "$SRC_DIR/$f" ]] || fail "Kaynak dosya yok: $SRC_DIR/$f"; done
 [[ -x "$KANIT_DIR/.venv/bin/python" ]] || fail "Panel kurulumu bulunamadı: $KANIT_DIR/.venv/bin/python"
 [[ -f "$KANIT_DIR/.env" ]] || fail "$KANIT_DIR/.env yok."
-"$KANIT_DIR/.venv/bin/python" -m app.cli gyazo-onbellekle --help >/dev/null 2>&1 || fail 'Kurulu panelde gyazo-onbellekle komutu yok; önce 2.3.1 güncellemesini uygulayın.'
+( cd "$KANIT_DIR" && "$KANIT_DIR/.venv/bin/python" -m app.cli gyazo-onbellekle --help ) >/dev/null 2>&1 || fail 'Kurulu panelde gyazo-onbellekle komutu yok; önce 2.3.1 güncellemesini uygulayın.'
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 uret() { sed -e "s#@KANIT_DIR@#$KANIT_DIR#g" -e "s#@BASLANGIC@#$BASLANGIC#g" -e "s#@BITIS@#$BITIS#g" -e "s#@GECELIK@#$GECELIK#g" -e "s#@DILIM@#$DILIM#g" "$1" > "$2"; }
