@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block baslik %}API anahtarları — Kanıt Paneli{% endblock %}
+{% block icerik %}
+{% set durum_adlari = {'etkin':'Etkin','iptal':'İptal edildi','suresi_doldu':'Süresi doldu'} %}
+{% set durum_sinifi = {'etkin':'aktif','iptal':'pasif','suresi_doldu':'bekliyor'} %}
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">Süperadmin yönetimi</p><h1>API anahtarları</h1><p>Başka bir sistemin panel verisini salt okunur çekmesi için anahtar oluşturun. Anahtarlar yalnız okuma yapar; kayıt ekleyemez, değiştiremez, silemez.</p></div>
+  <div class="baslik-eylemler"><a class="btn birincil" href="#yeni-anahtar">Yeni anahtar</a><a class="btn" href="#api-gunlugu">Son istekler</a></div>
+</section>
+{% if not api_acik %}<div class="hata" role="status">API şu an kapalı (.env: API_ACIK=0). Anahtar oluşturabilirsiniz ama /api/v1 adresleri 404 döner.</div>{% endif %}
+{% if mesaj %}<div class="{{ 'hata' if mesaj.startswith('Hata') else 'bilgi' }}" role="status">{{ mesaj }}</div>{% endif %}
+{% if yeni %}
+<section class="kart sifre-kutusu" id="yeni-anahtar-deger" aria-labelledby="yeni-anahtar-baslik">
+  <div class="kart-baslik"><div><p class="ust-etiket">Yeni API anahtarı</p><h2 id="yeni-anahtar-baslik"><b>{{ yeni.ad }}</b> için anahtar</h2></div><button type="button" class="btn birincil" data-kopyala="{{ yeni.anahtar }}">Anahtarı kopyala</button></div>
+  <p class="sifre-deger"><code>{{ yeni.anahtar }}</code></p>
+  <p class="kucukyazi">Bu anahtar yalnız şimdi görünür; panel yalnız özetini saklar. Sayfayı yenilemeyin, anahtarı karşı sistemin gizli ayarına güvenli bir yoldan yazın. Kaybolursa bu anahtarı iptal edip yenisini oluşturun.</p>
+  <p class="kucukyazi">Kullanım: <code>curl -H "Authorization: Bearer kp_…" {{ request.url_root }}api/v1/ozet</code> — ayrıntılar API_KULLANIM.md belgesinde.</p>
+</section>
+{% endif %}
+<section class="kart" aria-labelledby="anahtar-listesi-baslik">
+  <div class="kart-baslik"><div><h2 id="anahtar-listesi-baslik">Anahtarlar</h2><p class="kucukyazi" style="margin:0">{{ anahtarlar|length }} anahtar · Dakikada anahtar başına en çok {{ dakika_siniri }} istek.</p></div></div>
+  <div class="tablo-sarici" tabindex="0" role="region" aria-label="API anahtarları"><table class="tablo"><thead><tr><th>Ad</th><th>Kapsam</th><th>Durum</th><th>Kullanım</th><th class="islem-hucre"><span class="ekran-okuyucu">İşlem</span></th></tr></thead><tbody>
+  {% for a in anahtarlar %}
+  <tr class="{{ 'soluk' if a.durum != 'etkin' }}" id="anahtar-{{ a.id }}">
+    <td><b>{{ a.ad }}</b><br><small><code>kp_{{ a.onek }}…</code></small><br><small>{{ a.olusturan }} · {{ a.olusturma }}</small></td>
+    <td>{% if a.proje_listesi is none %}<span class="durum-etiket notr tek-satir">Tüm projeler</span>{% else %}{% for p in a.proje_listesi %}<span class="rozet" style="background:{{ renk(p) }};color:{{ metin_rengi(renk(p)) }}">{{ p }}</span> {% else %}<small>Proje yok</small>{% endfor %}{% endif %}
+      <br><small>{{ 'Yalnız onaylı kayıtlar' if a.yalniz_onayli else 'Onaylı ve bekleyen kayıtlar' }}{{ ' · SQL sorgusu' if a.sql_izni }}{{ ' · Görsel indirme' if a.gorsel_izni }}</small></td>
+    <td><span class="durum-etiket {{ durum_sinifi.get(a.durum,'notr') }}">{{ durum_adlari.get(a.durum, a.durum) }}</span>{% if a.son_kullanma %}<br><small>Son gün: {{ a.son_kullanma }}</small>{% endif %}{% if a.iptal %}<br><small>{{ a.iptal_eden }} · {{ a.iptal_zamani }}</small>{% endif %}</td>
+    <td><small>{{ a.istek_sayisi }} istek</small>{% if a.son_kullanim %}<br><small>Son: {{ a.son_kullanim }}</small><br><small>IP: {{ a.son_ip }}</small>{% else %}<br><small>Henüz kullanılmadı</small>{% endif %}</td>
+    <td class="islem-hucre">{% if not a.iptal %}<form method="post" data-onay="Bu anahtar iptal edilsin mi? Bu anahtarı kullanan sistem hemen erişimini kaybeder."><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="iptal"><input type="hidden" name="id" value="{{ a.id }}"><button class="btn kucuk">İptal et</button></form>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="5"><div class="bos-tablo">Henüz API anahtarı yok.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+<section class="kart kullanici-formu" id="yeni-anahtar" aria-labelledby="yeni-anahtar-form-baslik">
+  <p class="ust-etiket">Yeni anahtar</p>
+  <h2 id="yeni-anahtar-form-baslik">API anahtarı oluştur</h2>
+  <form method="post" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="olustur">
+    <label>Ad <small>(anahtarı kimin/hangi sistemin kullandığı; en çok 80 karakter)</small><input name="ad" required maxlength="80" placeholder="Rapor sunucusu"></label>
+    <fieldset class="yetki-alanlari"><legend>Proje kapsamı</legend>
+      <label class="satir-label"><input type="radio" name="kapsam" value="secili" checked> <span><b>Seçili projeler</b><small>Yalnız aşağıda işaretlenen projeler</small></span></label>
+      <label class="satir-label"><input type="radio" name="kapsam" value="hepsi"> <span><b>Tüm projeler</b><small>Sonradan eklenen projeler de dahil</small></span></label>
+      <div class="yetki-projeleri">{% for p in tum_projeler %}<div class="yetki-proje" style="--renk:{{ renk(p) }}"><label><input type="checkbox" name="projeler" value="{{ p }}"> <span class="rozet" style="background:{{ renk(p) }};color:{{ metin_rengi(renk(p)) }}">{{ p }}</span></label></div>{% endfor %}</div>
+    </fieldset>
+    <fieldset class="yetki-alanlari"><legend>İzinler</legend>
+      <label class="satir-label"><input type="checkbox" name="yalniz_onayli" value="1" checked> <span><b>Yalnız onaylı kayıtlar</b><small>Kapalıysa bekleyen kayıtlar da görünür; silinmiş kayıtlar hiçbir zaman görünmez</small></span></label>
+      <label class="satir-label"><input type="checkbox" name="sql_izni" value="1"> <span><b>SQL sorgusu</b><small>/api/v1/sorgu ile yalnız SELECT; kapsam dışı satırlar görünmez</small></span></label>
+      <label class="satir-label"><input type="checkbox" name="gorsel_izni" value="1"> <span><b>Görsel indirme</b><small>/api/v1/gorsel ile kanıt görselleri</small></span></label>
+    </fieldset>
+    <label>Son kullanma tarihi <small>(isteğe bağlı; o günün sonuna kadar geçerli)</small><input type="date" name="son_kullanma" min="{{ bugun }}"></label>
+    <button class="btn birincil genis">Anahtar oluştur</button>
+  </form>
+</section>
+<section class="kart" id="api-gunlugu" aria-labelledby="api-gunlugu-baslik">
+  <div class="kart-baslik"><div><h2 id="api-gunlugu-baslik">Son 50 istek</h2><p class="kucukyazi" style="margin:0">Geçersiz anahtarla gelen istekler de listelenir (anahtar sütunu boş).</p></div></div>
+  <div class="tablo-sarici" tabindex="0" role="region" aria-label="API istek günlüğü"><table class="tablo"><thead><tr><th>Zaman</th><th>Anahtar</th><th>Uç</th><th>IP</th><th>Durum</th><th>Süre</th><th>Satır</th></tr></thead><tbody>
+  {% for r in gunluk %}
+  <tr><td><small>{{ r.zaman }}</small></td><td>{% if r.anahtar_id %}{{ r.anahtar_ad }} <small><code>kp_{{ r.anahtar_onek }}…</code></small>{% else %}<small>—</small>{% endif %}</td><td><code>{{ r.uc }}</code></td><td><small>{{ r.ip }}</small></td><td><span class="durum-etiket {{ 'aktif' if r.durum and r.durum < 400 else 'pasif' }}">{{ r.durum }}</span></td><td><small>{{ r.sure_ms }} ms</small></td><td><small>{{ r.satir if r.satir is not none else '—' }}</small></td></tr>
+  {% else %}<tr><td colspan="7"><div class="bos-tablo">Henüz istek yok.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

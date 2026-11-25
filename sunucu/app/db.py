@@ -84,6 +84,17 @@ CREATE TABLE IF NOT EXISTS mesaj_bildirimleri (
  metin TEXT,zaman TEXT NOT NULL,okundu INTEGER DEFAULT 0,
  UNIQUE(kullanici_adi,olay),FOREIGN KEY(kayit_id) REFERENCES kayitlar(id)
 );
+CREATE TABLE IF NOT EXISTS api_anahtarlari (
+ id INTEGER PRIMARY KEY,ad TEXT NOT NULL,onek TEXT NOT NULL,ozet TEXT UNIQUE NOT NULL,
+ projeler TEXT NOT NULL DEFAULT '*',yalniz_onayli INTEGER NOT NULL DEFAULT 1,sql_izni INTEGER NOT NULL DEFAULT 0,
+ gorsel_izni INTEGER NOT NULL DEFAULT 0,son_kullanma TEXT,olusturan TEXT,olusturma TEXT,
+ iptal INTEGER NOT NULL DEFAULT 0,iptal_eden TEXT,iptal_zamani TEXT,
+ son_kullanim TEXT,son_ip TEXT,istek_sayisi INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS api_gunlugu (
+ id INTEGER PRIMARY KEY,anahtar_id INTEGER,zaman TEXT NOT NULL,uc TEXT,ip TEXT,
+ durum INTEGER,sure_ms INTEGER,satir INTEGER
+);
 CREATE INDEX IF NOT EXISTS ix_kayit_proje ON kayitlar(proje,silindi,kt);
 CREATE INDEX IF NOT EXISTS ix_kayit_tarih ON kayitlar(tarih);
 CREATE INDEX IF NOT EXISTS ix_kayit_personel ON kayitlar(personel);
@@ -96,6 +107,8 @@ CREATE INDEX IF NOT EXISTS ix_denetim_proje ON denetim(proje,id);
 CREATE INDEX IF NOT EXISTS ix_denetim_anahtar ON denetim(anahtar,id);
 CREATE INDEX IF NOT EXISTS ix_bildirim_kullanici ON bildirimler(kullanici_adi,okundu,id);
 CREATE INDEX IF NOT EXISTS ix_mesaj_alici ON mesaj_bildirimleri(kullanici_adi,okundu,id);
+CREATE INDEX IF NOT EXISTS ix_api_gunlugu_anahtar ON api_gunlugu(anahtar_id,id);
+CREATE INDEX IF NOT EXISTS ix_api_gunlugu_zaman ON api_gunlugu(zaman);
 '''
 DEFAULT_CATEGORIES = [
  ('ark','ARK','ark_ana'),('dds','DDS','sessiz_tip'),('ddt','DDT','sessiz_tip'),
@@ -151,7 +164,8 @@ def ayar_yaz(conn, anahtar, deger):
 def _ready(conn):
     try:
         # 2.3.1: hesap_surumu sütunu; bayrak yükseltilmeden _add_columns canlı (core_schema_21=1 yazılı) DB'de hiç çalışmazdı.
-        return ayar_al(conn, 'core_schema_23') == '1'
+        # 2.3.2: api_anahtarlari / api_gunlugu tabloları (core_schema_24). İki bayrak birlikte aranır: biri eksikse geçiş yeniden koşar.
+        return ayar_al(conn, 'core_schema_23') == '1' and ayar_al(conn, 'core_schema_24') == '1'
     except sqlite3.OperationalError:
         return False
 
@@ -193,7 +207,7 @@ def baglan(yol):
             katalog.ensure_schema(conn)
             donusum_isleri.ensure_schema(conn)
             yetki.eski_wildcardlari_sabitle(conn, [p['code'] for p in katalog.list_projects(conn)])
-            ayar_yaz(conn, 'core_schema_21', '1'); ayar_yaz(conn, 'core_schema_23', '1')
+            ayar_yaz(conn, 'core_schema_21', '1'); ayar_yaz(conn, 'core_schema_23', '1'); ayar_yaz(conn, 'core_schema_24', '1')
         return conn
     except BaseException:
         conn.close()

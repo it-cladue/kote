@@ -1,0 +1,210 @@
+# Kanıt Paneli API (2.3.2) — kullanım belgesi
+
+Başka bir panel ya da sistem, Kanıt Paneli verisini **salt okunur** olarak bu API ile çeker. API kayıt ekleyemez,
+değiştiremez, silemez; onay veremez. Tüm adresler `/api/v1/` ile başlar ve JSON döner.
+
+Aşağıdaki örneklerde `https://panel.ornek` yerine kendi panel adresinizi, `kp_…` yerine size verilen anahtarı yazın.
+
+## 1. Anahtar oluşturma (süperadmin)
+
+1. Panele süperadmin hesabıyla girin.
+2. Üst menü **Yönetim → API anahtarları** (`/yonetim/api-anahtarlari`).
+3. **API anahtarı oluştur** formu:
+   - **Ad**: anahtarı kullanacak sistem (ör. "Rapor sunucusu"). Listede ve günlükte bu ad görünür.
+   - **Proje kapsamı**: *Seçili projeler* (yalnız işaretlediğiniz projeler) ya da *Tüm projeler* (sonradan eklenen projeler de dahil).
+   - **Yalnız onaylı kayıtlar** (varsayılan açık): açıkken API yalnız onaylanmış kayıtları görür. Kapalıysa bekleyenler de görünür.
+     Silinmiş kayıtlar hiçbir koşulda görünmez.
+   - **SQL sorgusu** (varsayılan kapalı): `/api/v1/sorgu` ucunu açar.
+   - **Görsel indirme** (varsayılan kapalı): `/api/v1/gorsel/<id>` ucunu ve listelerdeki `gorsel_url` alanını açar.
+   - **Son kullanma tarihi** (isteğe bağlı): anahtar o günün sonuna kadar geçerlidir.
+4. **Anahtar oluştur**'a basın. Anahtar (`kp_` + 40 karakter) **yalnız bir kez** gösterilir: hemen kopyalayıp karşı sistemin gizli
+   ayarına yazın. Panel anahtarın kendisini saklamaz (yalnız özeti ve tanıma için ilk 8 karakteri); kaybolursa iptal edip yenisini oluşturun.
+5. Listede her anahtarın kapsamı, durumu (Etkin / İptal edildi / Süresi doldu), son kullanım zamanı ve IP'si, toplam istek sayısı görünür.
+   **İptal et** düğmesi anahtarı hemen geçersiz kılar. Sayfanın altında son 50 istek listelenir.
+6. Oluşturma ve iptal İşlem Geçmişi'ne yazılır ("API anahtarı oluşturma", "API anahtarı iptali").
+
+## 2. Kimlik doğrulama
+
+Her istekte başlık:
+
+```
+Authorization: Bearer kp_…
+```
+
+- Oturum çerezi kabul edilmez; tarayıcıda panele giriş yapmış olmak API'ye erişim sağlamaz. API yanıtları çerez yazmaz.
+- Yanıt başlıkları: `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`.
+- İstek gövdesi en çok 64 KB.
+- Anahtarı adres çubuğuna/sorgu dizesine koymayın; yalnız başlıkta gönderin. Panel HTTPS ile yayındaysa yalnız `https://` kullanın.
+
+## 3. Uçlar
+
+Tüm uçlarda kapsam uygulanır: anahtarın projeleri; "yalnız onaylı" açıksa yalnız onaylı kayıtlar; silinmiş kayıtlar her zaman hariç.
+Ortak süzgeçler:
+
+| Parametre | Anlamı |
+|---|---|
+| `proje` | Proje kodu; birden çok için tekrarlayın (`proje=OF&proje=PA`) ya da virgülle ayırın. Kapsam dışı proje → 403. Boş = anahtarın tüm projeleri. |
+| `tarih1`, `tarih2` | `YYYY-AA-GG`; kanıt tarihi (`tarih`) bu aralıkta (iki uç dahil). Ters verilirse yer değiştirilir ve yanıtta `uyari` döner. |
+| `tarihsiz=1` | Yalnız tarihi boş kayıtlar (tarih aralığıyla birlikte kullanılamaz). |
+
+### 3.1 `GET /api/v1/ozet`
+
+Parametreler: `proje`, `tarih1`, `tarih2`.
+
+```bash
+curl -s -H "Authorization: Bearer kp_…" "https://panel.ornek/api/v1/ozet?proje=OF&tarih1=2026-11-01&tarih2=2026-11-30"
+```
+
+Yanıt: `toplam`, `onayli`, `bekleyen`; `projeler` (proje bazlı toplam/onaylı/bekleyen); `kategori_tip` (kategori × tip çaprazı:
+toplam, onaylı); `ekleyenler` (ekleyen bazlı ilk 50: `ekleyen_id`, `ekleyen_ad`, toplam, onaylı); `suzgec`.
+
+### 3.2 `GET /api/v1/kayitlar`
+
+Parametreler: `proje`, `durum` (`onayli` | `bekleyen` | `hepsi`; varsayılan `hepsi`; "yalnız onaylı" anahtarda her zaman `onayli`),
+`kategori` (büyük/küçük harf duyarsız tam eşleşme), `ekleyen` (ad parçası ya da Telegram kimliği), `tarih1`, `tarih2`, `tarihsiz`,
+`q` (personel, üye ID, ana üye ID, lead ID, link, açıklama, ekleyen adı, kategoride arar — Kayıtlar sayfasıyla aynı),
+`sayfa` (1'den başlar), `adet` (1–500, varsayılan 100). Sıralama: kanıt tarihi yeni → eski.
+
+```bash
+curl -s -H "Authorization: Bearer kp_…" "https://panel.ornek/api/v1/kayitlar?proje=OF&durum=onayli&kategori=CVPS&tarih1=2026-11-01&adet=200&sayfa=1"
+```
+
+Yanıt: `{toplam, sayfa, adet, sayfa_sayisi, suzgec, kayitlar:[…]}`; her kayıt alanları için bkz. §4.
+
+### 3.3 `GET /api/v1/kayit/<id>`
+
+Tek kayıt ve yorumları (`yorumlar: [{kullanici, tur, metin, zaman}]`). Kapsam dışı ya da hiç olmayan kayıt için aynı 404 döner
+(kaydın var olup olmadığı belli edilmez).
+
+```bash
+curl -s -H "Authorization: Bearer kp_…" "https://panel.ornek/api/v1/kayit/1234"
+```
+
+### 3.4 `GET /api/v1/gorsel/<id>`
+
+Yalnız "Görsel indirme" izinli anahtarlar (aksi hâlde 403). Kaydın görselini bayt olarak döner (sunucudaki dosya ya da Gyazo önbelleği).
+Görsel yoksa 404. İkinci görsel için `?ikinci=1`.
+
+```bash
+curl -s -H "Authorization: Bearer kp_…" -o kayit-1234.jpg "https://panel.ornek/api/v1/gorsel/1234"
+```
+
+### 3.5 `POST /api/v1/sorgu`
+
+Yalnız "SQL sorgusu" izinli anahtarlar (aksi hâlde 403). Gövde JSON:
+
+```json
+{ "sql": "SELECT … WHERE personel = ?", "parametreler": ["ayse"] }
+```
+
+```bash
+curl -s -H "Authorization: Bearer kp_…" -H "Content-Type: application/json" \
+  -d '{"sql":"SELECT proje, count(*) AS adet FROM kayitlar GROUP BY proje"}' \
+  "https://panel.ornek/api/v1/sorgu"
+```
+
+Yanıt: `{sutunlar:[…], satirlar:[[…],…], satir_sayisi, kesildi, sure_ms}`.
+
+**Kurallar**
+
+- Yalnız tek bir `SELECT` (ya da `WITH … SELECT`, `VALUES`) ifadesi. Sondaki tek `;` kabul edilir; `;` sonrasında metin (başka ifade,
+  yorum) varsa 400.
+- Okunabilen tablolar (anahtarın kapsamına göre süzülmüş görünümler):
+  - `kayitlar`: `id, proje, kategori, kategori_code, kategori_mode, personel, uye_id, ana_uye_id, lead_id, tip, tarih, kt, kt_kim,
+    kt_zaman, ekleyen_id, ekleyen_ad, link, link_turu, aciklama, kaynak, giris_tipi, ilk_gorulme, guncelleme` — silinmişler yok;
+    "yalnız onaylı" anahtarda yalnız `kt=1`.
+  - `yorumlar`: `id, kayit_id, kullanici, tur, metin, zaman, yanit_id` — yalnız kapsamdaki kayıtların yorumları.
+  - `kategoriler`: `code, label, mode`.
+  - `tg_kullanicilar`: `id, username, first_name, onayli, engelli`.
+- Başka her şey reddedilir (403): panel kullanıcıları, ayarlar, işlem geçmişi, Telegram kuyrukları, `sqlite_master`, `main.` ile
+  doğrudan tablo okuma, PRAGMA, ATTACH, her türlü yazma, `WITH RECURSIVE`, tablo döndüren işlevler (`json_each`, `pragma_*`).
+- En çok 5000 satır döner; fazlası kesilir ve `kesildi: true` olur. Daha fazlası için `LIMIT`/`OFFSET` ya da `WHERE id > ?` ile sayfalayın.
+- Sorgu en çok 5 saniye çalışır; aşarsa durdurulur (400, `neden: "sure"`).
+- Parametreler `?` ile verilir (en çok 100; metin, sayı ya da null). Değerleri SQL metnine eklemek yerine parametre kullanın.
+- Hata yanıtlarında `neden` alanı: `yetki`, `sure`, `sutun`, `sozdizimi`, `parametre`, `tek_ifade`, `yalniz_select`, `girdi`, `boyut`, `diger`.
+
+**Örnek sorgular**
+
+1. Bu personel bu ay kaç CVPS (onaylı):
+
+```sql
+SELECT count(*) AS cvps
+FROM kayitlar
+WHERE personel = ? AND kategori = 'CVPS' AND kt = 1
+  AND tarih >= strftime('%Y-%m-01', 'now', 'localtime')
+```
+
+```bash
+curl -s -H "Authorization: Bearer kp_…" -H "Content-Type: application/json" \
+  -d "{\"sql\":\"SELECT count(*) AS cvps FROM kayitlar WHERE personel = ? AND kategori = 'CVPS' AND kt = 1 AND tarih >= strftime('%Y-%m-01','now','localtime')\",\"parametreler\":[\"ayse\"]}" \
+  "https://panel.ornek/api/v1/sorgu"
+```
+
+2. Bu ay personel × kategori dağılımı:
+
+```sql
+SELECT personel, kategori, count(*) AS adet, sum(kt) AS onayli
+FROM kayitlar
+WHERE tarih >= strftime('%Y-%m-01', 'now', 'localtime')
+GROUP BY personel, kategori
+ORDER BY adet DESC
+```
+
+3. Sessiz / telesekreter oranı ve yorumlu kayıt sayısı (proje bazlı):
+
+```sql
+SELECT k.proje,
+       sum(k.tip = 'sessiz') AS sessiz,
+       sum(k.tip = 'telesekreter') AS telesekreter,
+       count(DISTINCT y.kayit_id) AS yorumlu_kayit
+FROM kayitlar k LEFT JOIN yorumlar y ON y.kayit_id = k.id
+GROUP BY k.proje
+```
+
+## 4. Alan sözlüğü
+
+| Alan (`/kayitlar` JSON) | SQL sütunu | Anlamı |
+|---|---|---|
+| `id` | `id` | Kayıt numarası (panelde `#id`). |
+| `proje` | `proje` | Proje kodu (OF, PA, …). |
+| `kategori` | `kategori` | Kanıt kategorisinin görünen adı: **CVPS**, DDS, DDT, HGST, PRCST, LPST, ARK, S.ARK, btagsz, 30gün … ("bu personel kaç CVPS" sorusu bu alandır). |
+| — | `kategori_code`, `kategori_mode` | Kategori kodu (ör. `cvpsz`) ve soru akışı türü (`tek_uye`, `ark_ana`, `ana_only`, `sessiz_tip`). |
+| `tip` | `tip` | Yalnız sessiz_tip kategorilerinde (DDS, DDT): **`sessiz`** ya da **`telesekreter`**. |
+| `personel` | `personel` | Kanıtın ait olduğu personel. |
+| `uye_id`, `ana_uye_id`, `lead_id` | aynı | Üye / ana üye (arkadaş kategorilerinde) / lead kimlikleri. |
+| `tarih` | `tarih` | Kanıt tarihi `YYYY-AA-GG SS:DD:ss`. |
+| `onayli` (true/false) | `kt` (1/0) | Onay durumu. |
+| `onaylayan`, `onay_zamani` | `kt_kim`, `kt_zaman` | Onaylayan panel kullanıcısı ve zamanı. |
+| `ekleyen_id`, `ekleyen_ad` | aynı | Kanıtı ekleyen Telegram kullanıcısı (kimlik ve ad). |
+| `link`, `link_turu` | aynı | Kanıt bağlantısı ve türü (ör. gyazo). |
+| `aciklama` | `aciklama` | Açıklama metni. |
+| `yorum_sayisi` | — | Kayıttaki yorum sayısı. |
+| `gorsel_url` | — | Yalnız görsel izinli anahtarda: `/api/v1/gorsel/<id>` (görsel yoksa null). |
+
+## 5. Hata kodları
+
+Tüm hatalar `{"ok": false, "hata": "<Türkçe açıklama>", "kod": <HTTP kodu>}` biçimindedir.
+
+| Kod | Ne zaman |
+|---|---|
+| 400 | Geçersiz parametre (tarih, `durum`, `adet`), hatalı JSON gövde, SQL söz dizimi/süre/parametre hatası. |
+| 401 | Anahtar yok, biçimi yanlış, geçersiz, iptal edilmiş ya da süresi dolmuş. |
+| 403 | Kapsam dışı proje istendi; SQL ya da görsel izni yok; SQL sorgusu izin verilmeyen bir tabloya/işleme erişiyor. |
+| 404 | Kayıt yok ya da kapsam dışı; görsel yok; bilinmeyen uç; API kapalı (`API_ACIK=0`). |
+| 405 | Uç bu yöntemle çağrılamaz (ör. `GET /api/v1/sorgu`). |
+| 413 | Gövde 64 KB'den büyük. |
+| 429 | Hız sınırı aşıldı; `Retry-After` başlığı kaç saniye beklenmesi gerektiğini söyler. |
+| 500 | Beklenmeyen hata; yanıttaki `kayit_no`'yu panel yöneticisine iletin. |
+
+## 6. Hız sınırı ve günlük
+
+- Anahtar başına dakikada en çok `API_DAKIKA_SINIRI` istek (varsayılan 120; kayan 60 saniyelik pencere). Aşılınca 429 ve `Retry-After`.
+- Aynı IP'den dakikada 30'dan fazla geçersiz anahtar denemesi de 429 alır.
+- Her istek panelde günlüğe yazılır (anahtar, zaman, uç, IP, durum kodu, süre, satır sayısı); günlük 90 gün saklanır.
+
+## 7. Sunucu ayarları (.env)
+
+| Anahtar | Varsayılan | Anlamı |
+|---|---|---|
+| `API_ACIK` | `1` | `0` ise tüm `/api/v1` adresleri 404 döner (anahtarlar silinmez). |
+| `API_DAKIKA_SINIRI` | `120` | Anahtar başına dakikalık istek sınırı (1'den küçük ya da geçersiz değer 120 sayılır). |

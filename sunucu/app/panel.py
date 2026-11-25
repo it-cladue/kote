@@ -16,7 +16,7 @@ from werkzeug.datastructures import MultiDict
 from werkzeug.exceptions import SecurityError
 from functools import wraps
 from PIL import Image, UnidentifiedImageError
-from . import db, yetki, kullanicilar, gorsel, bot_yonetim
+from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari
 from .settings import AYAR, ROOT
 
 SURUM = '2.3.1'
@@ -42,6 +42,8 @@ class _CerezsizOturum(SecureCookieSessionInterface):
     def save_session(self,app,session,response):
         if request.endpoint in CEREZSIZ_UCLAR and not session.modified:
             return None
+        if request.path.startswith('/api/'):
+            return None  # 2.3.2: API yanıtları hiçbir koşulda oturum çerezi yazmaz
         return super().save_session(app,session,response)
 
 app.session_interface=_CerezsizOturum()
@@ -201,6 +203,7 @@ def _host_hatasi(error=None):
     return resp
 
 app.register_error_handler(SecurityError,_host_hatasi)
+app.register_blueprint(api.bp)  # 2.3.2: /api/v1/* (Bearer anahtar; oturum/CSRF yok)
 
 @app.before_request
 def before():
@@ -211,6 +214,9 @@ def before():
     if request.endpoint in CEREZSIZ_UCLAR:
         # Sağlık denetimi ve statik dosyalar oturum çerezi üretmez.
         g.yk=yetki.coz('');return None
+    if request.path.startswith('/api/'):
+        # 2.3.2: API oturum çerezini okumaz/yazmaz, CSRF uygulanmaz; kimlik api.py'de Bearer anahtarla. Eşleşmeyen yol → JSON 404/405.
+        g.yk=yetki.coz('');return api.yol_hatasi()
     if session.get('kad'):
         row=baglanti().execute('SELECT * FROM panel_kullanicilari WHERE kullanici_adi=?',(session['kad'],)).fetchone();u=dict(row) if row else None
         gz=session.get('gz')
@@ -410,13 +416,15 @@ ISLEM_ADLARI={'giris':'Giriş yaptı','giris_hata':'Hatalı giriş denemesi','on
  'bot_bakim_ac':'Bakım modunu açtı','bot_bakim_kapat':'Bakım modunu kapattı','bot_bakim':'Bakım modunu değiştirdi','bot_onayla':'Telegram kullanıcısını onayladı','bot_onay_kaldir':'Telegram onayını kaldırdı','bot_engelle':'Telegram kullanıcısını engelledi','bot_engel_kaldir':'Telegram engelini kaldırdı','bot_tam_sifirla':'Telegram kullanıcısını tam sıfırladı','bot_oturum_temizle':'Bot oturumunu temizledi','bot_kontrol':'Botu duraklattı / sürdürdü','bot_yedek':'Veritabanı yedeği aldı','bot_inbox_tekrar':'Bekleyen bot mesajlarını yeniden denedi','bot_kategori_kaydet':'Bot kategorisini kaydetti','bot_kategori_sil':'Bot kategorisini pasife aldı','bot_kategori_yayinla':'Bot kategorilerini yayınladı',
  'katalog_proje_kaydet':'Proje tanımını kaydetti','katalog_kategori_kaydet':'Kategori tanımını kaydetti',
  'gyazo_link_guncelle':'Gyazo bağlantısını güncelledi','gyazo_link_yerel_korundu':'Gyazo bağlantısı eklenmedi, yerel görsel korundu',
- 'hatirlatma_uret':'Onay bekleyenler için hatırlatma bildirimi üretti'}
+ 'hatirlatma_uret':'Onay bekleyenler için hatırlatma bildirimi üretti',
+ 'api_anahtar_olustur':'API anahtarı oluşturdu','api_anahtar_iptal':'API anahtarını iptal etti'}
 # İşlem Geçmişi tablosu için kısa ad biçimi.
 DENETIM_ADLARI={'giris':'Giriş','giris_hata':'Hatalı giriş','onayla':'Onay','onay_kaldir':'Onay kaldırma','duzenle':'Düzenleme','sil':'Silme','geri_al':'Geri alma','yorum_ekle':'Yorum','soru_yonelt':'Soru','yanit_ekle':'Yanıt','gyazo_istek':'Gyazo isteği','disa_aktar':'Excel çıktısı','dosya_kontrol':'Dosya kontrolü','kullanici_ekle':'Kullanıcı ekleme','kullanici_guncelle':'Kullanıcı güncelleme','kilit_ac':'Kilit açma','sifre_degisti':'Şifre değişimi','cikis':'Çıkış','giris_kilit':'Hesap kilidi','giris_sinir':'IP giriş sınırı','sifre_hata':'Hatalı mevcut parola','csrf_hata':'Geçersiz CSRF gönderimi','arsiv_esle':'Arşiv eşleme','beklenen_proje':'Beklenen proje','yeni_kayit':'Yeni kanıt','bildirim_okundu':'Bildirim okundu','sunucu_hata':'Sunucu hatası','ice_aktar':'İçe aktarım','yetki_kanonik':'Yetki düzeltme',
  'katalog_proje_kaydet':'Proje kaydı','katalog_kategori_kaydet':'Kategori kaydı',
  'telegram_kayit':'Telegram ile kanıt','bot_kayit':'Telegram ile kanıt','telegram_onay':'Telegram: şifreyle giriş','telegram_admin_giris':'Telegram: yönetici girişi','telegram_admin_giris_hata':'Telegram: yönetici parolası hatası','telegram_engel':'Telegram: engellendi','telegram_eski_buton':'Telegram: eski düğme','telegram_yanlis_adim_butonu':'Telegram: yanlış adım düğmesi',
  'bot_onayla':'Bot: kullanıcı onayı','bot_onay_kaldir':'Bot: onay kaldırma','bot_engelle':'Bot: engelleme','bot_engel_kaldir':'Bot: engel kaldırma','bot_tam_sifirla':'Bot: tam sıfırlama','bot_oturum_temizle':'Bot: oturum temizleme','bot_bakim':'Bot: bakım modu','bot_bakim_ac':'Bot: bakım modu açıldı','bot_bakim_kapat':'Bot: bakım modu kapatıldı','bot_kontrol':'Bot: duraklat/sürdür','bot_yedek':'Bot: veritabanı yedeği','bot_inbox_tekrar':'Bot: tekrar deneme','bot_kategori_kaydet':'Bot: kategori kaydı','bot_kategori_sil':'Bot: kategori pasife','bot_kategori_yayinla':'Bot: kategori yayını',
- 'gyazo_link_guncelle':'Gyazo bağlantısı','gyazo_link_yerel_korundu':'Gyazo: yerel görsel korundu','hatirlatma_uret':'Hatırlatma bildirimi'}
+ 'gyazo_link_guncelle':'Gyazo bağlantısı','gyazo_link_yerel_korundu':'Gyazo: yerel görsel korundu','hatirlatma_uret':'Hatırlatma bildirimi',
+ 'api_anahtar_olustur':'API anahtarı oluşturma','api_anahtar_iptal':'API anahtarı iptali'}
 
 def islem_adi(code,adlar=None):
     """Sözlükte olmayan kod ham yazılmaz; alt çizgiler boşluğa çevrilir (kod ikinci kez basılmaz)."""
@@ -1038,6 +1046,32 @@ def yonetim_kullanicilar():
     gecici=_gecici_sifre_al() if request.method=='GET' else None
     return render_template('kullanicilar.html',kullanicilar=users,mesaj=mesaj,tum_projeler=projeler(),gecici_sifre=gecici)
 
+
+@app.route('/yonetim/api-anahtarlari',methods=['GET','POST'])
+@admin_gerekli
+def yonetim_api_anahtarlari():
+    """2.3.2: dış sistemler için salt okunur API anahtarları. Yeni anahtar yalnız oluşturma yanıtında bir kez gösterilir (saklanmaz)."""
+    c=baglanti();mesaj=None;yeni=None;durum=200
+    if request.method=='POST':
+        try:
+            op=request.form.get('islem');kim=g.k['kullanici_adi']
+            if op=='olustur':
+                kapsam='*' if request.form.get('kapsam','secili')=='hepsi' else request.form.getlist('projeler')
+                kid,anahtar=api_anahtarlari.olustur(c,request.form.get('ad',''),kapsam,yalniz_onayli=request.form.get('yalniz_onayli')=='1',
+                    sql_izni=request.form.get('sql_izni')=='1',gorsel_izni=request.form.get('gorsel_izni')=='1',
+                    son_kullanma=request.form.get('son_kullanma') or None,olusturan=kim,ip=ip(),tanimli_projeler=projeler())
+                yeni=dict(id=kid,anahtar=anahtar,ad=db.metin_temizle(request.form.get('ad',''),80).strip())
+                mesaj='Anahtar oluşturuldu. Aşağıdaki değeri şimdi kopyalayın; bir daha gösterilmez.'
+            elif op=='iptal':
+                try:kid=int(request.form.get('id',''))
+                except ValueError:raise ValueError('Anahtar bulunamadı.')
+                mesaj='Anahtar iptal edildi; bu anahtarla gelen istekler artık reddedilir.' if api_anahtarlari.iptal(c,kid,kim,ip()) else 'Anahtar zaten iptal edilmişti.'
+                flash(mesaj);return redirect(url_for('yonetim_api_anahtarlari'))
+            else:raise ValueError('Bilinmeyen işlem.')
+        except ValueError as e:mesaj='Hata: '+str(e);durum=400
+    return render_template('api_anahtarlari.html',anahtarlar=api_anahtarlari.listele(c),gunluk=api_anahtarlari.son_gunluk(c,50),
+                           tum_projeler=projeler(),yeni=yeni,mesaj=mesaj,api_acik=api.acik_mi(),dakika_siniri=api.dakika_siniri(),
+                           bugun=datetime.now().strftime('%Y-%m-%d')),durum
 
 @app.route('/bot',methods=['GET','POST'])
 @admin_gerekli
