@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import sqlite3
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -25,7 +26,12 @@ bp = Blueprint('api', __name__, url_prefix='/api/v1')
 
 EN_BUYUK_GOVDE = 64 * 1024
 SQL_SURE_SN = 5.0
-SQL_EN_COK_SATIR = 5000
+SQL_EN_COK_SATIR = 1000
+SQL_EN_COK_BAYT = 8 * 1024 * 1024    # 2.3.2-inc: yanıttaki toplam değer boyutu üst sınırı (bellek tüketme DoS'una karşı)
+SQL_DEGER_EN_UZUN = 64 * 1024        # tek değer (metin/blob) üst sınırı: SQLITE_LIMIT_LENGTH
+SQL_ESZAMANLI_VARSAYILAN = 2         # süreç genelinde aynı anda çalışan sorgu (waitress threads=8'in altında)
+SQL_ESZAMANLI_EN_COK = 6
+SQL_RETRY_AFTER = 2
 SQL_EN_UZUN = 20000
 SQL_EN_COK_PARAMETRE = 100
 YETKISIZ_IP_SINIRI = 30  # dakikada IP başına geçersiz anahtar denemesi; aşan istekler günlüğe yazılmadan 429 alır
@@ -41,6 +47,11 @@ SQL_KAYIT_SUTUNLARI = ('id', 'proje', 'kategori', 'kategori_code', 'kategori_mod
 SQL_YORUM_SUTUNLARI = ('id', 'kayit_id', 'kullanici', 'tur', 'metin', 'zaman', 'yanit_id')
 SQL_GORUNUMLER = ('kayitlar', 'yorumlar', 'kategoriler', 'tg_kullanicilar')
 YASAK_FONKSIYONLAR = frozenset({'load_extension', 'zeroblob', 'randomblob', 'readfile', 'writefile', 'fts3_tokenizer', 'edit'})
+# 'sqlite_' önekli işlevler (sqlite_version, sqlite_source_id, sqlite_compileoption_get/used, sqlite_offset ...) derleme bilgisi açar: kapalı.
+YASAK_ONEKLER = ('sqlite_',)
+_SQL_KILIT = threading.Lock()
+_SQL_AKTIF = {}        # anahtar özeti -> çalışan sorgu sayısı
+_SQL_TOPLAM = [0]      # süreç genelinde çalışan sorgu sayısı
 
 
 def _panel():
@@ -48,8 +59,23 @@ def _panel():
     return panel
 
 
+API_ACIK_DEGERLER = ('1', 'true', 'evet', 'acik', 'açık', 'on', 'yes')
+
+
 def acik_mi():
-    return str(os.getenv('API_ACIK', '1') or '1').strip().lower() not in ('0', 'false', 'hayir', 'hayır', 'kapali', 'kapalı', 'no', 'off')
+    """Beyaz liste: boş/tanımsız ya da açık anlamlı değer → açık; tanınmayan her değer (ör. 'kapat') → kapalı (güvenli taraf)."""
+    return str(os.getenv('API_ACIK', '1') or '1').strip().lower() in API_ACIK_DEGERLER
+
+
+def sorgu_eszamanli_siniri():
+    """API_SORGU_ESZAMANLI (varsayılan 2, en çok 6): /sorgu ucunda süreç genelinde aynı anda çalışabilecek sorgu."""
+    try:
+        deger = int(str(os.getenv('API_SORGU_ESZAMANLI', '') or '').strip() or SQL_ESZAMANLI_VARSAYILAN)
+    except (TypeError, ValueError):
+        return SQL_ESZAMANLI_VARSAYILAN
+    if deger < 1:
+        return SQL_ESZAMANLI_VARSAYILAN
+    return min(deger, SQL_ESZAMANLI_EN_COK)
 
 
 def dakika_siniri():
@@ -119,19 +145,20 @@ def _kimlik():
     g.api_basla = time.perf_counter(); g.api_anahtar = None; g.api_satir = None; g.api_gunluk = False
     if not acik_mi():
         return _hata(404, HTTP_MESAJLARI[404])
-    if request.content_length is not None and request.content_length > EN_BUYUK_GOVDE:
-        g.api_gunluk = True
-        return _hata(413, HTTP_MESAJLARI[413])
+    buyuk = request.content_length is not None and request.content_length > EN_BUYUK_GOVDE
     request.max_content_length = EN_BUYUK_GOVDE
     c = _panel().baglanti()
     anahtar, neden = aa.dogrula(c, _bearer())
     if not anahtar:
+        # Kimliksiz/geçersiz istek (413 dahil): IP başına sınır; aşan istekler günlüğe yazılmadan 429 alır.
         izin, bekle = YETKISIZ_HIZ.dene('ip:' + str(request.remote_addr), YETKISIZ_IP_SINIRI)
         if not izin:
             resp = _hata(429, 'Çok fazla geçersiz anahtar denemesi. ' + str(bekle) + ' saniye sonra tekrar deneyin.')
             resp.headers['Retry-After'] = str(bekle)
             return resp
         g.api_gunluk = True
+        if buyuk:
+            return _hata(413, HTTP_MESAJLARI[413])
         mesaj = {'yok': 'API anahtarı gerekli: Authorization: Bearer kp_… başlığını gönderin. Oturum çerezi kabul edilmez.',
                  'iptal': 'Bu API anahtarı iptal edilmiş. Panel yöneticisinden yeni anahtar isteyin.',
                  'suresi_doldu': 'Bu API anahtarının süresi dolmuş. Panel yöneticisinden yeni anahtar isteyin.'}.get(
@@ -140,6 +167,8 @@ def _kimlik():
         resp.headers['WWW-Authenticate'] = 'Bearer realm="kanit-paneli-api"'
         return resp
     g.api_anahtar = anahtar; g.api_gunluk = True
+    if buyuk:
+        return _hata(413, HTTP_MESAJLARI[413])
     sinir = dakika_siniri()
     izin, bekle = HIZ.dene(anahtar['ozet'], sinir)
     if not izin:
@@ -235,6 +264,9 @@ def _suzgec(durum_kullan=True):
         kosul.append('proje IN (%s)' % ','.join('?' * len(secili))); par.extend(secili)
     yalniz = bool(g.api_anahtar['yalniz_onayli'])
     durum = 'onayli' if yalniz else 'hepsi'
+    durum_uyari = None
+    if durum_kullan and yalniz and (request.args.get('durum') or '').strip().lower() not in ('', 'onayli'):
+        durum_uyari = 'Bu anahtar yalnız onaylı kayıtları görür; durum süzgeci yok sayıldı.'
     if durum_kullan and not yalniz:
         durum = (request.args.get('durum') or 'hepsi').strip().lower()
         if durum not in ('onayli', 'bekleyen', 'hepsi'):
@@ -244,6 +276,8 @@ def _suzgec(durum_kullan=True):
         elif durum == 'bekleyen':
             kosul.append('kt=0')
     tarihler, uyari = _tarih_suzgeci(kosul, par)
+    if durum_uyari:
+        uyari = durum_uyari + (' ' + uyari if uyari else '')
     meta = dict(proje=secili, durum=durum, **tarihler)
     if durum_kullan:
         kategori = (request.args.get('kategori') or '').strip()[:120]
@@ -263,6 +297,8 @@ def _suzgec(durum_kullan=True):
 def _metin(v):
     if isinstance(v, bytes):
         return v.decode('utf-8', 'replace')
+    if isinstance(v, float) and not math.isfinite(v):
+        return None  # JSON'da Infinity/NaN geçerli değil (RFC 8259); null olarak verilir
     return v
 
 
@@ -271,7 +307,8 @@ def _gorsel_var(row):
     d = {k: _metin(row[k]) for k in row.keys()}
     try:
         yol, _ = panel.COZUCU.yerel_dosya(d)
-        return bool(yol) or panel.COZUCU.gyazo_mumkun(d)
+        # 2.3.2-inc: Snappark/Teamzone da /api/v1/gorsel ile sunulur (panel kayit_sozluk ile aynı kural; ağa çıkmaz).
+        return bool(yol) or bool(panel.COZUCU.gyazo_mumkun(d)) or bool(panel.COZUCU.dis_mumkun(d))
     except Exception:
         return False
 
@@ -353,6 +390,11 @@ def kayit(kid):
     return jsonify(ok=True, kayit=d)
 
 
+def _gorsel_bekleme():
+    from . import gorsel as gorsel_modulu
+    return gorsel_modulu.GORSEL_ISTEK_BEKLEME_SN
+
+
 @bp.route('/gorsel/<int:kid>')
 def gorsel(kid):
     if not g.api_anahtar['gorsel_izni']:
@@ -363,11 +405,13 @@ def gorsel(kid):
     if request.args.get('ikinci') == '1':
         d.update(gorsel_dosya=row['gorsel2_dosya'], link=row['gorsel2'], anahtar=str(row['anahtar'] or row['id']) + ':2')
     try:
-        yol, _ = panel.COZUCU.gorsel_yolu(d)
+        yol, _ = panel.COZUCU.gorsel_yolu(d, bekle=_gorsel_bekleme())
     except Exception:
         yol = None
     if not yol:
         raise _Red(404, 'Bu kaydın görseli yok ya da şu an alınamıyor.')
+    if not panel.COZUCU.gecerli(yol):
+        raise _Red(422, 'Kaydın görsel dosyası bozuk ya da görsel değil. Panel yöneticisine bildirin.')
     g.api_satir = 1
     try:
         return send_file(yol, conditional=True, download_name='kayit-%d%s' % (kid, Path(yol).suffix.lower() or '.jpg'))
@@ -423,7 +467,8 @@ class Yetkilendirici:
         if eylem == sqlite3.SQLITE_SELECT:
             return sqlite3.SQLITE_OK
         if eylem == sqlite3.SQLITE_FUNCTION:
-            if str(a2 or '').lower() in YASAK_FONKSIYONLAR:
+            ad = str(a2 or '').lower()
+            if ad in YASAK_FONKSIYONLAR or ad.startswith(YASAK_ONEKLER):
                 self.red += 1
                 return sqlite3.SQLITE_DENY
             return sqlite3.SQLITE_OK
@@ -457,7 +502,10 @@ def gorunumleri_kur(conn, projeler, tumu, yalniz_onayli):
         'yorumlar': ('SELECT %s FROM main.yorumlar y JOIN main.kayitlar k ON k.id=y.kayit_id WHERE %s'
                      % (','.join('y.' + s for s in SQL_YORUM_SUTUNLARI), where), {'yorumlar', 'kayitlar'}),
         'kategoriler': ('SELECT code,label,mode FROM main.kategoriler', {'kategoriler'}),
-        'tg_kullanicilar': ('SELECT id,username,first_name,onayli,engelli FROM main.tg_kullanicilar', {'tg_kullanicilar'}),
+        # 2.3.2-inc: tüm projeler kapsamlı anahtar dışında yalnız kapsamdaki kayıtları ekleyen Telegram kullanıcıları görünür.
+        'tg_kullanicilar': (('SELECT u.id,u.username,u.first_name,u.onayli,u.engelli FROM main.tg_kullanicilar u' if tumu and not yalniz_onayli else
+                             'SELECT u.id,u.username,u.first_name,u.onayli,u.engelli FROM main.tg_kullanicilar u WHERE u.id IN '
+                             '(SELECT k.ekleyen_id FROM main.kayitlar k WHERE %s)' % where), {'tg_kullanicilar', 'kayitlar'}),
     }
     kaynaklar = {}
     for ad, (secim, tablolar) in tanimlar.items():
@@ -487,21 +535,81 @@ def _hata_ozeti(error):
     return SorguHatasi(400, 'Sorgu çalıştırılamadı. Sorguyu kontrol edin.', 'diger')
 
 
-def sorgu_calistir(db_yolu, sql, parametreler, projeler, tumu, yalniz_onayli, sure_sn=None, en_cok=None):
-    """Authorizer'lı salt okunur bağlantıda sorgu. dict döndürür; hata → SorguHatasi."""
-    sure_sn = SQL_SURE_SN if sure_sn is None else sure_sn
-    en_cok = SQL_EN_COK_SATIR if en_cok is None else en_cok
-    sql = tek_ifade(sql)
+def _golge_hata(sql, parametreler):
+    """'no such column' hatasında şema varlığı sızmasın: sorgu yalnız dört izinli görünümün BOŞ kopyasını içeren bellek içi bir
+    veritabanında derlenir (EXPLAIN, çalıştırılmaz). Orada tablo bulunamıyorsa kullanıcı izinli olmayan bir tabloya (var ya da yok)
+    başvurmuştur → her durumda aynı 403. Yalnız izinli görünümlerde gerçekten olmayan sütun 400 'sutun' alır."""
+    golge = sqlite3.connect(':memory:', isolation_level=None)
+    try:
+        golge.create_collation('UNICODE_NOCASE', lambda a, b: 0)
+        for ad, sutunlar in (('kayitlar', SQL_KAYIT_SUTUNLARI), ('yorumlar', SQL_YORUM_SUTUNLARI), ('kategoriler', ('code', 'label', 'mode')),
+                             ('tg_kullanicilar', ('id', 'username', 'first_name', 'onayli', 'engelli'))):
+            golge.execute('CREATE TEMP TABLE "%s" (%s)' % (ad, ','.join('"%s"' % x for x in sutunlar)))
+        bitis = time.monotonic() + 1.0
+        golge.set_progress_handler(lambda: 1 if time.monotonic() > bitis else 0, 1000)
+        golge.execute('EXPLAIN ' + sql, parametreler).fetchall()
+    except sqlite3.Error as error:
+        metin = str(error).lower()
+        if 'no such table' in metin or 'no such column' not in metin:
+            return _hata_ozeti(sqlite3.OperationalError('not authorized'))
+        return _hata_ozeti(error)
+    except Exception:
+        return _hata_ozeti(sqlite3.OperationalError('not authorized'))
+    finally:
+        golge.close()
+    return _hata_ozeti(sqlite3.OperationalError('not authorized'))
+
+
+def _parametre_dogrula(parametreler):
     if parametreler is None:
         parametreler = []
     if not isinstance(parametreler, list) or len(parametreler) > SQL_EN_COK_PARAMETRE or any(
             p is not None and not isinstance(p, (str, int, float, bool)) for p in parametreler):
         raise SorguHatasi(400, '"parametreler" en çok %d öğelik bir liste olmalı (metin, sayı ya da null).' % SQL_EN_COK_PARAMETRE, 'parametre')
-    parametreler = [int(p) if isinstance(p, bool) else p for p in parametreler]
+    temiz = []
+    for p in parametreler:
+        if isinstance(p, bool):
+            p = int(p)
+        elif isinstance(p, int) and not (-2 ** 63 <= p < 2 ** 63):
+            raise SorguHatasi(400, 'Parametredeki tam sayı 64 bit aralığını aşıyor.', 'girdi')
+        elif isinstance(p, float) and not math.isfinite(p):
+            raise SorguHatasi(400, 'Parametrede NaN ya da sonsuz sayı kullanılamaz.', 'girdi')
+        elif isinstance(p, str):
+            try:
+                p.encode('utf-8')
+            except UnicodeError:
+                raise SorguHatasi(400, 'Parametrede geçersiz (eşi olmayan vekil) karakter var.', 'girdi')
+            if len(p) > SQL_DEGER_EN_UZUN:
+                raise SorguHatasi(400, 'Metin parametresi en çok %d karakter olabilir.' % SQL_DEGER_EN_UZUN, 'boyut')
+        temiz.append(p)
+    return temiz
+
+
+def _deger_boyutu(v):
+    if isinstance(v, (str, bytes)):
+        # JSON'da ASCII dışı karakter \uXXXX olarak (6 bayt) yazılır; üst sınır güvenli tarafta hesaplanır.
+        return len(v) if isinstance(v, bytes) or v.isascii() else 6 * len(v)
+    return 24
+
+
+def sorgu_calistir(db_yolu, sql, parametreler, projeler, tumu, yalniz_onayli, sure_sn=None, en_cok=None, en_cok_bayt=None):
+    """Authorizer'lı salt okunur bağlantıda sorgu. dict döndürür; hata → SorguHatasi.
+
+    Sınırlar: süre (SQL_SURE_SN), satır (SQL_EN_COK_SATIR), toplam değer boyutu (SQL_EN_COK_BAYT), tek değer (SQL_DEGER_EN_UZUN).
+    Satırlar tek tek alınır; sınırlardan biri dolunca durulur ve ``kesildi=True, neden='satir'|'boyut'`` döner."""
+    sure_sn = SQL_SURE_SN if sure_sn is None else sure_sn
+    en_cok = SQL_EN_COK_SATIR if en_cok is None else en_cok
+    en_cok_bayt = SQL_EN_COK_BAYT if en_cok_bayt is None else en_cok_bayt
+    sql = tek_ifade(sql)
+    try:
+        sql.encode('utf-8')
+    except UnicodeError:
+        raise SorguHatasi(400, 'Sorguda geçersiz (eşi olmayan vekil) karakter var.', 'girdi')
+    parametreler = _parametre_dogrula(parametreler)
     uri = 'file:' + quote(str(Path(db_yolu).resolve())) + '?mode=ro'
     conn = sqlite3.connect(uri, uri=True, timeout=5, isolation_level=None)
     try:
-        conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 1000000)
+        conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, SQL_DEGER_EN_UZUN)
         conn.setlimit(sqlite3.SQLITE_LIMIT_SQL_LENGTH, SQL_EN_UZUN + 1000)
         conn.setlimit(sqlite3.SQLITE_LIMIT_ATTACHED, 0)
         conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, SQL_EN_COK_PARAMETRE)
@@ -521,18 +629,54 @@ def sorgu_calistir(db_yolu, sql, parametreler, projeler, tumu, yalniz_onayli, su
         bitis = time.monotonic() + sure_sn
         conn.set_progress_handler(lambda: 1 if time.monotonic() > bitis else 0, 1000)
         basla = time.perf_counter()
+        satirlar, toplam, neden = [], 0, None
         try:
-            cur = conn.execute('SELECT * FROM (\n' + sql + '\n) LIMIT %d' % (en_cok + 1), parametreler)
-            satirlar = cur.fetchmany(en_cok + 1)
+            # Kullanıcı ifadesi metin birleştirmeyle sarılmaz (kapanmamış /* ya da ')' ile dış sorgudan çıkış yok);
+            # satır ve boyut sınırı aşağıdaki döngüde uygulanır. İlerleme işleyicisi döngü boyunca da etkindir.
+            cur = conn.execute(sql, parametreler)
+            for r in cur:
+                if len(satirlar) >= en_cok:
+                    neden = 'satir'
+                    break
+                toplam += sum(_deger_boyutu(v) for v in r)
+                if toplam > en_cok_bayt:
+                    neden = 'boyut'
+                    break
+                satirlar.append(r)
         except sqlite3.Error as error:
+            if 'no such column' in str(error).lower():
+                raise _golge_hata(sql, parametreler)
             raise _hata_ozeti(error)
+        except (OverflowError, UnicodeError, ValueError):
+            raise SorguHatasi(400, 'Sorgu ya da parametre değeri işlenemedi (çok büyük sayı ya da geçersiz karakter).', 'girdi')
         sutunlar = [d[0] for d in cur.description or []]
-        kesildi = len(satirlar) > en_cok
-        satirlar = [[_metin(v) for v in r] for r in satirlar[:en_cok]]
-        return dict(sutunlar=sutunlar, satirlar=satirlar, satir_sayisi=len(satirlar), kesildi=kesildi,
-                    sure_ms=int((time.perf_counter() - basla) * 1000))
+        satirlar = [[_metin(v) for v in r] for r in satirlar]
+        sonuc = dict(sutunlar=sutunlar, satirlar=satirlar, satir_sayisi=len(satirlar), kesildi=neden is not None,
+                     sure_ms=int((time.perf_counter() - basla) * 1000))
+        if neden:
+            sonuc['neden'] = neden
+        return sonuc
     finally:
         conn.close()
+
+
+def _sorgu_kapisi_al(ozet):
+    """(None, None) ya da (neden, mesaj). Süreç genelinde en çok API_SORGU_ESZAMANLI, anahtar başına aynı anda 1 sorgu."""
+    sinir = sorgu_eszamanli_siniri()
+    with _SQL_KILIT:
+        if _SQL_AKTIF.get(ozet):
+            return 'es_zamanli_anahtar', 'Bu anahtarla zaten bir sorgu çalışıyor; o bitince yenisini gönderin.'
+        if _SQL_TOPLAM[0] >= sinir:
+            return 'es_zamanli', 'SQL sorgu kuyruğu dolu, birkaç saniye sonra deneyin.'
+        _SQL_TOPLAM[0] += 1
+        _SQL_AKTIF[ozet] = 1
+    return None, None
+
+
+def _sorgu_kapisi_birak(ozet):
+    with _SQL_KILIT:
+        _SQL_TOPLAM[0] = max(0, _SQL_TOPLAM[0] - 1)
+        _SQL_AKTIF.pop(ozet, None)
 
 
 @bp.route('/sorgu', methods=['POST'])
@@ -543,9 +687,17 @@ def sorgu():
     if not isinstance(veri, dict):
         raise _Red(400, 'Gövde JSON olmalı: {"sql": "SELECT …", "parametreler": […]}. Content-Type: application/json gönderin.')
     projeler, tumu, yalniz = _kapsam()
+    ozet = g.api_anahtar['ozet']
+    neden, mesaj = _sorgu_kapisi_al(ozet)
+    if neden:
+        resp = _hata(429, mesaj, neden=neden)
+        resp.headers['Retry-After'] = str(SQL_RETRY_AFTER)
+        return resp
     try:
         sonuc = sorgu_calistir(_panel().AYAR['DB'], veri.get('sql'), veri.get('parametreler'), projeler, tumu, yalniz)
     except SorguHatasi as error:
         raise _Red(error.kod, error.mesaj, neden=error.neden)
+    finally:
+        _sorgu_kapisi_birak(ozet)
     g.api_satir = sonuc['satir_sayisi']
     return jsonify(ok=True, **sonuc)

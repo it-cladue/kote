@@ -201,7 +201,7 @@ def test_yonlendirme_siniri_ve_goreli_yonlendirme(coz, sahte):
     c, a = coz
     yol = "/img.snappark.net/s/%s/raw/" % SP_ID
     sahte.yollar[yol] = (302, {"Location": yol}, b"")  # kendine sonsuz yönlendirme
-    assert c.dis_indir({"link": SP_RAW}) is None and c._dis_son_durum == "yonlendirme" and len(sahte.hits) == 5
+    assert c.dis_indir({"link": SP_RAW}) is None and c._dis_son_durum == "yonlendirme" and len(sahte.hits) == 6  # 5 yönlendirme + son
     sid = "Baska123"
     y2 = "/img.snappark.net/s/%s/raw/" % sid
     sahte.yollar[y2] = (301, {"Location": "dosya.png"}, b"")  # göreli yönlendirme aynı hosta
@@ -382,12 +382,15 @@ def test_toplu_dis_servis_erisim_yoksa_kalanlari_denemez(toplu):
         SP_RAW: [OSError("Name or service not known"), OSError("Name or service not known")],
         "https://i.gyazo.com/%s.png" % TZ_ID: [SahteYanit(200, png(), {"Content-Type": "image/png"})],
     })
+    # 2.3.2-inc: servis yalnız art arda 3 FARKLI bağlantıda bağlantı kurulamazsa atlanır (bkz. test_inceleme_232);
+    # burada yalnız 2 farklı Snappark bağlantısı var: ikisi de denenir, servis atlanmaz.
+    c._http.plan["https://img.snappark.net/s/Iki2/raw/"] = [OSError("Name or service not known"), OSError("Name or service not known")]
     uykular, loglar = [], []
     r = gorsel.gyazo_toplu_indir(conn, c, a, uyku=uykular.append, log=loglar.append)
-    assert uykular.count(5) == 1  # geçici hata bir kez yeniden denendi
-    assert r["dis_erisim_yok"] == ["Snappark"] and any("Snappark'a ulaşılamıyor" in m for m in loglar)
+    assert uykular.count(5) == 2  # her geçici hata bir kez yeniden denendi
+    assert "dis_erisim_yok" not in r
     assert r["turler"]["snappark"]["acilamayan"] == 3 and r["turler"]["teamzone"]["indirilen"] == 1
-    assert "https://img.snappark.net/s/Iki2/raw/" not in c._http.istekler and c._http.istekler.count(SP_RAW) == 2
+    assert c._http.istekler.count("https://img.snappark.net/s/Iki2/raw/") == 2 and c._http.istekler.count(SP_RAW) == 2
     assert r["bitis_nedeni"] == "tamam"
 
 
