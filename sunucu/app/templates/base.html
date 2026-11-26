@@ -7,7 +7,10 @@
 <meta name="csrf" content="{{ csrf }}">
 <meta name="color-scheme" content="dark light">
 <script src="{{ url_for('static', filename='tema.js',v=SURUM) }}"></script>
-<link rel="icon" href="data:,">
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg',v=SURUM) }}">
+<link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png',v=SURUM) }}">
+<link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png',v=SURUM) }}">
+<meta name="theme-color" content="#2457d6">
 <link rel="stylesheet" href="{{ url_for('static', filename='stil.css',v=SURUM) }}">
 {% block head %}{% endblock %}
 </head>

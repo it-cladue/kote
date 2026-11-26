@@ -110,3 +110,16 @@ def test_login_lock_and_last_admin(web):
     for _ in range(5):c.post('/giris',data={'csrf':token(c),'kullanici':'testadmin','sifre':'bad'})
     assert kullanicilar.dogrula(a,'testadmin','Test-Password-123!')[0] is None
     with pytest.raises(ValueError):kullanicilar.guncelle(a,'testadmin',aktif=0)
+
+
+def test_sekme_simgesi_favicon(web):
+    """2.4.1: sekme simgesi (favicon) girişli ve girişsiz sayfalarda; dosyalar statikten sürüm numarasıyla verilir."""
+    c, a = web
+    giris = c.get('/giris').get_data(as_text=True)
+    assert 'favicon.svg' in giris and 'favicon-32.png' in giris and 'apple-touch-icon.png' in giris and 'href="data:,"' not in giris
+    login(c)
+    ana = c.get('/').get_data(as_text=True)
+    assert 'rel="icon" type="image/svg+xml"' in ana and 'theme-color' in ana
+    for ad, tip in (('favicon.svg', 'image/svg+xml'), ('favicon-32.png', 'image/png'), ('apple-touch-icon.png', 'image/png')):
+        r = c.get('/static/' + ad)
+        assert r.status_code == 200 and r.mimetype == tip and len(r.data) > 100, ad
