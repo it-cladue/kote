@@ -21,7 +21,7 @@ from tests.test_web import web, login  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
 TARAYICI_BETIK = Path(__file__).with_name('personel_ozet_tarayici.js')
-EKRAN_KLASOR = '/tmp/claude-0/p234'
+EKRAN_KLASOR = '/tmp/kanit-ekran/p234'
 
 BUGUN = date.today()
 HAFTA_BASI = BUGUN - timedelta(days=BUGUN.weekday())

@@ -22,7 +22,7 @@ from tests.test_personel_ozet_234 import (BUGUN, KAYITLAR, B, anahtar, hesap, ma
 
 ROOT = Path(__file__).resolve().parents[1]
 TARAYICI_BETIK = Path(__file__).with_name('personel_kartlari_tarayici.js')
-EKRAN_KLASOR = '/tmp/claude-0/p235'
+EKRAN_KLASOR = '/tmp/kanit-ekran/p235'
 PROJELER = ['OF', 'PA', 'HI']
 
 

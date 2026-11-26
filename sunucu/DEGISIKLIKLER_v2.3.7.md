@@ -42,4 +42,4 @@ Satırdaki ilk sayı ile tıklanınca açılan liste aynıdır: kategori satır�
 
 ## Test
 
-Yeni `tests/test_rapor_durumlar_237.py` (15 test) ve tarayıcı senaryosu `tests/rapor_durumlar_tarayici.js` (Node + Playwright yoksa atlanır; ekran görüntüleri `/tmp/claude-0/p237/`). `tests/test_personel_ozet_234.py`'de Excel sayfa listesi Özet / Durumlar / Bilgi olarak güncellendi.
+Yeni `tests/test_rapor_durumlar_237.py` (15 test) ve tarayıcı senaryosu `tests/rapor_durumlar_tarayici.js` (Node + Playwright yoksa atlanır; ekran görüntüleri `/tmp/kanit-ekran/p237/`). `tests/test_personel_ozet_234.py`'de Excel sayfa listesi Özet / Durumlar / Bilgi olarak güncellendi.

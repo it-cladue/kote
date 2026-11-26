@@ -21,7 +21,7 @@ from tests.test_personel_ozet_234 import anahtar, B, _playwright_var
 
 ROOT = Path(__file__).resolve().parents[1]
 TARAYICI_BETIK = Path(__file__).with_name('panel_kanit_ekle_tarayici.js')
-EKRAN_KLASOR = '/tmp/claude-0/p236'
+EKRAN_KLASOR = '/tmp/kanit-ekran/p236'
 SIFRE = 'Test-Password-123!'
 GYAZO = 'https://gyazo.com/0123456789abcdef0123456789abcdef'
 GYAZO2 = 'https://i.gyazo.com/fedcba9876543210fedcba9876543210.png'

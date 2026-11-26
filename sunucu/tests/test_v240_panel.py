@@ -21,7 +21,7 @@ from test_hatirlatma_233 import uret as gs_uret, gun_sonu_satirlari, IST
 
 ROOT = Path(__file__).resolve().parents[1]
 TARAYICI_BETIK = Path(__file__).with_name('v240_panel_tarayici.js')
-EKRAN_KLASOR = '/tmp/claude-0/p240a'
+EKRAN_KLASOR = '/tmp/kanit-ekran/p240a'
 XHR = {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'}
 
 

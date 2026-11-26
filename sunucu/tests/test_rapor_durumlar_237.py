@@ -23,7 +23,7 @@ from tests.test_personel_ozet_234 import BUGUN, B, anahtar, hesap, sonuc_sayisi,
 
 ROOT = Path(__file__).resolve().parents[1]
 TARAYICI_BETIK = Path(__file__).with_name('rapor_durumlar_tarayici.js')
-EKRAN_KLASOR = '/tmp/claude-0/p237'
+EKRAN_KLASOR = '/tmp/kanit-ekran/p237'
 
 # Örnek pencere: 11–20 Mart 2025 (10 gün) → önceki dönem 1–10 Mart 2025.
 T1, T2 = '2025-03-11', '2025-03-20'
