@@ -6,8 +6,8 @@
   <div>
     <p class="ust-etiket">Kanıt operasyonu</p>
     <h1 id="hero-baslik">Hoş geldiniz, {{ k.ad or k.kullanici_adi }}</h1>
-    <p>Yeni kanıtlar yalnız Telegram üzerinden gelir. Burada kayıtları kontrol edin, onaylayın, soru sorun ve takip edin.</p>
-    <div class="baslik-eylemler">{% if bekleyen_baglanti %}<a class="btn birincil" href="{{ url_for('kayitlar', durum='bekleyen') }}">Onay bekleyenleri aç</a>{% else %}<a class="btn birincil" href="{{ url_for('kayitlar', durum='onayli') }}">Onaylı kayıtları aç</a>{% endif %}<a class="btn" href="{{ url_for('kayitlar', durum='hepsi') }}">Tüm kayıtlar</a><a class="btn" href="{{ url_for('disa_aktar_sayfasi') }}">Excel çıktısı</a></div>
+    <p>Yeni kanıtlar Telegram botundan{% if kanit_ekle_olur %} ya da buradan, <b>Kanıt ekle</b> ile{% else %} ya da yetkili kullanıcılar için panelden{% endif %} gelir. Burada kayıtları kontrol edin, onaylayın, soru sorun ve takip edin.</p>
+    <div class="baslik-eylemler">{% if bekleyen_baglanti %}<a class="btn birincil" href="{{ url_for('kayitlar', durum='bekleyen') }}">Onay bekleyenleri aç</a>{% else %}<a class="btn birincil" href="{{ url_for('kayitlar', durum='onayli') }}">Onaylı kayıtları aç</a>{% endif %}{% if kanit_ekle_olur %}<a class="btn ikincil" id="ana-kanit-ekle" href="{{ url_for('kayit_yeni') }}">Kanıt ekle</a>{% endif %}<a class="btn" href="{{ url_for('kayitlar', durum='hepsi') }}">Tüm kayıtlar</a><a class="btn" href="{{ url_for('disa_aktar_sayfasi') }}">Excel çıktısı</a></div>
     {% if gizli_proje_var %}<p class="kucukyazi" id="ana-onaysiz-not">Onay yetkiniz olmayan projelerde onay bekleyen kayıtlar size gösterilmez; sayılar yalnız onaylı kayıtları kapsar.</p>{% endif %}
   </div>
   <div class="arama-blok">

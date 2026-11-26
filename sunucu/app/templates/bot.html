@@ -36,7 +36,7 @@
 </section>
 <section class="kart" aria-labelledby="ekleyen-baslik">
   <h2 id="ekleyen-baslik">En çok kanıt ekleyenler</h2>
-  <div class="tablo-sarici"><table class="tablo kucuk" style="min-width:0"><thead><tr><th>Ad</th><th>Telegram ID</th><th>Kayıt</th></tr></thead><tbody>{% for x in istatistik.ekleyenler %}<tr><td>{{ x.ad }}</td><td>{% if x.id %}<a href="{{ url_for('telegram_kayitlari',tg_id=x.id) }}"><code>{{ x.id }}</code></a>{% else %}—{% endif %}</td><td>{{ x.adet }}</td></tr>{% else %}<tr><td colspan="3"><div class="bos-tablo">Henüz kayıt yok.</div></td></tr>{% endfor %}</tbody></table></div>
+  <div class="tablo-sarici"><table class="tablo kucuk" style="min-width:0"><thead><tr><th>Ad</th><th>Telegram ID</th><th>Kayıt</th></tr></thead><tbody>{% for x in istatistik.ekleyenler %}<tr>{% if x.id and x.id.startswith('panel:') %}<td>{{ x.ad }} <small class="panel-etiket">(panel)</small></td><td>—</td>{% else %}<td>{{ x.ad }}</td><td>{% if x.id %}<a href="{{ url_for('telegram_kayitlari',tg_id=x.id) }}"><code>{{ x.id }}</code></a>{% else %}—{% endif %}</td>{% endif %}<td>{{ x.adet }}</td></tr>{% else %}<tr><td colspan="3"><div class="bos-tablo">Henüz kayıt yok.</div></td></tr>{% endfor %}</tbody></table></div>
 </section>
 </div>
 

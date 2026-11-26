@@ -66,6 +66,9 @@ def settings():
         'HATIRLATMA_SAAT_TOPLU': _pozitif('HATIRLATMA_SAAT_TOPLU', 5),
         'GUN_SONU_SAAT': os.getenv('GUN_SONU_SAAT', '18:00'),
         'GUN_SONU_ALICILAR': os.getenv('GUN_SONU_ALICILAR', ''),
+        # 2.3.6 — Panelden eklenen kanıtların kategorisi (varsayılan SMS). Katalogda yoksa açılışta oluşturulur
+        # (etkin, tüm etkin projelere bağlı). Asıl okuma katalog.panel_kategori_etiketi() içindedir; burası bilgi amaçlıdır.
+        'PANEL_EKLEME_KATEGORI': (os.getenv('PANEL_EKLEME_KATEGORI', '') or '').strip() or 'SMS',
     }
 
 AYAR = settings()

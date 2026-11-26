@@ -7,7 +7,9 @@ sonrasında :func:`ensure_schema` çağırır. Migration eklemeli ve tekrar
 from __future__ import annotations
 
 import json
+import os
 import re
+import unicodedata
 from contextlib import contextmanager
 from typing import Any, Iterable
 
@@ -166,6 +168,7 @@ def ensure_schema(conn) -> None:
         ).fetchone() is None
         if not first:
             _seed_beta_project(conn)
+            panel_kategori_hazirla(conn)
             return
 
         # Seed INSERT OR IGNORE'dur: yarım kalmış bir ilk migration tekrar
@@ -223,6 +226,7 @@ def ensure_schema(conn) -> None:
             (MIGRATION_NAME, _now()),
         )
         _seed_beta_project(conn)
+        panel_kategori_hazirla(conn)
 
 
 def _seed_beta_project(conn) -> None:
@@ -259,6 +263,105 @@ def _seed_beta_project(conn) -> None:
         "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)",
         (BETA_MIGRATION_NAME, _now()),
     )
+
+
+# ---------------------------------------------------------------- 2.3.6: panelden kanıt ekleme kategorisi
+# Panelden eklenen kanıtlar tek bir katalog kategorisine yazılır (varsayılan "SMS", kod "sms").
+# PANEL_EKLEME_KATEGORI ortam değişkeni başka bir ad verirse ve o ad katalogda yoksa aynı biçimde oluşturulur.
+# Geçiş her ad için bir kez çalışır (schema_migrations); var olan kategori (ör. elle açılmış 'sms') hiç değiştirilmez.
+PANEL_KATEGORI_VARSAYILAN = "SMS"
+PANEL_KATEGORI_GOC = "panel_kategori_2_3_6:"
+PANEL_KATEGORI_MODU = "tek_uye"
+_TR_ASCII = str.maketrans({"ı": "i", "İ": "i", "ş": "s", "Ş": "s", "ğ": "g", "Ğ": "g", "ü": "u", "Ü": "u",
+                           "ö": "o", "Ö": "o", "ç": "c", "Ç": "c"})
+
+
+def panel_kategori_etiketi() -> str:
+    """PANEL_EKLEME_KATEGORI (boşsa 'SMS'); kontrol karakterleri silinir, en çok 120 karakter."""
+    deger = db.metin_temizle(os.getenv("PANEL_EKLEME_KATEGORI", "") or "", 200).replace("\n", " ").strip()
+    return deger[:120].strip() or PANEL_KATEGORI_VARSAYILAN
+
+
+def _etiket_anahtari(etiket: str) -> str:
+    return str(etiket or "").strip().casefold()
+
+
+def _panel_kodu_uret(conn, etiket: str) -> str:
+    temel = unicodedata.normalize("NFKD", str(etiket).translate(_TR_ASCII))
+    temel = "".join(ch for ch in temel if not unicodedata.combining(ch)).lower()
+    temel = re.sub(r"[^a-z0-9]+", "_", temel).strip("_")[:40] or "panel"
+    kod, sira = temel, 2
+    while conn.execute("SELECT 1 FROM kategoriler WHERE code=?", (kod,)).fetchone():
+        kod = "%s_%d" % (temel[:40], sira)
+        sira += 1
+    return kod
+
+
+def _panel_kategori_bul(conn, etiket: str) -> dict[str, Any] | None:
+    """Ayarda saklanan kod → varsayılan 'sms' kodu → aynı ad (harf duyarsız) sırasıyla arar; değiştirmez."""
+    anahtar = _etiket_anahtari(etiket)
+    kod = db.ayar_al(conn, "panel_kategori_kodu:" + anahtar) if _table_exists(conn, "ayarlar") else None
+    adaylar = [kod] if kod else []
+    if anahtar == PANEL_KATEGORI_VARSAYILAN.casefold():
+        adaylar.append("sms")
+    for aday in adaylar:
+        row = conn.execute("SELECT code,label,mode,aktif FROM kategoriler WHERE code=?", (aday,)).fetchone()
+        if row:
+            return dict(row)
+    for row in conn.execute("SELECT code,label,mode,aktif FROM kategoriler ORDER BY aktif DESC,rowid"):
+        if _etiket_anahtari(row["label"]) == anahtar:
+            return dict(row)
+    return None
+
+
+def panel_kategori_hazirla(conn, etiket: str | None = None) -> dict[str, Any] | None:
+    """Panel ekleme kategorisi yoksa oluşturur: etkin, tüm etkin projelere bağlı, 'tek_uye' soru şablonuyla.
+
+    Var olan kategori bulunursa yalnız kodu ayarlara yazılır; adı, aktifliği, proje bağları ve soruları değişmez.
+    """
+    etiket = etiket or panel_kategori_etiketi()
+    goc = PANEL_KATEGORI_GOC + _etiket_anahtari(etiket)
+    if not _table_exists(conn, "kategoriler") or not _table_exists(conn, "projeler"):
+        return None
+    if conn.execute("SELECT 1 FROM schema_migrations WHERE name=?", (goc,)).fetchone():
+        return _panel_kategori_bul(conn, etiket)
+    with _transaction(conn):
+        if conn.execute("SELECT 1 FROM schema_migrations WHERE name=?", (goc,)).fetchone():
+            return _panel_kategori_bul(conn, etiket)
+        row = _panel_kategori_bul(conn, etiket)
+        if row is None:
+            kod = _panel_kodu_uret(conn, etiket)
+            conn.execute(
+                "INSERT INTO kategoriler(code,label,mode,aktif,revision) VALUES(?,?,?,1,1)",
+                (kod, etiket, PANEL_KATEGORI_MODU),
+            )
+            for proje in conn.execute("SELECT code FROM projeler WHERE aktif=1 ORDER BY sort_order,code").fetchall():
+                sira = conn.execute(
+                    "SELECT COALESCE(MAX(sort_order),0)+1 FROM proje_kategorileri WHERE proje_code=?", (proje[0],)
+                ).fetchone()[0]
+                conn.execute(
+                    "INSERT OR IGNORE INTO proje_kategorileri(proje_code,kategori_code,aktif,sort_order) VALUES(?,?,1,?)",
+                    (proje[0], kod, sira),
+                )
+            for order, question in enumerate(_legacy_questions(PANEL_KATEGORI_MODU), start=1):
+                conn.execute(
+                    "INSERT OR IGNORE INTO kategori_sorular"
+                    "(kategori_code,soru_key,source,preset_key,label,type,required,options_json,sort_order,aktif) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,1)",
+                    (kod, question["key"], "preset", question["preset"], question["label"], question["type"],
+                     int(question["required"]), json.dumps(question["options"], ensure_ascii=False), order),
+                )
+            row = {"code": kod, "label": etiket, "mode": PANEL_KATEGORI_MODU, "aktif": 1}
+        if _table_exists(conn, "ayarlar"):
+            db.ayar_yaz(conn, "panel_kategori_kodu:" + _etiket_anahtari(etiket), row["code"])
+        conn.execute("INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES(?,?)", (goc, _now()))
+    return row
+
+
+def panel_kategori(conn) -> dict[str, Any] | None:
+    """Panelden eklenen kanıtların kategorisi: {code,label,mode,aktif} (gerekirse önce oluşturulur)."""
+    ensure_schema(conn)
+    return panel_kategori_hazirla(conn)
 
 
 def _normalise_project_code(code: Any) -> str:

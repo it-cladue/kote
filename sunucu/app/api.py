@@ -39,7 +39,7 @@ HIZ = aa.HizSiniri()
 YETKISIZ_HIZ = aa.HizSiniri()
 
 KAYIT_ALANLARI = ('id', 'proje', 'kategori', 'personel', 'uye_id', 'ana_uye_id', 'lead_id', 'tip', 'tarih', 'kt', 'kt_kim', 'kt_zaman',
-                  'ekleyen_id', 'ekleyen_ad', 'link', 'link_turu', 'aciklama')
+                  'ekleyen_id', 'ekleyen_ad', 'link', 'link_turu', 'aciklama', 'kaynak')  # 2.3.6: kaynak (telegram / panel / legacy_excel)
 # SQL ucundaki ``kayitlar`` görünümünün sütunları (ham DB adlarıyla). Dosya yolu, Telegram sohbet/mesaj kimliği gibi iç alanlar yok.
 SQL_KAYIT_SUTUNLARI = ('id', 'proje', 'kategori', 'kategori_code', 'kategori_mode', 'personel', 'uye_id', 'ana_uye_id', 'lead_id', 'tip',
                        'tarih', 'kt', 'kt_kim', 'kt_zaman', 'ekleyen_id', 'ekleyen_ad', 'link', 'link_turu', 'aciklama', 'kaynak',

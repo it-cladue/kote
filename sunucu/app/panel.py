@@ -6,6 +6,7 @@ import re
 import secrets
 import sys
 import time
+import unicodedata
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -19,7 +20,7 @@ from PIL import Image, UnidentifiedImageError
 from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari, personel_ozeti
 from .settings import AYAR, ROOT
 
-SURUM = '2.3.5'
+SURUM = '2.3.6'
 secret_path = Path(AYAR['BOT_KLASOR']) / 'session.key'
 secret = os.getenv('SESSION_SECRET')
 if not secret:
@@ -281,7 +282,8 @@ def context():
                 url_degistir=url_degistir,url_filtre=url_filtre,csrf=session.get('csrf',''),projeler=lambda:allowed,
                 proje_renkleri={p['code']:p['color'] for p in info},proje_bilgileri=info,
                 izin=lambda p,e:yetki.izin(g.yk,p,e),simdi=simdi,SURUM=SURUM,csp_nonce=g.get('csp_nonce',''),
-                rol_adi=('Süperadmin' if g.get('yk') and g.yk['admin'] else 'Admin') if g.get('k') else '')
+                rol_adi=('Süperadmin' if g.get('yk') and g.yk['admin'] else 'Admin') if g.get('k') else '',
+                kanit_ekle_olur=bool(_ekleme_projeleri()) if g.get('k') else False)
 
 
 def giris_gerekli(f):
@@ -412,7 +414,7 @@ def _son_islemler(allowed,limit=10):
 # discussion.py, donusum_isleri.py, bildirim_gecmisi.py içindeki denetim_yaz çağrıları.
 ISLEM_ADLARI={'giris':'Giriş yaptı','giris_hata':'Hatalı giriş denemesi','onayla':'Kaydı onayladı','onay_kaldir':'Onayı kaldırdı','duzenle':'Kaydı düzenledi','sil':'Kaydı sildi','geri_al':'Kaydı geri aldı','yorum_ekle':'Yorum yazdı','soru_yonelt':'Soru yöneltti','yanit_ekle':'Yanıt verdi','gyazo_istek':'Gyazo dönüşümü istedi','disa_aktar':'Excel çıktısı aldı','dosya_kontrol':'Dosya kontrolü yaptı','kullanici_ekle':'Kullanıcı ekledi','kullanici_guncelle':'Kullanıcıyı güncelledi','kilit_ac':'Hesap kilidini açtı','sifre_degisti':'Parolasını değiştirdi','cikis':'Çıkış yaptı','giris_kilit':'Hesap kilitlendi','giris_sinir':'IP giriş sınırına ulaştı','sifre_hata':'Hatalı mevcut parola','csrf_hata':'Geçersiz CSRF gönderimi','arsiv_esle':'Arşiv görseli eşledi','beklenen_proje':'Beklenen projeyi atadı','yeni_kayit':'Yeni kanıt ekledi','sunucu_hata':'Sunucu hatası',
  'bildirim_okundu':'Bildirimleri okudu','ice_aktar':'İçe aktarım yaptı','yetki_kanonik':'Yetki tanımı düzeltildi',
- 'telegram_kayit':'Telegram ile kanıt ekledi','bot_kayit':'Telegram ile kanıt ekledi','telegram_onay':'Telegram botuna şifreyle giriş yaptı','telegram_admin_giris':'Telegram botuna yönetici olarak giriş yaptı','telegram_admin_giris_hata':'Telegram botunda yönetici parolasını yanlış girdi','telegram_engel':'Telegram botunda engellendi','telegram_eski_buton':'Telegram botunda eski düğmeye bastı','telegram_yanlis_adim_butonu':'Telegram botunda yanlış adımda düğmeye bastı',
+ 'telegram_kayit':'Telegram ile kanıt ekledi','bot_kayit':'Telegram ile kanıt ekledi','panel_kanit_ekle':'Panelden kanıt ekledi','telegram_onay':'Telegram botuna şifreyle giriş yaptı','telegram_admin_giris':'Telegram botuna yönetici olarak giriş yaptı','telegram_admin_giris_hata':'Telegram botunda yönetici parolasını yanlış girdi','telegram_engel':'Telegram botunda engellendi','telegram_eski_buton':'Telegram botunda eski düğmeye bastı','telegram_yanlis_adim_butonu':'Telegram botunda yanlış adımda düğmeye bastı',
  'bot_bakim_ac':'Bakım modunu açtı','bot_bakim_kapat':'Bakım modunu kapattı','bot_bakim':'Bakım modunu değiştirdi','bot_onayla':'Telegram kullanıcısını onayladı','bot_onay_kaldir':'Telegram onayını kaldırdı','bot_engelle':'Telegram kullanıcısını engelledi','bot_engel_kaldir':'Telegram engelini kaldırdı','bot_tam_sifirla':'Telegram kullanıcısını tam sıfırladı','bot_oturum_temizle':'Bot oturumunu temizledi','bot_kontrol':'Botu duraklattı / sürdürdü','bot_yedek':'Veritabanı yedeği aldı','bot_inbox_tekrar':'Bekleyen bot mesajlarını yeniden denedi','bot_kategori_kaydet':'Bot kategorisini kaydetti','bot_kategori_sil':'Bot kategorisini pasife aldı','bot_kategori_yayinla':'Bot kategorilerini yayınladı',
  'katalog_proje_kaydet':'Proje tanımını kaydetti','katalog_kategori_kaydet':'Kategori tanımını kaydetti',
  'gyazo_link_guncelle':'Gyazo bağlantısını güncelledi','gyazo_link_yerel_korundu':'Gyazo bağlantısı eklenmedi, yerel görsel korundu',
@@ -421,7 +423,7 @@ ISLEM_ADLARI={'giris':'Giriş yaptı','giris_hata':'Hatalı giriş denemesi','on
 # İşlem Geçmişi tablosu için kısa ad biçimi.
 DENETIM_ADLARI={'giris':'Giriş','giris_hata':'Hatalı giriş','onayla':'Onay','onay_kaldir':'Onay kaldırma','duzenle':'Düzenleme','sil':'Silme','geri_al':'Geri alma','yorum_ekle':'Yorum','soru_yonelt':'Soru','yanit_ekle':'Yanıt','gyazo_istek':'Gyazo isteği','disa_aktar':'Excel çıktısı','dosya_kontrol':'Dosya kontrolü','kullanici_ekle':'Kullanıcı ekleme','kullanici_guncelle':'Kullanıcı güncelleme','kilit_ac':'Kilit açma','sifre_degisti':'Şifre değişimi','cikis':'Çıkış','giris_kilit':'Hesap kilidi','giris_sinir':'IP giriş sınırı','sifre_hata':'Hatalı mevcut parola','csrf_hata':'Geçersiz CSRF gönderimi','arsiv_esle':'Arşiv eşleme','beklenen_proje':'Beklenen proje','yeni_kayit':'Yeni kanıt','bildirim_okundu':'Bildirim okundu','sunucu_hata':'Sunucu hatası','ice_aktar':'İçe aktarım','yetki_kanonik':'Yetki düzeltme',
  'katalog_proje_kaydet':'Proje kaydı','katalog_kategori_kaydet':'Kategori kaydı',
- 'telegram_kayit':'Telegram ile kanıt','bot_kayit':'Telegram ile kanıt','telegram_onay':'Telegram: şifreyle giriş','telegram_admin_giris':'Telegram: yönetici girişi','telegram_admin_giris_hata':'Telegram: yönetici parolası hatası','telegram_engel':'Telegram: engellendi','telegram_eski_buton':'Telegram: eski düğme','telegram_yanlis_adim_butonu':'Telegram: yanlış adım düğmesi',
+ 'telegram_kayit':'Telegram ile kanıt','bot_kayit':'Telegram ile kanıt','panel_kanit_ekle':'Panelden kanıt','telegram_onay':'Telegram: şifreyle giriş','telegram_admin_giris':'Telegram: yönetici girişi','telegram_admin_giris_hata':'Telegram: yönetici parolası hatası','telegram_engel':'Telegram: engellendi','telegram_eski_buton':'Telegram: eski düğme','telegram_yanlis_adim_butonu':'Telegram: yanlış adım düğmesi',
  'bot_onayla':'Bot: kullanıcı onayı','bot_onay_kaldir':'Bot: onay kaldırma','bot_engelle':'Bot: engelleme','bot_engel_kaldir':'Bot: engel kaldırma','bot_tam_sifirla':'Bot: tam sıfırlama','bot_oturum_temizle':'Bot: oturum temizleme','bot_bakim':'Bot: bakım modu','bot_bakim_ac':'Bot: bakım modu açıldı','bot_bakim_kapat':'Bot: bakım modu kapatıldı','bot_kontrol':'Bot: duraklat/sürdür','bot_yedek':'Bot: veritabanı yedeği','bot_inbox_tekrar':'Bot: tekrar deneme','bot_kategori_kaydet':'Bot: kategori kaydı','bot_kategori_sil':'Bot: kategori pasife','bot_kategori_yayinla':'Bot: kategori yayını',
  'gyazo_link_guncelle':'Gyazo bağlantısı','gyazo_link_yerel_korundu':'Gyazo: yerel görsel korundu','hatirlatma_uret':'Hatırlatma bildirimi',
  'api_anahtar_olustur':'API anahtarı oluşturma','api_anahtar_iptal':'API anahtarı iptali','rapor_aktar':'Personel raporu çıktısı'}
@@ -826,7 +828,8 @@ def kayitlar():
         onayli_tum=c.execute(f'SELECT COUNT(*) FROM kayitlar WHERE {w_tum} AND kt=1 AND silindi=0',p_tum).fetchone()[0]
         if listelenen and not onayli_tum: onaysiz_uyari='Aradığınız ID için onaylı kanıt yok; %d onaysız kayıt listelendi.' % listelenen
         elif onayli_tum and f['durum'] in ('bekleyen','silinen'): onayli_notu=onayli_tum
-    return render_template('kayitlar.html',kayitlar=records,toplam=total,sayfa=page,sayfa_sayisi=pages,f=f,izinli=allowed,kategoriler=cats,gorunum=view,sayac=counts,sayfa_boyu=size,sayfa_boylari=SAYFA_BOYLARI,toplu_kt=toplu_kt,uyari=uyari,acik_kayit=acik or None,acik_yorum=(yorum if acik and yorum else None),onaysiz_uyari=onaysiz_uyari,onayli_notu=onayli_notu,hatirlatma_gun=_hatirlatma_gun(),damga=_degisiklik_damgasi() or '',filtre_aktif=bool(f.get('q') or f.get('kategori') or f.get('ekleyen') or f.get('tarih1') or f.get('tarih2') or f.get('tarihsiz') or f.get('proje') or f.get('bekleme') or f.get('personel') or f.get('ekleyen_ad') or f.get('tip') or f.get('silinmemis')),bos_deger=personel_ozeti.BOS_DEGER)
+    ekle=_ekleme_baglami() if _ekleme_projeleri() else None  # 2.3.6: 'Kanıt ekle' düğmesi ve penceresi (jeton pencere açılınca alınır)
+    return render_template('kayitlar.html',ekle=ekle,kayitlar=records,toplam=total,sayfa=page,sayfa_sayisi=pages,f=f,izinli=allowed,kategoriler=cats,gorunum=view,sayac=counts,sayfa_boyu=size,sayfa_boylari=SAYFA_BOYLARI,toplu_kt=toplu_kt,uyari=uyari,acik_kayit=acik or None,acik_yorum=(yorum if acik and yorum else None),onaysiz_uyari=onaysiz_uyari,onayli_notu=onayli_notu,hatirlatma_gun=_hatirlatma_gun(),damga=_degisiklik_damgasi() or '',filtre_aktif=bool(f.get('q') or f.get('kategori') or f.get('ekleyen') or f.get('tarih1') or f.get('tarih2') or f.get('tarihsiz') or f.get('proje') or f.get('bekleme') or f.get('personel') or f.get('ekleyen_ad') or f.get('tip') or f.get('silinmemis')),bos_deger=personel_ozeti.BOS_DEGER)
 
 @app.route('/kayit/<int:kid>')
 @giris_gerekli
@@ -1025,6 +1028,197 @@ def kayit_duzenle(kid):
             c.execute('UPDATE kayitlar SET '+','.join(f'{k}=?' for k in vals)+',surum=surum+1,guncelleme=? WHERE id=?',(*vals.values(),simdi(),kid))
             db.denetim_yaz(c,g.k['kullanici_adi'],'duzenle',r['proje'],r['anahtar'],json.dumps({k:r[k] for k in vals},ensure_ascii=False),json.dumps(vals,ensure_ascii=False),ip()); db.degisti(c)
     return jsonify(ok=True,degisiklik=bool(vals),damga=_degisiklik_damgasi())
+
+# ---------- 2.3.6: panelden kanıt ekleme (kategori SMS) ----------
+# Kim: süperadmin ya da etkin bir projede onay (kt) veya düzenleme yetkisi olan kullanıcı; yalnız o projelere ekler.
+# Görsel dosyası yüklenmez; Gyazo / Snappark / Teamzone bağlantısı (gorsel.py izin listesi, host tam eşleşme) yapıştırılır.
+# Çift gönderim: her form açılışında oturuma bir jeton yazılır; kayıt anahtarı 'panel:<jeton>' olduğu için aynı form iki kayıt üretemez.
+EKLEME_HOSTLARI=tuple(dict.fromkeys(tuple(gorsel.GYAZO_HOSTLAR)+tuple(h for v in gorsel.DIS_GORSEL_HOSTLAR.values() for h in v)))
+EKLEME_TIPLERI=(('sessiz','Sessiz'),('telesekreter','Telesekreter'))  # bot ile aynı değerler (t:sessiz / t:telesekreter)
+EKLEME_ALANLARI=(('personel','Personel',100,True),('uye_id','Üye ID',500,False),('ana_uye_id','Ana üye ID',500,False),('lead_id','Lead ID',500,False))
+EKLEME_ACIKLAMA_SINIRI=500
+EKLEME_JETON_SAYISI=20
+_EKLEME_JETON_RX=re.compile(r'[0-9a-f]{32}')
+_EKLEME_KONTROL_RX=re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+
+def _ekleme_projeleri():
+    """Kullanıcının panelden kanıt ekleyebileceği etkin projeler (proje sırasıyla)."""
+    if not g.get('k'):return []
+    aktif={p['code'] for p in _all_project_info() if p.get('aktif')}
+    return [p for p in _allowed() if p in aktif and (g.yk['admin'] or yetki.izin(g.yk,p,'kt') or yetki.izin(g.yk,p,'duzenle'))]
+
+def _ekleme_jetonu():
+    jeton=uuid.uuid4().hex
+    liste=[x for x in (session.get('ekle_jeton') or []) if isinstance(x,str)][-(EKLEME_JETON_SAYISI-1):]
+    session['ekle_jeton']=liste+[jeton]
+    return jeton
+
+def _ekleme_jetonu_dus(jeton):
+    session['ekle_jeton']=[x for x in (session.get('ekle_jeton') or []) if isinstance(x,str) and x!=jeton]
+
+def _ekleme_secili_proje(uygun,istenen=None):
+    istenen=[str(p).strip().upper() for p in (istenen or []) if str(p).strip()]
+    istenen=[p for p in dict.fromkeys(istenen) if p in uygun]
+    if len(istenen)==1:return istenen[0]
+    return uygun[0] if len(uygun)==1 else ''
+
+def _ekleme_kategori_adi():
+    from . import katalog
+    try:
+        kat=katalog.panel_kategori(baglanti())
+        return kat['label'] if kat else katalog.panel_kategori_etiketi()
+    except Exception:
+        return katalog.panel_kategori_etiketi()
+
+def _ekleme_baglami(degerler=None,hatalar=None,jeton=None,genel_hata=None):
+    uygun=_ekleme_projeleri()
+    degerler=dict(degerler or {})
+    if 'proje' not in degerler:degerler['proje']=_ekleme_secili_proje(uygun,request.args.getlist('proje'))
+    if 'onayli' not in degerler:degerler['onayli']='1'
+    etiketler={p['code']:p['label'] for p in _all_project_info()}
+    return dict(ekleme_projeleri=[dict(code=p,label=etiketler.get(p,p),kt=yetki.izin(g.yk,p,'kt')) for p in uygun],
+                ekleme_kategori=_ekleme_kategori_adi(),ekleme_hostlari=EKLEME_HOSTLARI,ekleme_tipleri=EKLEME_TIPLERI,
+                ekleme_alanlari=EKLEME_ALANLARI,ekleme_aciklama_siniri=EKLEME_ACIKLAMA_SINIRI,
+                degerler=degerler,hatalar=hatalar or {},jeton=jeton or '',genel_hata=genel_hata)
+
+def _ekleme_linki(ham,zorunlu):
+    """Görsel bağlantısını doğrular. Dönüş: ((link, link_turu) | None, hata | None)."""
+    v=(ham if isinstance(ham,str) else '').strip()
+    if not v:
+        return None,('Görsel bağlantısı zorunludur; Gyazo, Snappark veya Teamzone bağlantısını yapıştırın.' if zorunlu else None)
+    if len(v)>2048:return None,'Bağlantı en çok 2048 karakter olabilir.'
+    if not v.lower().startswith('https://'):return None,'Bağlantı https:// ile başlamalıdır (http:// ve diğer biçimler kabul edilmez).'
+    if not gorsel._guvenli_url(v,EKLEME_HOSTLARI):
+        return None,'Yalnız şu adreslerin bağlantıları kabul edilir: '+', '.join(EKLEME_HOSTLARI)+'. Bağlantıda boşluk, @ işareti veya Türkçe karakter olmamalıdır.'
+    tur,kimlik=gorsel.link_turu_ve_kimlik(v)
+    if tur=='gyazo' and gorsel.KIMLIK_RX.fullmatch(kimlik or ''):return (v,'gyazo'),None
+    if tur in ('snappark','teamzone') and gorsel.dis_gorsel_cozumle(v):return (v,tur),None
+    return None,'Bağlantıda görsel kimliği bulunamadı. Gyazo için https://gyazo.com/… (32 karakterlik kimlik), Snappark için https://img.snappark.net/s/…/raw/ biçimini kullanın.'
+
+def _ekleme_dogrula(form,uygun):
+    """Form → (değerler, hatalar, yetkisiz proje mi). İstemci kuralları birebir: zorunlu alanlar, uzunluk, kontrol karakteri, tip listesi."""
+    def al(ad):
+        v=form.get(ad,'')
+        # Görünmez biçim karakterleri (U+200B, U+202E yön değiştirme vb., Unicode Cf) sessizce atılır.
+        return ''.join(ch for ch in v if unicodedata.category(ch)!='Cf') if isinstance(v,str) else ''
+    degerler={};hatalar={};yasak=False
+    proje=al('proje').strip().upper()
+    degerler['proje']=proje
+    if not proje:hatalar['proje']='Proje seçin.'
+    elif proje not in uygun:hatalar['proje']='Bu projeye kanıt ekleme yetkiniz yok.';yasak=True
+    for ad,zorunlu in (('link',True),('gorsel2',False)):
+        degerler[ad]=al(ad).strip()
+        sonuc,hata=_ekleme_linki(al(ad),zorunlu)
+        if hata:hatalar[ad]=hata
+        elif sonuc:degerler[ad+'_tur']=sonuc[1]
+    if 'link' not in hatalar and 'gorsel2' not in hatalar and degerler.get('gorsel2') and degerler['gorsel2']==degerler['link']:
+        hatalar['gorsel2']='İkinci görsel bağlantısı birinciyle aynı; boş bırakın ya da başka bir bağlantı girin.'
+    for ad,etiket,sinir,zorunlu in EKLEME_ALANLARI:
+        ham=al(ad)
+        v=re.sub(r'\s+',' ',db.metin_temizle(ham)).strip()
+        degerler[ad]=v
+        if _EKLEME_KONTROL_RX.search(ham):hatalar[ad]=etiket+' alanında kontrol karakteri kullanılamaz.'
+        elif zorunlu and not v:hatalar[ad]=etiket+' zorunludur.'
+        elif len(v)>sinir:hatalar[ad]='%s en çok %d karakter olabilir.' % (etiket,sinir)
+    tip=al('tip').strip().lower()
+    degerler['tip']=tip
+    if tip and tip not in dict(EKLEME_TIPLERI):hatalar['tip']='Sessiz / Telesekreter alanında yalnız listedeki seçenekler kullanılabilir.'
+    ham=al('aciklama')
+    aciklama=db.metin_temizle(ham).strip()
+    degerler['aciklama']=aciklama
+    if _EKLEME_KONTROL_RX.search(ham):hatalar['aciklama']='Açıklamada kontrol karakteri kullanılamaz.'
+    elif len(aciklama)>EKLEME_ACIKLAMA_SINIRI:hatalar['aciklama']='Açıklama en çok %d karakter olabilir.' % EKLEME_ACIKLAMA_SINIRI
+    degerler['onayli']='1' if al('onayli')=='1' else ''
+    return degerler,hatalar,yasak
+
+def _ekleme_hata(kod,mesaj,degerler=None,hatalar=None,yeni_jeton=False):
+    if _json_bekleniyor():
+        ek={'hatalar':hatalar or {}}
+        if yeni_jeton:ek['jeton']=_ekleme_jetonu()
+        return jsonify(ok=False,hata=mesaj,kod=kod,**ek),kod
+    return render_template('kayit_yeni.html',e=_ekleme_baglami(degerler,hatalar,jeton=_ekleme_jetonu(),genel_hata=mesaj)),kod
+
+def _ekleme_tekrar_yaniti(row):
+    """Aynı jetonla ikinci gönderim (çift tıklama, sayfa yenileme): yeni kayıt açılmaz, ilk kayıt döner."""
+    if row['ekleyen_id']!='panel:'+g.k['kullanici_adi']:
+        return _ekleme_hata(409,'Bu form başka bir gönderimde kullanılmış; formu kapatıp yeniden açın.',yeni_jeton=True)
+    mesaj='Bu form zaten gönderildi; Kayıt #%d yeniden oluşturulmadı.' % row['id']
+    if _json_bekleniyor():
+        return jsonify(ok=True,id=row['id'],tekrar=True,mesaj=mesaj,proje=row['proje'],damga=_degisiklik_damgasi())
+    flash(mesaj);return redirect(url_for('kayitlar',durum='hepsi',proje=row['proje'],ac=row['id']))
+
+@app.route('/kayit/yeni.json')
+@giris_gerekli
+def kayit_yeni_json():
+    """Ekleme penceresi her açılışta buradan yeni bir form jetonu ve güncel proje listesini alır."""
+    if not _ekleme_projeleri():_json_hata(403,'Kanıt eklemek için bir projede onay ya da düzenleme yetkiniz olmalı.')
+    b=_ekleme_baglami()
+    return jsonify(ok=True,jeton=_ekleme_jetonu(),projeler=b['ekleme_projeleri'],kategori=b['ekleme_kategori'],hostlar=list(EKLEME_HOSTLARI),secili=b['degerler']['proje'])
+
+@app.route('/kayit/yeni',methods=['GET','POST'])
+@giris_gerekli
+def kayit_yeni():
+    from . import katalog
+    uygun=_ekleme_projeleri()
+    if not uygun:_json_hata(403,'Kanıt eklemek için bir projede onay (takım lideri) ya da düzenleme yetkiniz olmalı. Gerekirse süperadminden yetki isteyin.')
+    if request.method=='GET':
+        return render_template('kayit_yeni.html',e=_ekleme_baglami(jeton=_ekleme_jetonu()))
+    jeton=str(request.form.get('jeton') or '').strip().lower()
+    if not _EKLEME_JETON_RX.fullmatch(jeton):
+        return _ekleme_hata(400,'Form kimliği eksik ya da bozuk; formu kapatıp yeniden açın.',yeni_jeton=True)
+    c=baglanti();kad=g.k['kullanici_adi'];anahtar='panel:'+jeton
+    var=c.execute('SELECT id,proje,ekleyen_id FROM kayitlar WHERE anahtar=?',(anahtar,)).fetchone()
+    if var:return _ekleme_tekrar_yaniti(var)
+    degerler,hatalar,yasak=_ekleme_dogrula(request.form,uygun)
+    if yasak:
+        _json_hata(403,'Bu projeye kanıt ekleme yetkiniz yok; kayıt '+degerler['proje']+' projesine eklenemez.',proje=degerler['proje'])
+    if jeton not in (session.get('ekle_jeton') or []):
+        return _ekleme_hata(400,'Form süresi doldu ya da başka bir oturumda açıldı; bilgileriniz korunarak form yenilendi, yeniden gönderin.',degerler,yeni_jeton=True)
+    if hatalar:
+        return _ekleme_hata(400,'Formda düzeltilmesi gereken alanlar var.',degerler,hatalar)
+    proje=degerler['proje'];onayli=bool(degerler['onayli']) and yetki.izin(g.yk,proje,'kt')
+    kat=katalog.panel_kategori(c)
+    if not kat:
+        return _ekleme_hata(400,'Panel ekleme kategorisi katalogda bulunamadı; süperadmine bildirin.',degerler)
+    if not kat.get('aktif'):
+        return _ekleme_hata(400,'Panel ekleme kategorisi (%s) katalogda pasif; panelden kanıt ekleme kapalı. Süperadmin katalogdan kategoriyi yeniden etkinleştirebilir.' % kat['label'],degerler)
+    tanim=katalog.get_category(c,kat['code']) or {}
+    sorular=[dict(q) for q in tanim.get('questions') or []]
+    # Anlık görüntü panel formunun kuralını yansıtır: panelde yalnız Personel zorunlu, diğer hazır sorular isteğe bağlıdır.
+    for q in sorular:
+        if q.get('required') and q.get('preset')!='personel':q['required']=False
+    cevaplar={q['key']:degerler[q['preset']] for q in sorular if q.get('preset') in degerler and degerler.get(q['preset'])}
+    an=simdi()
+    with db.transaction(c):
+        var=c.execute('SELECT id,proje,ekleyen_id FROM kayitlar WHERE anahtar=?',(anahtar,)).fetchone()
+        if var:return _ekleme_tekrar_yaniti(var)
+        alanlar=dict(anahtar=anahtar,proje=proje,kategori=kat['label'],kategori_code=kat['code'],kategori_mode=kat.get('mode'),
+                     personel=degerler['personel'],uye_id=degerler['uye_id'] or None,ana_uye_id=degerler['ana_uye_id'] or None,
+                     lead_id=degerler['lead_id'] or None,tip=degerler['tip'] or None,link=degerler['link'],link_turu=degerler['link_tur'],
+                     gorsel2=degerler['gorsel2'] or None,aciklama=degerler['aciklama'] or None,tarih=an,tarih_ham=an,guncelleme=an,
+                     kt=1 if onayli else 0,excel_durum='var',ekleyen_id='panel:'+kad,ekleyen_ad=kad,ekleyen_guven='panel',
+                     kaynak='panel',giris_tipi='panel',silindi=0,surum=1)
+        if onayli:alanlar.update(kt_kaynak='panel',kt_kim=kad,kt_zaman=an)
+        mevcut={row['name'] for row in c.execute('PRAGMA table_info(kayitlar)')}
+        ekler={'kategori_soru_surumu':tanim.get('revision'),
+               'soru_anlik_json':json.dumps({'questions':sorular,'category_code':kat['code'],'project':proje},ensure_ascii=False,separators=(',',':')),
+               'cevaplar_json':json.dumps(cevaplar,ensure_ascii=False,separators=(',',':'))}
+        alanlar.update({k:v for k,v in ekler.items() if k in mevcut})
+        kid=c.execute('INSERT INTO kayitlar('+','.join(alanlar)+') VALUES('+','.join('?'*len(alanlar))+')',list(alanlar.values())).lastrowid
+        if not onayli:db.bildirim_uret(c,kid,haric=kad)  # onaylı eklenen kayıt için onay bildirimi gerekmez
+        db.denetim_yaz(c,kad,'panel_kanit_ekle',proje,anahtar,
+                       yeni=json.dumps({'kayit':kid,'kategori':kat['label'],'personel':degerler['personel'],'onayli':onayli,'link_turu':degerler['link_tur']},ensure_ascii=False),
+                       ip=ip(),hedef_turu='kayit',hedef_id=kid)
+        db.degisti(c)
+    _ekleme_jetonu_dus(jeton)
+    mesaj='Kayıt #%d eklendi%s.' % (kid,' (onaylı)' if onayli else '; onay bekliyor')
+    # ONAYSIZ_GORUNUM=gizle ve onay yetkisi yok: kullanıcı kendi eklediği onaysız kaydı da göremez; ayrıntı açılmaz, ileti bunu söyler.
+    acilabilir=onayli or _onaysiz_modu()!='gizle' or yetki.izin(g.yk,proje,'kt')
+    if not acilabilir:mesaj+=' Onaylanınca listede görünür.'
+    if _json_bekleniyor():
+        return jsonify(ok=True,id=kid,mesaj=mesaj,kt=1 if onayli else 0,proje=proje,kategori=kat['label'],acilabilir=acilabilir,damga=_degisiklik_damgasi(),jeton=_ekleme_jetonu())
+    flash(mesaj)
+    return redirect(url_for('kayitlar',durum='hepsi',proje=proje,ac=kid) if acilabilir else url_for('kayitlar',proje=proje))
 
 @app.route('/kayit/<int:kid>/sil',methods=['POST'])
 @giris_gerekli
@@ -1548,7 +1742,7 @@ def _yorum_ozetleri(ids):
                 out[r['kayit_id']]['metin']=f"{r['kullanici']} ({r['zaman']}): {r['metin']}"
     return out
 
-GIRIS_TIPI_ADLARI={'resim':'Görsel','lead':'Lead ID','metin':'Metin','link':'Bağlantı'}
+GIRIS_TIPI_ADLARI={'resim':'Görsel','lead':'Lead ID','metin':'Metin','link':'Bağlantı','panel':'Panel (bağlantı)'}
 KAYNAK_ADLARI={'telegram':'Telegram','excel':'Eski Excel','legacy_excel':'Eski Excel','panel':'Panel'}
 
 def _cikti_degeri(r,name,yorumlar):

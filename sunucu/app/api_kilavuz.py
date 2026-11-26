@@ -52,7 +52,7 @@ ORNEK_OZET = {
 ORNEK_KAYIT = {
     'id': 1, 'proje': 'OF', 'kategori': 'CVPS', 'personel': 'P123', 'uye_id': '445566', 'ana_uye_id': None, 'lead_id': None,
     'tip': 'Sessiz', 'tarih': '2026-11-20 14:05:00', 'onayli': True, 'onaylayan': 'admin', 'onay_zamani': '2026-11-20 15:10:00',
-    'ekleyen_id': '5551234', 'ekleyen_ad': 'ahmet', 'link': 'https://gyazo.com/abc123', 'link_turu': 'gyazo', 'aciklama': None,
+    'ekleyen_id': '5551234', 'ekleyen_ad': 'ahmet', 'link': 'https://gyazo.com/abc123', 'link_turu': 'gyazo', 'aciklama': None, 'kaynak': 'telegram',
     'yorum_sayisi': 0,
 }
 ORNEK_KAYITLAR = {

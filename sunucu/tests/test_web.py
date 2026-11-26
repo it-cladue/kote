@@ -46,7 +46,7 @@ def test_health_login_and_no_site_submission(web):
         assert c.get(url).status_code==200,url
     assert c.get('/ekle').status_code==404
     assert c.post('/ekle',data={'csrf':csrf(c)}).status_code==404
-    assert b'Kan\xc4\xb1t ekle' not in c.get('/').data
+    assert b'Kan\xc4\xb1t ekle' in c.get('/').data  # 2.3.6: yetkili kullanıcı panelden kanıt ekler (/kayit/yeni); /ekle yok
     assert not list(Path(a['BOT_KLASOR']).glob('*.xlsx'))
 
 def test_crud_comments_and_no_excel_queue(web):

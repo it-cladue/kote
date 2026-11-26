@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% import "_kanit_ekle.html" as ekle_formu %}
+{% block baslik %}Kanıt ekle — Kanıt Paneli{% endblock %}
+{% block icerik %}
+<link rel="stylesheet" href="{{ url_for('static', filename='kayit.css', v=SURUM) }}">
+<div class="kayit-sayfa ekle-sayfa">
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">Panelden kanıt ekleme</p><h1>Kanıt ekle</h1>
+  <p>Görsel bağlantısını yapıştırıp diğer bilgileri doldurun. Kayıt <b>{{ e.ekleme_kategori }}</b> kategorisiyle eklenir ve Kayıtlar sayfasında Telegram kayıtlarıyla aynı biçimde görünür (kaynak: Panel).</p></div>
+  <div class="baslik-eylemler"><a class="btn" href="{{ url_for('kayitlar') }}">Kayıtlara dön</a></div>
+</section>
+<section class="kart ekle-kart" aria-label="Kanıt ekleme formu">
+  {{ ekle_formu.form(e, csrf, sayfa=True) }}
+</section>
+</div>
+{% endblock %}
+{% block script %}<script nonce="{{ csp_nonce }}">Panel.kanitEkle({sayfa:true});</script>{% endblock %}

@@ -232,6 +232,7 @@ curl -s -H "Authorization: Bearer kp_…" "https://panel.ornek/api/v1/personel-o
 | `id` | `id` | Kayıt numarası (panelde `#id`). |
 | `proje` | `proje` | Proje kodu (OF, PA, …). |
 | `kategori` | `kategori` | Kanıt kategorisinin görünen adı: **CVPS**, DDS, DDT, HGST, PRCST, LPST, ARK, S.ARK, btagsz, 30gün … ("bu personel kaç CVPS" sorusu bu alandır). |
+| — | `giris_tipi` | `resim` / `yazili` (bot), `panel` (panelden bağlantıyla eklenen kayıt). |
 | — | `kategori_code`, `kategori_mode` | Kategori kodu (ör. `cvpsz`) ve soru akışı türü (`tek_uye`, `ark_ana`, `ana_only`, `sessiz_tip`). |
 | `tip` | `tip` | Yalnız sessiz_tip kategorilerinde (DDS, DDT): **`sessiz`** ya da **`telesekreter`**. |
 | `personel` | `personel` | Kanıtın ait olduğu personel. |
@@ -239,7 +240,8 @@ curl -s -H "Authorization: Bearer kp_…" "https://panel.ornek/api/v1/personel-o
 | `tarih` | `tarih` | Kanıt tarihi `YYYY-AA-GG SS:DD:ss`. |
 | `onayli` (true/false) | `kt` (1/0) | Onay durumu. |
 | `onaylayan`, `onay_zamani` | `kt_kim`, `kt_zaman` | Onaylayan panel kullanıcısı ve zamanı. |
-| `ekleyen_id`, `ekleyen_ad` | aynı | Kanıtı ekleyen Telegram kullanıcısı (kimlik ve ad). |
+| `ekleyen_id`, `ekleyen_ad` | aynı | Kanıtı ekleyen Telegram kullanıcısı (kimlik ve ad). Panelden eklenen kayıtta `ekleyen_id` = `panel:<kullanıcı>`, `ekleyen_ad` = panel kullanıcı adı. |
+| `kaynak` | `kaynak` | Kaydın geldiği yer: `telegram` (bot), `panel` (2.3.6: panelden **Kanıt ekle**, kategori SMS), `legacy_excel` / `excel` (eski Excel aktarımı). |
 | `link`, `link_turu` | aynı | Kanıt bağlantısı ve türü (ör. gyazo). |
 | `aciklama` | `aciklama` | Açıklama metni. |
 | `yorum_sayisi` | — | Kayıttaki yorum sayısı. |

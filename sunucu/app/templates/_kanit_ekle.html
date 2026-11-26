@@ -1,0 +1,61 @@
+{# 2.3.6: panelden kanıt ekleme formu. Kayıtlar sayfasındaki pencere ve /kayit/yeni sayfası aynı formu kullanır.
+   e = panel._ekleme_baglami(): ekleme_projeleri, ekleme_kategori, ekleme_hostlari, ekleme_tipleri, ekleme_alanlari, degerler, hatalar, jeton, genel_hata #}
+{% macro form(e, csrf, sayfa=False) -%}
+{% set d = e.degerler %}{% set h = e.hatalar %}
+{% set secili_kt = (e.ekleme_projeleri|selectattr('code', 'equalto', d.proje)|map(attribute='kt')|first) if d.proje else none %}
+<form class="ekle-form" id="ekle-form" method="post" action="{{ url_for('kayit_yeni') }}" novalidate autocomplete="off"
+      data-kt-projeler="{{ e.ekleme_projeleri|selectattr('kt')|map(attribute='code')|list|join(',') }}" data-hostlar="{{ e.ekleme_hostlari|join(',') }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="jeton" value="{{ e.jeton }}" data-ekle-jeton>
+  <p class="form-hata{{ '' if e.genel_hata else ' gizli' }}" id="ekle-hata" role="alert">{{ e.genel_hata or '' }}</p>
+  <div class="ekle-izgara">
+    <label class="ekle-alan" for="ekle-proje">Proje <span class="zorunlu" aria-hidden="true">*</span>
+      <select id="ekle-proje" name="proje" required aria-describedby="ekle-proje-hata"{% if h.proje %} aria-invalid="true" class="hatali"{% endif %}>
+        {% if e.ekleme_projeleri|length != 1 %}<option value="">— Proje seçin —</option>{% endif %}
+        {% for p in e.ekleme_projeleri %}<option value="{{ p.code }}" {{ 'selected' if p.code == d.proje }} data-kt="{{ '1' if p.kt else '0' }}">{{ p.code }}{% if p.label and p.label != p.code %} — {{ p.label }}{% endif %}</option>{% endfor %}
+      </select>
+      <small class="alan-hata" id="ekle-proje-hata" data-hata="proje">{{ h.proje or '' }}</small>
+    </label>
+    <div class="ekle-alan ekle-kategori">
+      <span class="ekle-etiket" id="ekle-kategori-etiket">Kategori</span>
+      <span class="kategori-rozet" aria-describedby="ekle-kategori-etiket" data-ekle-kategori>{{ e.ekleme_kategori }}</span>
+      <small class="alan-ipucu">Panelden eklenen kanıtlar her zaman bu kategoriye yazılır.</small>
+    </div>
+    <label class="ekle-alan genis" for="ekle-link">Görsel bağlantısı <span class="zorunlu" aria-hidden="true">*</span>
+      <input id="ekle-link" name="link" type="url" inputmode="url" required maxlength="2048" spellcheck="false" autocapitalize="off" value="{{ d.link or '' }}" placeholder="https://gyazo.com/…" aria-describedby="ekle-link-ipucu ekle-link-hata"{% if h.link %} aria-invalid="true" class="hatali"{% endif %}>
+      <small class="alan-ipucu" id="ekle-link-ipucu">Gyazo, Snappark veya Teamzone bağlantısını olduğu gibi yapıştırın; https:// ile başlamalı. Kabul edilen adresler: {{ e.ekleme_hostlari|join(', ') }}.</small>
+      <small class="alan-hata" id="ekle-link-hata" data-hata="link">{{ h.link or '' }}</small>
+    </label>
+    <label class="ekle-alan genis" for="ekle-gorsel2">2. görsel bağlantısı <span class="kucukyazi">(isteğe bağlı)</span>
+      <input id="ekle-gorsel2" name="gorsel2" type="url" inputmode="url" maxlength="2048" spellcheck="false" autocapitalize="off" value="{{ d.gorsel2 or '' }}" placeholder="https://gyazo.com/…" aria-describedby="ekle-gorsel2-hata"{% if h.gorsel2 %} aria-invalid="true" class="hatali"{% endif %}>
+      <small class="alan-hata" id="ekle-gorsel2-hata" data-hata="gorsel2">{{ h.gorsel2 or '' }}</small>
+    </label>
+    {% for ad, etiket, sinir, zorunlu in e.ekleme_alanlari %}
+    <label class="ekle-alan" for="ekle-{{ ad }}">{{ etiket }}{% if zorunlu %} <span class="zorunlu" aria-hidden="true">*</span>{% endif %}
+      <input id="ekle-{{ ad }}" name="{{ ad }}" maxlength="{{ sinir }}" value="{{ d[ad] or '' }}" data-etiket="{{ etiket }}"{% if zorunlu %} required{% endif %} aria-describedby="ekle-{{ ad }}-hata"{% if h[ad] %} aria-invalid="true" class="hatali"{% endif %}>
+      <small class="alan-hata" id="ekle-{{ ad }}-hata" data-hata="{{ ad }}">{{ h[ad] or '' }}</small>
+    </label>
+    {% endfor %}
+    <label class="ekle-alan" for="ekle-tip">Sessiz / Telesekreter
+      <select id="ekle-tip" name="tip" aria-describedby="ekle-tip-hata"{% if h.tip %} aria-invalid="true" class="hatali"{% endif %}>
+        <option value="">—</option>
+        {% for deger, ad in e.ekleme_tipleri %}<option value="{{ deger }}" {{ 'selected' if d.tip == deger }}>{{ ad }}</option>{% endfor %}
+      </select>
+      <small class="alan-hata" id="ekle-tip-hata" data-hata="tip">{{ h.tip or '' }}</small>
+    </label>
+    <label class="ekle-alan genis" for="ekle-aciklama">Açıklama <span class="kucukyazi">(isteğe bağlı)</span>
+      <textarea id="ekle-aciklama" name="aciklama" rows="3" maxlength="{{ e.ekleme_aciklama_siniri }}" aria-describedby="ekle-aciklama-hata"{% if h.aciklama %} aria-invalid="true" class="hatali"{% endif %}>{{ d.aciklama or '' }}</textarea>
+      <small class="alan-hata" id="ekle-aciklama-hata" data-hata="aciklama">{{ h.aciklama or '' }}</small>
+    </label>
+    <div class="ekle-alan genis ekle-onay{{ ' gizli' if not secili_kt and (d.proje or not (e.ekleme_projeleri|selectattr('kt')|list)) }}" data-ekle-onay>
+      <label class="onay-kutu" for="ekle-onayli"><input type="checkbox" id="ekle-onayli" name="onayli" value="1" {{ 'checked' if d.onayli }}> Onaylı olarak ekle</label>
+      <small class="alan-ipucu">Bu projede onay yetkiniz var; işaretliyse kayıt onay bekleyenlere düşmez ve onaylayan olarak siz yazılırsınız.{% if not d.proje %} Onay yetkiniz olmayan projelerde kayıt onaysız eklenir.{% endif %}</small>
+    </div>
+  </div>
+  <div class="ekle-dugmeler">
+    <button type="submit" class="btn birincil" data-ekle-gonder>Kanıtı ekle</button>
+    {% if sayfa %}<a class="btn" href="{{ url_for('kayitlar') }}">Vazgeç</a>{% else %}<button type="button" class="btn" data-ekle-kapat>Vazgeç</button>{% endif %}
+    <span class="kucukyazi ekle-not"><span class="zorunlu" aria-hidden="true">*</span> zorunlu alan</span>
+  </div>
+</form>
+{%- endmacro %}

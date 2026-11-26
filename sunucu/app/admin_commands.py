@@ -51,7 +51,7 @@ def process(bot,conn,chat_id,user,text,session):
         elif cmd=='/istatistik':
             r=service.istatistik(conn);u=r['kullanicilar'];bot._say(chat_id,f"<b>İSTATİSTİK</b>\nKullanıcı: {u['toplam']}\nOnaylı: {u['onayli']}\nEngelli: {u['engelli']}\nOturum: {r['oturum']}\nKayıt: {sum(x['toplam'] for x in r['projeler'])}")
         elif cmd=='/kayit_raporu':
-            n=_sayi(arg,10,1,50,'Kullanım: /kayit_raporu [adet 1-50]');rows=service.istatistik(conn)['ekleyenler'][:n];bot._say(chat_id,'<b>KAYIT RAPORU</b>\n'+'\n'.join(f"{esc(x['ad'])} ({esc(x['id'])}): {x['adet']}" for x in rows))
+            n=_sayi(arg,10,1,50,'Kullanım: /kayit_raporu [adet 1-50]');rows=service.istatistik(conn)['ekleyenler'][:n];bot._say(chat_id,'<b>KAYIT RAPORU</b>\n'+'\n'.join(f"{esc(x['ad'])} ({'panel' if str(x['id']).startswith('panel:') else esc(x['id'])}): {x['adet']}" for x in rows))
         elif cmd in ('/son_kullanicilar','/kullanici_ara','/engelliler'):
             args=arg.split()
             limit=_sayi(args[0],30,1,SON_KULLANICI_SINIRI,f'Kullanım: /son_kullanicilar [adet 1-{SON_KULLANICI_SINIRI}] [1saat|2saat|24saat|7gun|30gun]') if args and cmd=='/son_kullanicilar' else min(30,SON_KULLANICI_SINIRI)

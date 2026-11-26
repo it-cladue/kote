@@ -238,12 +238,16 @@ def degisti(conn):
     ayar_yaz(conn, 'son_degisiklik', datetime.now().isoformat(timespec='microseconds'))
 
 
-def bildirim_uret(conn, kayit_id):
+def bildirim_uret(conn, kayit_id, haric=None):
+    """Yeni kanıt bildirimi: projede onay (kt) yetkisi olan etkin panel kullanıcılarına. 2.3.6: haric = kaydı panelden
+    ekleyen kullanıcı (kendi eklediği kayıt için bildirim almaz)."""
     from . import yetki
     row = conn.execute('SELECT proje FROM kayitlar WHERE id=?', (kayit_id,)).fetchone()
     if not row:
         return
     for user in conn.execute('SELECT kullanici_adi,yetki FROM panel_kullanicilari WHERE aktif=1').fetchall():
+        if haric and user['kullanici_adi'] == haric:
+            continue
         if yetki.izin(yetki.coz(user['yetki']), row['proje'], 'kt'):
             conn.execute('INSERT OR IGNORE INTO bildirimler(kullanici_adi,kayit_id,proje,zaman) VALUES(?,?,?,?)',
                          (user['kullanici_adi'], kayit_id, row['proje'], simdi()))
