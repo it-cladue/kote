@@ -1,6 +1,6 @@
 # Kanıt Paneli 2.3.2 — dış görsel servisleri ve API anahtarları (25 Kasım 2026)
 
-2.3.1 üzerine `deploy/apply-update.sh` ile uygulanır (sunucuda `git pull` + güncelleme, KURULUM §13). Veritabanına yalnız iki yeni tablo eklenir (`api_anahtarlari`, `api_gunlugu`); mevcut kayıtlar ve ayarlar korunur.
+2.3.1 üzerine `deploy/apply-update.sh` ile uygulanır (sunucuda depodan taze kopya + güncelleme, KURULUM §13). Veritabanına yalnız iki yeni tablo eklenir (`api_anahtarlari`, `api_gunlugu`); mevcut kayıtlar ve ayarlar korunur.
 
 ## Snappark ve Teamzone görselleri panelde
 

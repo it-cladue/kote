@@ -34,7 +34,7 @@
 - `gyazo-onbellekle` artık başta Gyazo'ya tek bir deneme isteği atar; ulaşılamıyorsa hiçbir bağlantı denemeden anlaşılır bir mesajla durur (daha önce sessizce beklerdi). Küçük denemelerde (`--en-cok 100` ve altı) ya da `--ayrintili` ile her bağlantı için satır yazar; hız sınırında "30 sn bekleniyor" der.
 - Gece planı: `--yeni-en-cok N` (bir çalıştırmada en çok N yeni indirme) ve `--pencere 22:30-07:30` (yalnız bu saatlerde çalış, bitişte dur; `--saat-dilimi` varsayılan Europe/Istanbul). Pencere dışında başlatılırsa hiçbir şey yapmadan çıkar. Çıkış satırları: `GYAZO_ONBELLEK_TAMAM`, `GYAZO_ONBELLEK_DEVAM` (kalan sayısıyla), `GYAZO_ONBELLEK_YARIM` (hız sınırı ya da erişim yok).
 - `deploy/setup-gyazo-gece.sh`: `kanit-gyazo.service` + `kanit-gyazo.timer` kurar (kanit kullanıcısı, sertleştirilmiş birim, her gece 22:30 TR + 5 dk rastgele, gecede 900, bitiş 07:30); 6.000 bağlantı yaklaşık 7 geceye yayılır, iş bitince gecelik çalışma saniyeler içinde "yeni yok" der ve bottan gelen yeni Gyazo bağlantılarını da aynı pencerede alır.
-- Güncellemeler GitHub'dan: sunucuda tek seferlik `git clone`, sonra her sürüm için `git pull` + `apply-update.sh` (KURULUM §13).
+- Güncellemeler GitHub'dan: sunucu her sürümde depodan taze kopya alır (`.git` geçmişi sunucuda tutulmaz), sonra `apply-update.sh` (KURULUM §13).
 
 ## Bot mesajı
 
