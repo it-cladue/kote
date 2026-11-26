@@ -21,7 +21,7 @@ from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari
 from . import iki_adim, qr_svg
 from .settings import AYAR, ROOT
 
-SURUM = '2.4.0'
+SURUM = '2.4.1'
 secret_path = Path(AYAR['BOT_KLASOR']) / 'session.key'
 secret = os.getenv('SESSION_SECRET')
 if not secret:
