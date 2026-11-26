@@ -40,8 +40,9 @@ def rows(a, sql, *params):
 
 
 def uret(a, **kw):
+    # 2.3.3 adımları (2 saat, gün sonu) burada kapalı: bu dosya yalnız 3 gün kuralını sınar (test_hatirlatma_233.py ayrı sınar).
     c = db.baglan(a['DB'])
-    try: return hatirlatma.uret(c, dict(a), **kw)
+    try: return hatirlatma.uret(c, dict(a, HATIRLATMA_SAAT=0, GUN_SONU_SAAT=''), **kw)
     finally: c.close()
 
 
@@ -240,7 +241,8 @@ def test_surum_ve_statik_surum_parametresi(web):
 def test_dusuk_bulgular(web):
     from app import panel, settings
     c, a = web; login(c)
-    assert hatirlatma.ayarlar({'HATIRLATMA_GUN': 0, 'HATIRLATMA_TEKRAR_GUN': -5, 'HATIRLATMA_GUNLUK_SINIR': 0, 'HATIRLATMA_KONTROL_DK': 10 ** 12}) == dict(gun=3, tekrar=3, sinir=50, kontrol_dk=7 * 24 * 60)
+    ayar_sonuc = hatirlatma.ayarlar({'HATIRLATMA_GUN': 0, 'HATIRLATMA_TEKRAR_GUN': -5, 'HATIRLATMA_GUNLUK_SINIR': 0, 'HATIRLATMA_KONTROL_DK': 10 ** 12})
+    assert {k: ayar_sonuc[k] for k in ('gun', 'tekrar', 'sinir', 'kontrol_dk')} == dict(gun=3, tekrar=3, sinir=50, kontrol_dk=7 * 24 * 60)
     kid = insert(a, ilk_gorulme='', tarih=gun(5))  # boş dize NULL sayılır → tarih kullanılır
     assert uret(a)['bekleyen'] == 1 and c.get('/bildirim.json').json['sayac']['OF']['geciken'] == 1
     html = c.get('/kayitlar?durum=hepsi&ac=-1&yorum=99999999999999999999').data.decode()

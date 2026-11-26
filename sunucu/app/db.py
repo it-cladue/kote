@@ -95,6 +95,10 @@ CREATE TABLE IF NOT EXISTS api_gunlugu (
  id INTEGER PRIMARY KEY,anahtar_id INTEGER,zaman TEXT NOT NULL,uc TEXT,ip TEXT,
  durum INTEGER,sure_ms INTEGER,satir INTEGER
 );
+CREATE TABLE IF NOT EXISTS hatirlatma_isaret (
+ kayit_id INTEGER NOT NULL,kullanici_adi TEXT NOT NULL,tur TEXT NOT NULL,zaman TEXT,
+ PRIMARY KEY(kayit_id,kullanici_adi,tur)
+);
 CREATE INDEX IF NOT EXISTS ix_kayit_proje ON kayitlar(proje,silindi,kt);
 CREATE INDEX IF NOT EXISTS ix_kayit_tarih ON kayitlar(tarih);
 CREATE INDEX IF NOT EXISTS ix_kayit_personel ON kayitlar(personel);
@@ -165,7 +169,9 @@ def _ready(conn):
     try:
         # 2.3.1: hesap_surumu sütunu; bayrak yükseltilmeden _add_columns canlı (core_schema_21=1 yazılı) DB'de hiç çalışmazdı.
         # 2.3.2: api_anahtarlari / api_gunlugu tabloları (core_schema_24). İki bayrak birlikte aranır: biri eksikse geçiş yeniden koşar.
-        return ayar_al(conn, 'core_schema_23') == '1' and ayar_al(conn, 'core_schema_24') == '1'
+        # 2.3.3: hatirlatma_isaret tablosu (2 saat hatırlatmasının kime hangi kayıt için gittiği; core_schema_25).
+        return (ayar_al(conn, 'core_schema_23') == '1' and ayar_al(conn, 'core_schema_24') == '1'
+                and ayar_al(conn, 'core_schema_25') == '1')
     except sqlite3.OperationalError:
         return False
 
@@ -208,6 +214,7 @@ def baglan(yol):
             donusum_isleri.ensure_schema(conn)
             yetki.eski_wildcardlari_sabitle(conn, [p['code'] for p in katalog.list_projects(conn)])
             ayar_yaz(conn, 'core_schema_21', '1'); ayar_yaz(conn, 'core_schema_23', '1'); ayar_yaz(conn, 'core_schema_24', '1')
+            ayar_yaz(conn, 'core_schema_25', '1')
         return conn
     except BaseException:
         conn.close()

@@ -57,8 +57,15 @@ def settings():
         # 0, negatif ya da geçersiz değer (eşik/tekrar/sınır için) varsayılana döner; hatirlatma.ayarlar() aynı kuralı uygular.
         'HATIRLATMA_GUN': _pozitif('HATIRLATMA_GUN', 3),
         'HATIRLATMA_TEKRAR_GUN': _pozitif('HATIRLATMA_TEKRAR_GUN', 3),
-        'HATIRLATMA_KONTROL_DK': min(_tam_sayi('HATIRLATMA_KONTROL_DK', 30), 7 * 24 * 60),
+        'HATIRLATMA_KONTROL_DK': min(_tam_sayi('HATIRLATMA_KONTROL_DK', 10), 7 * 24 * 60),
         'HATIRLATMA_GUNLUK_SINIR': _pozitif('HATIRLATMA_GUNLUK_SINIR', 50),
+        # 2.3.3 — 2 saat bildirimi (saat; 0 = kapalı), aynı projeden kaç kayıttan fazlası tek toplu bildirime döner,
+        # gün sonu özeti saati (İstanbul, SS:DD; boş ya da 0 = kapalı) ve alıcıları (boş = tüm aktif yöneticiler).
+        # Doğrulama hatirlatma.ayarlar() içinde: geçersiz değer varsayılana döner.
+        'HATIRLATMA_SAAT': _tam_sayi('HATIRLATMA_SAAT', 2, en_az=-1),  # negatif → -1 → hatirlatma.ayarlar() varsayılan 2'ye çevirir
+        'HATIRLATMA_SAAT_TOPLU': _pozitif('HATIRLATMA_SAAT_TOPLU', 5),
+        'GUN_SONU_SAAT': os.getenv('GUN_SONU_SAAT', '18:00'),
+        'GUN_SONU_ALICILAR': os.getenv('GUN_SONU_ALICILAR', ''),
     }
 
 AYAR = settings()

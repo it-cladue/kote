@@ -50,8 +50,9 @@ def rows(a, sql, *params):
 
 
 def conn_uret(a, **kw):
+    # 2.3.3 adımları (2 saat, gün sonu) burada kapalı: bu dosya yalnız 3 gün kuralını sınar (test_hatirlatma_233.py ayrı sınar).
     c = db.baglan(a['DB'])
-    try: return hatirlatma.uret(c, dict(a), **kw)
+    try: return hatirlatma.uret(c, dict(a, HATIRLATMA_SAAT=0, GUN_SONU_SAAT=''), **kw)
     finally: c.close()
 
 
@@ -165,7 +166,7 @@ def test_hatirlatma_akista_etiket_baglanti_ve_okundu(web):
 
 def test_hatirlatma_cli_raporu_ve_kapali_arka_plan(tmp_path):
     veri = tmp_path / 'veri'
-    ortam = dict(os.environ, PANEL_VERI=str(veri), GYAZO_WORKER='0', HATIRLATMA_GUN='2')
+    ortam = dict(os.environ, PANEL_VERI=str(veri), GYAZO_WORKER='0', HATIRLATMA_GUN='2', HATIRLATMA_SAAT='0', GUN_SONU_SAAT='')
     kur = subprocess.run([sys.executable, '-m', 'app.cli', 'veritabani-kur'], cwd=str(ROOT), env=ortam, capture_output=True, text=True, timeout=120)
     assert kur.returncode == 0, kur.stderr
     ayar = {'DB': str(veri / 'panel.db')}
@@ -189,7 +190,9 @@ def test_hatirlatma_cli_raporu_ve_kapali_arka_plan(tmp_path):
     assert 'hatirlatma-uret' in subprocess.run([sys.executable, '-m', 'app.cli', '--help'], cwd=str(ROOT), env=ortam, capture_output=True, text=True, timeout=120).stdout
     # Ayar okuma: boş/geçersiz değerler varsayılana düşer; HATIRLATMA_KONTROL_DK=0 arka plan işini kapatır.
     from app import panel
-    assert hatirlatma.ayarlar({'HATIRLATMA_GUN': 'x', 'HATIRLATMA_TEKRAR_GUN': 0, 'HATIRLATMA_GUNLUK_SINIR': None}) == dict(gun=3, tekrar=3, sinir=50, kontrol_dk=30)
+    # 2.3.3: kontrol sıklığı varsayılanı 30 → 10 dk; yeni anahtarlar test_hatirlatma_233.py'de sınanır.
+    ayar_sonuc = hatirlatma.ayarlar({'HATIRLATMA_GUN': 'x', 'HATIRLATMA_TEKRAR_GUN': 0, 'HATIRLATMA_GUNLUK_SINIR': None})
+    assert {k: ayar_sonuc[k] for k in ('gun', 'tekrar', 'sinir', 'kontrol_dk')} == dict(gun=3, tekrar=3, sinir=50, kontrol_dk=10)
     eski = dict(panel.AYAR)
     try:
         panel.AYAR['HATIRLATMA_KONTROL_DK'] = 0; assert panel._start_hatirlatma_isi() is None

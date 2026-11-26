@@ -19,7 +19,7 @@ from PIL import Image, UnidentifiedImageError
 from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari
 from .settings import AYAR, ROOT
 
-SURUM = '2.3.2'
+SURUM = '2.3.3'
 secret_path = Path(AYAR['BOT_KLASOR']) / 'session.key'
 secret = os.getenv('SESSION_SECRET')
 if not secret:
@@ -707,7 +707,8 @@ def _kayit_al(kid,action):
 
 def _hatirlatmalari_kapat(c,kid):
     """2.3.1: onaylanan ya da silinen kaydın açık hatırlatmaları okundu olur (zil sayacı düşer); akış da bunları süzer."""
-    c.execute("UPDATE mesaj_bildirimleri SET okundu=1 WHERE kayit_id=? AND tur='hatirlatma' AND olay LIKE 'hatirlatma:%' AND okundu=0",(kid,))
+    # 2.3.3: 2 saat hatırlatması ('hatirlatma-saat:<id>') da kapanır; toplu ve gün sonu satırları listeye bağlı olduğu için kalır.
+    c.execute("UPDATE mesaj_bildirimleri SET okundu=1 WHERE kayit_id=? AND tur='hatirlatma' AND (olay LIKE 'hatirlatma:%' OR olay LIKE 'hatirlatma-saat:%') AND okundu=0",(kid,))
 
 def version_check(r):
     v=request.form.get('surum')
@@ -1185,8 +1186,15 @@ BILDIRIM_TUR_ADLARI={'soru':'Soru','yanit':'Yanıt','yorum':'Yorum','onay':'Onay
 
 def _bildirim_hedef(row):
     """2.3.1: bildirime tıklanınca açılacak adres. Kayıt → kayıt modalı (durum=hepsi, liste dışı olsa da açılır);
-    yorum/soru/yanıt → aynı modalda ilgili yorum vurgulanır (&yorum=); hatırlatma özeti → projenin bekleyen listesi."""
-    if row.get('ozet') or str(row.get('olay') or '').startswith('hatirlatma-ozet:'):
+    yorum/soru/yanıt → aynı modalda ilgili yorum vurgulanır (&yorum=); hatırlatma özeti → projenin bekleyen listesi.
+    2.3.3: gün sonu özeti → tüm projelerin bekleyen listesi; 2 saat toplu bildirimi → projenin bekleyen listesi (gün süzgeci yok);
+    2 saat kayıt hatırlatması → kayıt modalı (aşağıdaki genel yol)."""
+    olay=str(row.get('olay') or '')
+    if olay.startswith('gun-sonu:'):
+        return url_for('kayitlar',durum='bekleyen')
+    if olay.startswith('hatirlatma-saat-ozet:'):
+        return url_for('kayitlar',proje=row.get('proje'),durum='bekleyen')
+    if row.get('ozet') or olay.startswith('hatirlatma-ozet:'):
         return url_for('kayitlar',proje=row.get('proje'),durum='bekleyen',bekleme=_hatirlatma_gun())
     args=dict(proje=row.get('proje'),durum='hepsi',ac=row.get('kayit_id'))
     if row.get('yorum_id'): args['yorum']=row['yorum_id']
@@ -1736,7 +1744,8 @@ def _start_web_converter():
 
 def _start_hatirlatma_isi():
     """2.3.1: onay bekleyen kayıtlar için hatırlatma bildirimlerini HATIRLATMA_KONTROL_DK dakikada bir üretir (0 = kapalı).
-    Üretim gün bazlı idempotent olduğu için sık çalışması yeni satır eklemez; ilk çalışma açılıştan ~20 sn sonra."""
+    Üretim idempotent olduğu için sık çalışması yeni satır eklemez; ilk çalışma açılıştan ~20 sn sonra.
+    2.3.3: varsayılan 10 dk; 2 saat bildirimi eşikten en geç ~10 dk sonra, gün sonu özeti İstanbul 18:00–18:10 arasında gider."""
     import sqlite3,threading
     from . import hatirlatma
     dk=hatirlatma.ayarlar(AYAR)['kontrol_dk']
@@ -1755,7 +1764,7 @@ def _start_hatirlatma_isi():
             finally:
                 if conn:conn.close()
             try:time.sleep(dk*60)
-            except (OverflowError,ValueError):time.sleep(1800)
+            except (OverflowError,ValueError):time.sleep(600)
     t=threading.Thread(target=loop,name='kanit-web-hatirlatma',daemon=True);t.start();return t
 
 def sunucu_ayarlari():

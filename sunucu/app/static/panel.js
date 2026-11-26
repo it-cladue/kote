@@ -493,7 +493,7 @@ window.Panel = (function () {
       /* Liste değişmediyse yeniden çizilmez (odaktaki düğme kaybolmasın); değiştiyse odak aynı satıra geri konur. */
       if(imza===hpImza&&hpListe.firstChild)return liste;hpImza=imza;
       var odak=document.activeElement,odakKey=odak&&hpListe.contains(odak)?odak.getAttribute('data-hp-ac'):null;
-      hpListe.innerHTML=liste.map(function(n){var id=bildirimAnahtari(n),kid=n.kayit_id||n.id,bas=n.ozet?esc(n.proje||'')+' · Proje özeti':'Kayıt #'+esc(kid)+(n.personel?' · '+esc(n.personel):'');
+      hpListe.innerHTML=liste.map(function(n){var id=bildirimAnahtari(n),kid=n.kayit_id||n.id,bas=n.ozet?(String(n.olay||'').indexOf('gun-sonu:')===0?'Gün sonu özeti':esc(n.proje||'')+' · Proje özeti'):'Kayıt #'+esc(kid)+(n.personel?' · '+esc(n.personel):'');
         return '<li class="'+(n.ozet?'ozet':'')+'">'+rozet(n)+'<span class="hp-metin"><b>'+bas+'</b> <span>'+esc(n.metin||'')+'</span></span><a class="btn kucuk ikincil" href="'+esc(hedef(n))+'" data-hp-ac="'+esc(id)+'">'+(n.ozet?'Bekleyenleri aç':'Aç')+'</a></li>';}).join('')||'<li class="bos">Bekleyen hatırlatma kalmadı.</li>';
       var s=document.getElementById('hp-sayi');if(s)s.textContent=liste.length?liste.length+' hatırlatma':'';
       if(odakKey!==null){var geri=hpListe.querySelector('[data-hp-ac="'+odakKey+'"]')||hpListe.querySelector('[data-hp-ac]')||hp.querySelector('[data-hp-sonra]');if(geri)geri.focus();}

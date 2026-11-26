@@ -3,6 +3,10 @@
 from datetime import datetime
 from . import db
 
+# Tek kayda değil bir listeye bağlanan hatırlatmalar (arayüz "Kayıt #" yerine "Bekleyenleri aç" gösterir).
+# 2.3.3: 2 saat toplu bildirimi ve gün sonu özeti eklendi.
+OZET_ONEKLERI = ('hatirlatma-ozet:', 'hatirlatma-saat-ozet:', 'gun-sonu:')
+
 
 def _base(username, allowed, gizli=None):
     """gizli=(sql, params): 2.3.1 ONAYSIZ_GORUNUM=gizle için 'k' takma adlı ek koşul (kt yetkisi olmayan projelerde yalnız onaylı)."""
@@ -21,7 +25,7 @@ def _base(username, allowed, gizli=None):
               b.olay,CASE WHEN b.olay LIKE 'yorum:%' THEN CAST(substr(b.olay,7) AS INTEGER) END yorum_id
               FROM mesaj_bildirimleri b JOIN kayitlar k ON k.id=b.kayit_id
               WHERE b.kullanici_adi=? AND k.proje IN ({places}){ek_sql}
-              AND NOT (b.tur='hatirlatma' AND b.olay LIKE 'hatirlatma:%' AND (k.kt=1 OR k.silindi=1))'''
+              AND NOT (b.tur='hatirlatma' AND (b.olay LIKE 'hatirlatma:%' OR b.olay LIKE 'hatirlatma-saat:%') AND (k.kt=1 OR k.silindi=1))'''
     return sql, [username, *allowed, *ek_params, username, *allowed, *ek_params]
 
 
@@ -65,7 +69,7 @@ def liste(conn, username, allowed, filters=None, page_size=30, gizli=None):
     rows = [dict(r) for r in conn.execute('SELECT * FROM (' + sql + ') WHERE ' + clause + ' ORDER BY zaman DESC,key DESC LIMIT ? OFFSET ?',
                                           [*params, *values, page_size, (page - 1) * page_size])]
     for row in rows:
-        row['ozet'] = str(row.get('olay') or '').startswith('hatirlatma-ozet:')
+        row['ozet'] = str(row.get('olay') or '').startswith(OZET_ONEKLERI)
     count = conn.execute('SELECT COUNT(*) toplam,SUM(okundu=0) okunmamis,SUM(okundu=1) okundu FROM (' + sql + ')', params).fetchone()
     counts = {key: count[key] or 0 for key in count.keys()}
     types = [r[0] for r in conn.execute('SELECT DISTINCT tur FROM (' + sql + ') ORDER BY tur', params)]
