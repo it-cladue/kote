@@ -95,7 +95,7 @@ def main():
             ayrintili=args.ayrintili or (0<args.en_cok<=100)
             try:
                 r=gorsel.gyazo_toplu_indir(c,gorsel.GorselCozucu(AYAR,AYAR['ONBELLEK']),AYAR,en_cok=args.en_cok,yeni_en_cok=args.yeni_en_cok,bitis=bitis,
-                                           bekleme_sn=args.bekleme,rapor_yolu=args.rapor,ilerleme=ilerleme,log=log if ayrintili else (lambda m: print(m,flush=True) if ('bekleniyor' in m or 'ulaşılamıyor' in m or 'sınırı' in m or 'Bitiş' in m or 'erişimi' in m or 'taranıyor' in m) else None),
+                                           bekleme_sn=args.bekleme,rapor_yolu=args.rapor,ilerleme=ilerleme,log=log if ayrintili else (lambda m: print(m,flush=True) if ('bekleniyor' in m or 'ulaşılamıyor' in m or 'sınırı' in m or 'Bitiş' in m or 'erişimi' in m or 'taranıyor' in m or 'arızası' in m) else None),
                                            on_kontrol=not args.on_kontrol_atla)
             except ValueError as e: raise SystemExit('Hata: '+str(e))
             print(json.dumps(r,ensure_ascii=False,indent=2))
@@ -108,7 +108,7 @@ def main():
                 for servis in r['ariza']:
                     d=int(denenmedi.get(servis,0) or 0);acil=max(0,int((turler.get(str(servis).lower()) or {}).get('acilamayan',0) or 0)-d)
                     parcalar.append(f"{servis} yanıt vermiyor (muhtemelen {servis} arızası); {acil} bağlantı açılamadı"+(f", {d} bağlantı denenmedi" if d else ''))
-                print('ARIZA: '+' · '.join(parcalar)+'. Gece planı sonraki çalıştırmada yeniden dener.',flush=True)
+                print('ARIZA: '+' · '.join(parcalar)+'. Sonraki çalıştırmada (gece planı kuruluysa kendiliğinden) yeniden denenir.',flush=True)
             neden=r.get('bitis_nedeni','tamam')
             if neden=='tamam': print('GYAZO_ONBELLEK_TAMAM')
             elif neden in ('sinir','sure'): print(f"GYAZO_ONBELLEK_DEVAM: kalan {r.get('kalan',0)} bağlantı sonraki çalıştırmada sürer.")

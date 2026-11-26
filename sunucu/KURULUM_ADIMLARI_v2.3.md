@@ -127,7 +127,7 @@ cd /opt/kanit-paneli
 runuser -u kanit -- .venv/bin/python -m app.cli gyazo-onbellekle --en-cok 20
 ```
 
-Beklenen: `Gyazo erişimi: tamam`, ardından `1/20 … indirildi (123 KB)` satırları (birkaçı `açılamadı: Gyazo'da görsel yok (404)` olabilir), sonda `GYAZO_ONBELLEK_TAMAM`. `GYAZO_ONBELLEK_YARIM: Gyazo'ya ulaşılamıyor` çıkarsa sunucunun dış HTTPS erişimi engellidir; çıktıyı gönderin. Gyazo arızadaysa (çoğu bağlantı `HTTP 503` ya da zaman aşımı) komut kendiliğinden hızlanır ve art arda 25 yanıtsız bağlantıdan sonra kalanları denemeden biter; sonda `ARIZA: Gyazo yanıt vermiyor …` satırı çıkar. Ctrl+C gerekmez; gece planı sonraki çalıştırmada yeniden dener.
+Beklenen: `Gyazo erişimi: tamam`, ardından `1/20 … indirildi (123 KB)` satırları (birkaçı `açılamadı: Gyazo'da görsel yok (404)` olabilir), sonda `GYAZO_ONBELLEK_TAMAM`. `GYAZO_ONBELLEK_YARIM: Gyazo'ya ulaşılamıyor` çıkarsa sunucunun dış HTTPS erişimi engellidir; çıktıyı gönderin. Gyazo arızadaysa (çoğu bağlantı `HTTP 503` ya da zaman aşımı) komut 10 hatadan sonra yeniden deneme ve beklemeyi bırakır, sonda `ARIZA: Gyazo yanıt vermiyor …` satırı çıkar; Gyazo hiç yanıt vermeden asılı kalıyorsa bu 20 bağlantılık deneme yine birkaç dakika sürebilir (bağlantı başına en çok 15 sn), bekleyin. Gece planında (sınırsız aday) art arda 25 yanıtsız bağlantıdan sonra kalan Gyazo bağlantıları denenmeden geçilir, komut kendiliğinden erken biter ve sonraki gece yeniden dener.
 
 Deneme iyiyse gece zamanlayıcısı (her gece TR 22:30'da başlar, gecede en çok 900 bağlantı indirir, en geç 07:30'da durur, kaldığı yerden sürer; gün içinde çalışmaz):
 
