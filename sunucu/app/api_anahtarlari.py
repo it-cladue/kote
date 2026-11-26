@@ -70,7 +70,7 @@ def durum(anahtar, bugun=None):
 
 
 def olustur(conn, ad, projeler, *, yalniz_onayli=True, sql_izni=False, gorsel_izni=False, son_kullanma=None,
-            olusturan, ip=None, tanimli_projeler=None):
+            olusturan, ip=None, tanimli_projeler=None, izinli_ipler=''):
     """Yeni anahtar. ``projeler``: '*' ya da kod listesi. (id, düz anahtar) döndürür; geçersiz girdide ValueError."""
     ad = db.metin_temizle(ad or '', 80).replace('\n', ' ').strip()
     if not ad:
@@ -94,16 +94,37 @@ def olustur(conn, ad, projeler, *, yalniz_onayli=True, sql_izni=False, gorsel_iz
             raise ValueError('Son kullanma tarihi bugünden önce olamaz.')
     else:
         son_kullanma = None
+    from . import erisim
+    izinli_ipler = erisim.normalle(izinli_ipler or '')  # 2.4.0: boş = anahtar için ek IP sınırı yok; geçersizde ValueError
     anahtar, onek, oz = uret()
     with db.transaction(conn):
-        kid = conn.execute('INSERT INTO api_anahtarlari(ad,onek,ozet,projeler,yalniz_onayli,sql_izni,gorsel_izni,son_kullanma,olusturan,olusturma) '
-                           'VALUES(?,?,?,?,?,?,?,?,?,?)',
+        kid = conn.execute('INSERT INTO api_anahtarlari(ad,onek,ozet,projeler,yalniz_onayli,sql_izni,gorsel_izni,son_kullanma,olusturan,olusturma,izinli_ipler) '
+                           'VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                            (ad, onek, oz, saklanan, 1 if yalniz_onayli else 0, 1 if sql_izni else 0, 1 if gorsel_izni else 0,
-                            son_kullanma, olusturan, db.simdi())).lastrowid
+                            son_kullanma, olusturan, db.simdi(), izinli_ipler or None)).lastrowid
         db.denetim_yaz(conn, olusturan, 'api_anahtar_olustur', ip=ip, hedef_turu='api_anahtari', hedef_id=kid,
                        yeni={'ad': ad, 'onek': ONEK + onek, 'projeler': saklanan, 'yalniz_onayli': int(bool(yalniz_onayli)),
-                             'sql_izni': int(bool(sql_izni)), 'gorsel_izni': int(bool(gorsel_izni)), 'son_kullanma': son_kullanma})
+                             'sql_izni': int(bool(sql_izni)), 'gorsel_izni': int(bool(gorsel_izni)), 'son_kullanma': son_kullanma,
+                             'izinli_ipler': izinli_ipler.split('\n') if izinli_ipler else []})
     return kid, anahtar
+
+
+def ip_guncelle(conn, kid, metin, eden, ip=None):
+    """2.4.0: anahtarın kendi IP listesini değiştirir (boş = ek sınır yok). Kanonik metni döndürür; İşlem Geçmişi'ne eski/yeni."""
+    from . import erisim
+    yeni = erisim.normalle(metin or '')
+    with db.transaction(conn):
+        row = conn.execute('SELECT * FROM api_anahtarlari WHERE id=?', (kid,)).fetchone()
+        if not row:
+            raise ValueError('Anahtar bulunamadı.')
+        eski = row['izinli_ipler'] or ''
+        if eski == yeni:
+            return yeni
+        conn.execute('UPDATE api_anahtarlari SET izinli_ipler=? WHERE id=?', (yeni or None, kid))
+        db.denetim_yaz(conn, eden, 'api_anahtar_ip', ip=ip, hedef_turu='api_anahtari', hedef_id=kid,
+                       eski={'ad': row['ad'], 'izinli_ipler': eski.split('\n') if eski else []},
+                       yeni={'ad': row['ad'], 'izinli_ipler': yeni.split('\n') if yeni else []})
+    return yeni
 
 
 def iptal(conn, kid, eden, ip=None):

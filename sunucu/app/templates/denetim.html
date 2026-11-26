@@ -1,22 +1,25 @@
 {% extends "base.html" %}
 {% block baslik %}İşlem Geçmişi — Kanıt Paneli{% endblock %}
+{% block head %}<style>.hizli-tarih{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 2px}.denetim-okunur{margin:0 0 2px}.denetim-ham code{white-space:pre-wrap;word-break:break-word;font-size:12px}</style>{% endblock %}
 {% block icerik %}
 {% set flt = filters|default({}) %}
 {% set logs = logs|default(kayitlar|default([])) %}
-{% set islem_adlari = {'giris':'Giriş','giris_hata':'Hatalı giriş','onayla':'Onay','onay_kaldir':'Onay kaldırma','duzenle':'Düzenleme','sil':'Silme','geri_al':'Geri alma','yorum_ekle':'Yorum','soru_yonelt':'Soru','yanit_ekle':'Yanıt','gyazo_istek':'Gyazo isteği','disa_aktar':'Excel çıktısı','dosya_kontrol':'Dosya kontrolü','kullanici_ekle':'Kullanıcı ekleme','kullanici_guncelle':'Kullanıcı güncelleme','sifre_degisti':'Şifre değişimi','arsiv_esle':'Arşiv eşleme','beklenen_proje':'Beklenen proje','yeni_kayit':'Yeni kanıt','bildirim_okundu':'Bildirim okundu','sunucu_hata':'Sunucu hatası','katalog_proje_kaydet':'Proje kaydı','katalog_kategori_kaydet':'Kategori kaydı','telegram_kayit':'Telegram ile kanıt','bot_onayla':'Bot: kullanıcı onayı','bot_onay_kaldir':'Bot: onay kaldırma','bot_engelle':'Bot: engelleme','bot_engel_kaldir':'Bot: engel kaldırma','bot_tam_sifirla':'Bot: tam sıfırlama','bot_oturum_temizle':'Bot: oturum temizleme','bot_bakim':'Bot: bakım modu','bot_kontrol':'Bot: duraklat/sürdür','bot_yedek':'Bot: veritabanı yedeği','bot_inbox_tekrar':'Bot: tekrar deneme','bot_kategori_sil':'Bot: kategori pasife','yetki_kanonik':'Yetki düzeltme'} %}
+{% set islem_adlari = islem_adlari|default({}) %}
+{% set ip_goster = ip_goster|default(false) %}
 <section class="sayfa-baslik">
   <div><p class="ust-etiket">İzlenebilirlik</p><h1>İşlem Geçmişi</h1><p>Görüntüleme kapsamınız içindeki kayıt hareketleri gösterilir. Şifre, anahtar gibi gizli değerler bu ekranda yer almaz.</p></div>
-  <div class="baslik-eylemler"><a class="btn" href="{{ url_for('bildirim_sayfasi') }}">Bildirimlerim</a></div>
+  <div class="baslik-eylemler">{% if csv_url %}<a class="btn" href="{{ csv_url }}" data-denetim-csv>CSV indir</a>{% endif %}<a class="btn" href="{{ url_for('bildirim_sayfasi') }}">Bildirimlerim</a></div>
 </section>
 <form class="filtre filtre-kapsamli" method="get" aria-label="İşlem geçmişi filtreleri">
   <div class="filtre-temel">
-    <div class="ara-alani"><label for="denetim-ara">Ara</label><input id="denetim-ara" name="q" value="{{ flt.get('q', q|default('')) }}" placeholder="Kullanıcı, işlem veya kayıt anahtarı"></div>
+    <div class="ara-alani"><label for="denetim-ara">Ara</label><input id="denetim-ara" name="q" value="{{ flt.get('q', q|default('')) }}" placeholder="Kayıt no, personel, kullanıcı, açıklama{{ ', IP' if ip_goster }}" title="Kayıt numarası (ör. 1234 ya da #1234), kayıt anahtarı, personel, kullanıcı, işlem, açıklama{{ ' ve IP adresi' if ip_goster }} içinde arar"></div>
     <div><label for="denetim-aktor">Kullanıcı</label><input id="denetim-aktor" name="kullanici" value="{{ flt.get('kullanici','') }}" placeholder="Kullanıcı adı"></div>
     <div><label for="denetim-islem">İşlem</label><input id="denetim-islem" name="islem" value="{{ flt.get('islem','') }}" placeholder="Örn. onayla, sil" list="islem-listesi"></div>
     <div><label for="denetim-proje">Proje</label><select id="denetim-proje" name="proje"><option value="">Tüm yetkili projeler</option>{% for p in projeler() %}<option value="{{ p }}" {{ 'selected' if flt.get('proje','') == p }}>{{ p }}</option>{% endfor %}</select></div>
     <button class="btn birincil" type="submit">Uygula</button>
     {% if flt.get('q') or flt.get('kullanici') or flt.get('islem') or flt.get('proje') or flt.get('tarih1') or flt.get('tarih2') %}<a class="btn" href="{{ url_for('denetim') }}">Temizle</a>{% endif %}
   </div>
+  <div class="hizli-tarih" role="group" aria-label="Hızlı tarih aralığı">{% for h in hizli_tarih|default([]) %}<a class="btn kucuk{{ ' birincil' if h.secili }}" href="{{ url_degistir(tarih1=h.tarih1, tarih2=h.tarih2) }}" {% if h.secili %}aria-current="true"{% endif %}>{{ h.ad }}</a>{% endfor %}{% if flt.get('tarih1') or flt.get('tarih2') %}<a class="btn kucuk hayalet" href="{{ url_degistir(tarih1=None, tarih2=None) }}">Tüm tarihler</a>{% endif %}</div>
   <details class="gelismis-filtre" {% if flt.get('tarih1') or flt.get('tarih2') %}open{% endif %}><summary>Tarih aralığı</summary><div class="filtre-ileri"><label for="denetim-tarih1">Başlangıç<input id="denetim-tarih1" type="date" name="tarih1" value="{{ flt.get('tarih1','') }}" {% if uyari %}aria-invalid="true"{% endif %}></label><label for="denetim-tarih2">Bitiş<input id="denetim-tarih2" type="date" name="tarih2" value="{{ flt.get('tarih2','') }}" {% if uyari %}aria-invalid="true"{% endif %}></label></div></details>
   {% if uyari %}<div class="hata filtre-uyari" role="alert" id="denetim-uyari">{{ uyari }} Tarihleri düzeltip yeniden uygulayın.</div>{% endif %}
 </form>
@@ -24,17 +27,18 @@
 <p class="sonuc-ozeti"><b>{{ toplam|default(logs|length) }}</b> işlem{% if sayfa_sayisi|default(1) > 1 %} · sayfa {{ sayfa|default(1) }} / {{ sayfa_sayisi }}{% endif %}</p>
 <div class="tablo-sarici" tabindex="0" role="region" aria-label="İşlem geçmişi tablosu">
 <table class="tablo denetim-tablo">
-  <thead><tr><th>Zaman</th><th>Kullanıcı</th><th>İşlem</th><th>Hedef</th><th>Proje</th><th>Sonuç</th><th>Ayrıntı</th></tr></thead>
+  <thead><tr><th>Zaman</th><th>Kullanıcı</th><th>İşlem</th><th>Hedef</th><th>Proje</th>{% if ip_goster %}<th>IP</th>{% endif %}<th>Sonuç</th><th>Ayrıntı</th></tr></thead>
   <tbody>
   {% for r in logs %}
   <tr>
     <td class="nowrap">{{ r.zaman }}</td><td><b>{{ r.kullanici or r.aktor or 'Sistem' }}</b></td><td>{{ r.islem_adi or islem_adlari.get(r.islem) or (r.islem or '')|replace('_',' ') }}{% if r.islem_bilinen or r.islem in islem_adlari %}<br><code>{{ r.islem }}</code>{% endif %}</td>
     <td>{% if r.hedef_turu == 'kayit' and r.hedef_id %}<a href="{{ url_for('kayitlar', proje=r.proje, durum='hepsi', ac=r.hedef_id) }}">Kayıt #{{ r.hedef_id }}</a>{% elif r.hedef_turu or r.hedef_id %}{{ {'hesap':'Hesap','kategori':'Kategori','proje':'Proje','anahtar':'Kayıt anahtarı','sistem':'Sistem','bildirim':'Bildirim','kontrol':'Kontrol'}.get(r.hedef_turu, r.hedef_turu or 'Kayıt') }}{% if r.hedef_id %}: {{ r.hedef_id }}{% endif %}{% else %}{{ r.anahtar or '—' }}{% endif %}</td>
-    <td>{% if r.proje %}<span class="rozet" style="background:{{ renk(r.proje) }};color:{{ metin_rengi(renk(r.proje)) }}">{{ r.proje }}</span>{% endif %}</td>
+    <td>{% if r.proje %}<span class="rozet" style="background:{{ renk(r.proje) }};color:{{ metin_rengi(renk(r.proje)) }}">{{ r.proje }}</span>{% endif %}{% if r.kayit_personel %}<br><small title="Personel">{{ r.kayit_personel }}</small>{% endif %}</td>
+    {% if ip_goster %}<td class="nowrap"><small>{% if r.ip %}<a href="{{ url_degistir(q=r.ip) }}" title="Bu adresin işlemleri">{{ r.ip }}</a>{% else %}—{% endif %}</small></td>{% endif %}
     <td>{% set sonuc = r.sonuc or r.aciklama or 'Tamamlandı' %}<span class="durum-etiket {{ 'silinen' if sonuc == 'Hata' else 'bekliyor' if sonuc == 'Uyarı' else 'onayli' }}">{{ sonuc }}</span></td>
-    <td class="denetim-ayrinti">{% if r.aciklama %}<p class="denetim-sebep"><b>{{ r.sebep_etiketi or 'Açıklama' }}:</b> {{ r.aciklama }}</p>{% endif %}{% if r.ayrinti is defined %}{% if r.ayrinti and r.ayrinti_katla %}<details class="deger-detay"><summary>Önceki / yeni</summary>{% for satir in r.ayrinti %}<p>{{ satir }}</p>{% endfor %}</details>{% elif r.ayrinti %}{% for satir in r.ayrinti %}<p>{{ satir }}</p>{% endfor %}{% elif not r.aciklama %}<span class="kucukyazi">—</span>{% endif %}{% elif r.eski or r.yeni %}<details class="deger-detay"><summary>Önceki / yeni</summary>{% if r.eski %}<p><b>Önceki:</b> {{ r.eski }}</p>{% endif %}{% if r.yeni %}<p><b>Yeni:</b> {{ r.yeni }}</p>{% endif %}</details>{% elif not r.aciklama %}<span class="kucukyazi">—</span>{% endif %}</td>
+    <td class="denetim-ayrinti">{% if r.aciklama %}<p class="denetim-sebep"><b>{{ r.sebep_etiketi or 'Açıklama' }}:</b> {{ r.aciklama }}</p>{% endif %}{% if r.okunur %}{% for satir in r.okunur %}<p class="denetim-okunur">{{ satir }}</p>{% endfor %}{% if r.eski or r.yeni %}<details class="deger-detay denetim-ham"><summary>Ham</summary>{% if r.eski %}<p><b>Önceki:</b> <code>{{ r.eski }}</code></p>{% endif %}{% if r.yeni %}<p><b>Yeni:</b> <code>{{ r.yeni }}</code></p>{% endif %}</details>{% endif %}{% elif r.ayrinti is defined %}{% if r.ayrinti and r.ayrinti_katla %}<details class="deger-detay"><summary>Önceki / yeni</summary>{% for satir in r.ayrinti %}<p>{{ satir }}</p>{% endfor %}</details>{% elif r.ayrinti %}{% for satir in r.ayrinti %}<p>{{ satir }}</p>{% endfor %}{% elif not r.aciklama %}<span class="kucukyazi">—</span>{% endif %}{% elif r.eski or r.yeni %}<details class="deger-detay"><summary>Önceki / yeni</summary>{% if r.eski %}<p><b>Önceki:</b> {{ r.eski }}</p>{% endif %}{% if r.yeni %}<p><b>Yeni:</b> {{ r.yeni }}</p>{% endif %}</details>{% elif not r.aciklama %}<span class="kucukyazi">—</span>{% endif %}</td>
   </tr>
-  {% else %}<tr><td colspan="7"><div class="bos-tablo">Bu filtrede işlem yok.</div></td></tr>{% endfor %}
+  {% else %}<tr><td colspan="{{ 8 if ip_goster else 7 }}"><div class="bos-tablo">Bu filtrede işlem yok.</div></td></tr>{% endfor %}
   </tbody>
 </table>
 </div>

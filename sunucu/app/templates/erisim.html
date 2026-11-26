@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block baslik %}Erişim sınırı — Kanıt Paneli{% endblock %}
+{% block head %}<style>
+.erisim-izgara{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.erisim-izgara textarea{width:100%;min-height:140px;font-family:ui-monospace,Consolas,monospace;font-size:14px}
+.adres-kutu{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.adres-kutu code{font-size:18px;padding:4px 10px;border-radius:6px;background:var(--zemin-2,rgba(127,127,127,.12))}
+.erisim-ornek code{white-space:nowrap}
+.erisim-uyari{border-left:4px solid var(--kirmizi,#c0392b)}
+.onay-alani{border:1px solid var(--uyari,#d97706);border-radius:8px;padding:10px 12px;margin:10px 0}
+.onay-alani input[type=text]{max-width:320px}
+@media (max-width:820px){.erisim-izgara{grid-template-columns:1fr}}
+</style>{% endblock %}
+{% block icerik %}
+{% set kaynak_adi = {'veritabani':'panelden kaydedildi','ortam':'.env dosyasından (panelden kaydedince bu değer geçersiz olur)','yok':'sınır yok'} %}
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">Sahip yönetimi</p><h1>Erişim sınırı (IP izin listesi)</h1>
+  <p>Panele ve API'ye yalnız izin verdiğiniz internet adreslerinden girilsin. Liste boşsa sınır yoktur. Sınır hem alan adı (Cloudflare) yolunda hem de doğrudan sunucu IP'si yolunda (IP:18443) çalışır; giriş sayfası da dahildir.</p></div>
+  <div class="baslik-eylemler"><a class="btn" href="{{ url_for('denetim', islem='erisim') }}">Erişim kayıtları</a></div>
+</section>
+{% if mesaj %}<div class="{{ 'hata' if mesaj.startswith('Hata') else 'bilgi' }}" role="{{ 'alert' if mesaj.startswith('Hata') else 'status' }}" id="erisim-mesaj">{{ mesaj }}</div>{% endif %}
+{% if d.vekil_suphesi %}
+<section class="kart erisim-uyari" role="alert" id="trust-proxy-uyari">
+  <h2>TRUST_PROXY=1 gerekli</h2>
+  <p>Sunucu sizin adresinizi değil, kendi içindeki aktarıcının adresini ({{ d.ip }}) görüyor. Bu hâlde bir liste kaydedilirse herkes engellenir; bu yüzden panel listesi kaydedilemez.</p>
+  <p>Düzeltme: sunucudaki <code>.env</code> dosyasında <code>TRUST_PROXY=1</code> satırı olmalı, ardından <code>sudo systemctl restart kanit-web</code>.</p>
+</section>
+{% endif %}
+<section class="kart" aria-labelledby="adres-baslik">
+  <h2 id="adres-baslik">Şu anki adresiniz</h2>
+  <div class="adres-kutu"><code id="su-anki-ip">{{ d.ip or 'bilinmiyor' }}</code>
+    {% if not d.vekil_suphesi and d.ip %}<button type="button" class="btn kucuk birincil" data-ip-ekle="{{ d.ip }}" data-hedef="erisim-panel">Panel listesine ekle</button><button type="button" class="btn kucuk" data-ip-ekle="{{ d.ip }}" data-hedef="erisim-api">API listesine ekle</button>{% endif %}
+  </div>
+  <p class="kucukyazi">{% if d.muaf %}Bu istek sunucunun kendisinden geliyor; sınırdan muaftır (ERISIM_LOOPBACK_SERBEST).{% elif d.panel.aglar %}{% if d.ip_listede %}Bu adres panel listesinde: girişiniz açık.{% else %}<b class="flash-hata">Bu adres panel listesinde değil.</b>{% endif %}{% else %}Panel listesi boş: her adresten girilebiliyor.{% endif %}
+  Ofis internetinin adresi çoğu zaman sabit değildir (ev/ofis hatlarında sağlayıcı değiştirebilir). Adres değişirse giriş engellenir; bu yüzden mümkünse sağlayıcınızdan <b>sabit IP</b> isteyin ya da adresin bulunduğu bloğu (ör. <code>85.105.12.0/24</code>) yazın.</p>
+</section>
+<form method="post" autocomplete="off" class="kart" aria-labelledby="liste-baslik" data-erisim-form>
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="kaydet">
+  <h2 id="liste-baslik">İzinli adresler</h2>
+  <div class="erisim-izgara">
+    <label for="erisim-panel"><b>Panel</b> (tarayıcıdan giriş) <small>· {{ kaynak_adi.get(d.panel.kaynak) }}</small>
+      <textarea id="erisim-panel" name="panel" spellcheck="false" placeholder="Boş = sınır yok">{{ form.panel if form.panel is defined and form else d.panel.metin }}</textarea></label>
+    <label for="erisim-api"><b>API</b> (dış sistemler, tüm anahtarlar için) <small>· {{ kaynak_adi.get(d.api.kaynak) }}</small>
+      <textarea id="erisim-api" name="api" spellcheck="false" placeholder="Boş = genel sınır yok">{{ form.api if form.api is defined and form else d.api.metin }}</textarea></label>
+  </div>
+  {% if d.panel.hata or d.api.hata %}<p class="hata">Kayıtlı listede geçersiz satır var: {{ d.panel.hata or d.api.hata }}</p>{% endif %}
+  <p class="kucukyazi erisim-ornek">Her satıra bir adres ya da blok; virgülle de ayırabilirsiniz. Örnekler: tek adres <code>85.105.12.34</code> · blok <code>85.105.12.0/24</code> (85.105.12.0–255) · geniş blok <code>85.0.0.0/8</code> · IPv6 <code>2a02:4780:1::/48</code>. <code>#</code> ile başlayan kısım açıklamadır (ör. <code>85.105.12.34  # ofis</code>).</p>
+  <label class="satir-label"><input type="checkbox" name="kendimi_disarida" value="1"> Kendi adresimi dışarıda bırakmayı anlıyorum <small>(işaretlemezseniz şu anki adresinizi içermeyen panel listesi kaydedilmez)</small></label>
+  <div class="onay-alani"><label>Onay <small>(yalnız dolu bir listeyi tamamen boşaltırken gerekir: kullanıcı adınızı yazın — <b>{{ k.kullanici_adi }}</b>)</small><input type="text" name="onay" autocomplete="off" autocapitalize="off" spellcheck="false"></label></div>
+  <div class="form-eylemler"><button class="btn birincil">Kaydet</button><small>Değişiklik hemen geçerli olur ve İşlem Geçmişi'ne eski/yeni liste ile yazılır.</small></div>
+</form>
+<section class="kart" aria-labelledby="temizle-baslik">
+  <h2 id="temizle-baslik">Listeyi temizle (sınırı kaldır)</h2>
+  <div class="erisim-izgara">
+  {% for tur, ad in [('panel','Panel'),('api','API')] %}
+    <form method="post" autocomplete="off" data-temizle-form>
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="temizle"><input type="hidden" name="tur" value="{{ tur }}">
+      <label>{{ ad }} listesini temizlemek için kullanıcı adınızı yazın (<b>{{ k.kullanici_adi }}</b>)<input type="text" name="onay" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="{{ k.kullanici_adi }}"></label>
+      <button class="btn kucuk tehlike" {{ 'disabled' if not d[tur].aglar }}>{{ ad }} listesini temizle</button>
+    </form>
+  {% endfor %}
+  </div>
+  <p class="kucukyazi">Kendinizi dışarıda bıraktıysanız sunucuda (SSH): <code>cd /opt/kanit-paneli && runuser -u kanit -- .venv/bin/python -m app.cli erisim-izin --goster</code>; adres eklemek için <code>--ekle 85.105.12.34</code>, sınırı kaldırmak için <code>--temizle</code>.</p>
+</section>
+<section class="kart" aria-labelledby="nasil-baslik">
+  <h2 id="nasil-baslik">Cloudflare ile birlikte</h2>
+  <ul>
+    <li><b>Yalnız Cloudflare kuralı</b> (WAF → özel kural "IP adresi listede değilse engelle") yalnız alan adı yolunu korur; sunucunun doğrudan IP adresi (IP:18443) açık kalır.</li>
+    <li><b>Bu sayfadaki liste</b> iki yolu da ve API'yi korur; Cloudflare'a gerek kalmadan çalışır.</li>
+    <li>İkisini birlikte kullanırsanız Cloudflare kötü trafiği daha sunucuya gelmeden keser; bu liste de doğrudan IP yolunu kapatır. Önerilen: bu liste (gerekirse ek olarak Cloudflare).</li>
+  </ul>
+  <p class="kucukyazi">Sunucu ziyaretçi adresini alan adı yolunda Cloudflare'ın gönderdiği gerçek adresten, IP yolunda doğrudan bağlantıdan alır (TRUST_PROXY=1 ile). Ayarınız: TRUST_PROXY={{ '1' if trust_proxy else '0' }}{% if not trust_proxy %} — <b>sunucu nginx arkasındaysa 1 olmalı</b>{% endif %}.</p>
+</section>
+{% if anahtar_listeleri %}
+<section class="kart" aria-labelledby="anahtar-ip-baslik">
+  <h2 id="anahtar-ip-baslik">Kendi IP listesi olan API anahtarları</h2>
+  <ul>{% for a in anahtar_listeleri %}<li><b>{{ a.ad }}</b> <small><code>kp_{{ a.onek }}…</code></small>: {{ a.izinli_ipler|replace('\n', ', ') }}</li>{% endfor %}</ul>
+  <p class="kucukyazi">Anahtar listeleri <a href="{{ url_for('yonetim_api_anahtarlari') }}">API anahtarları</a> sayfasında düzenlenir.</p>
+</section>
+{% endif %}
+{% endblock %}
+{% block script %}
+<script nonce="{{ csp_nonce }}">
+/* "Ekle": şu anki adresi ilgili listeye ekler (yalnız kutuyu doldurur; kaydetmek için Kaydet'e basılır). */
+Array.prototype.forEach.call(document.querySelectorAll('[data-ip-ekle]'),function(b){b.addEventListener('click',function(){
+  var t=document.getElementById(b.getAttribute('data-hedef'));if(!t)return;var ip=b.getAttribute('data-ip-ekle');
+  var satirlar=t.value.split(/[\s,;]+/).filter(Boolean);if(satirlar.indexOf(ip)<0){t.value=(t.value.replace(/\s+$/,'')+(t.value.trim()?'\n':'')+ip);}
+  t.focus();b.textContent='Eklendi — Kaydet\'e basın';});});
+</script>
+{% endblock %}

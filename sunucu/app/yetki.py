@@ -1,18 +1,34 @@
-"""Kanonik süperadmin veya açık, sonlu proje izinleri. Hatalı kural fail-closed."""
+"""Kanonik sahip / süperadmin veya açık, sonlu proje izinleri. Hatalı kural fail-closed.
+
+2.4.0: 'sahip' (sistem sahibi) süperadminin üstündedir: admin=True + sahip=True. Süperadminleri, API anahtarlarını ve
+erişim (IP) sınırını yalnız sahip yönetir. Saklanan metin tam olarak 'sahip'tir (eş anlamlılar kanonikle()'de çevrilir)."""
 import re
 
 EYLEMLER = ('oku', 'gorsel', 'kt', 'duzenle', 'sil')
 TAM = set(EYLEMLER)
 _CODE = re.compile(r'^[A-Z0-9_]{1,24}$')
+_ROL_KODLARI = ('ADMIN', 'SUPERADMIN', 'SAHIP', 'OWNER')
+SAHIP_ES_ANLAMLILAR = ('sahip', 'owner', 'sistem sahibi', 'sistem_sahibi')
+
+# Yalnız sahibin açabileceği uç noktalar (Flask endpoint adları). panel.before() her istekte bakar; panel.sahip_gerekli
+# süsleyicisi kullanıldığı ucu buraya kendiliğinden ekler. Başka modüller kendi uçlarını bu kümeye ekleyebilir.
+SAHIP_GEREKLI_EYLEMLER = set()
+
+
+def _bos(gecerli=True):
+    return {'admin': False, 'sahip': False, 'hepsi': None, 'projeler': {}, 'gecerli': gecerli}
 
 
 def coz(metin):
-    result = {'admin': False, 'hepsi': None, 'projeler': {}, 'gecerli': True}
+    result = _bos()
     raw = str(metin or '')
     if not raw:
         return result
     if raw == 'admin':
         result.update(admin=True, hepsi=set(TAM))
+        return result
+    if raw == 'sahip':
+        result.update(admin=True, sahip=True, hepsi=set(TAM))
         return result
     try:
         if raw.strip() != raw or len(raw) > 5000:
@@ -32,21 +48,32 @@ def coz(metin):
                 codes, allowed = group, set(TAM)
             for code in codes.split(','):
                 code = code.upper()
-                if not _CODE.fullmatch(code) or code in ('ADMIN', 'SUPERADMIN'):
+                if not _CODE.fullmatch(code) or code in _ROL_KODLARI:
                     raise ValueError('Geçersiz proje veya rol.')
                 result['projeler'].setdefault(code, set()).update(allowed)
     except (ValueError, TypeError):
-        return {'admin': False, 'hepsi': None, 'projeler': {}, 'gecerli': False}
+        return _bos(False)
     return result
+
+
+def _sade(metin):
+    """Rol adı karşılaştırması: Türkçe büyük harfler, büyük-küçük harf ve fazla boşluk önemsizdir."""
+    return ' '.join(str(metin or '').replace('İ', 'i').replace('I', 'i').replace('ı', 'i').casefold().split())
 
 
 def kanonikle(metin, projeler=None):
     # 'superadmin' / 'süperadmin' (büyük-küçük harf fark etmez) 'admin'in eş anlamlısıdır; arayüz ve CLI yardımı süperadmin der.
-    if str(metin or '').strip().replace('İ', 'i').casefold() in ('superadmin', 'süperadmin'):
+    # 2.4.0: 'sahip' / 'owner' / 'sistem sahibi' → 'sahip'.
+    sade = _sade(metin)
+    if sade in ('superadmin', 'süperadmin'):
         metin = 'admin'
+    elif sade in SAHIP_ES_ANLAMLILAR:
+        metin = 'sahip'
     parsed = coz(metin)
     if not parsed['gecerli'] or (not parsed['admin'] and not parsed['projeler']):
         raise ValueError('Geçerli rol ve en az bir açık proje izni seçin. * veya admin: biçimi kullanılamaz.')
+    if parsed['sahip']:
+        return 'sahip'
     if parsed['admin']:
         return 'admin'
     if projeler is not None and any(p not in projeler for p in parsed['projeler']):
@@ -66,8 +93,47 @@ def izinli_projeler(yk, tum_projeler):
     return [p for p in tum_projeler if izin(yk, p, 'oku')]
 
 
+def _yk(yk_veya_metin):
+    return coz(yk_veya_metin) if yk_veya_metin is None or isinstance(yk_veya_metin, str) else yk_veya_metin
+
+
+def sahip_mi(yk_veya_metin):
+    return bool(_yk(yk_veya_metin).get('sahip'))
+
+
+def yonetici_mi(yk_veya_metin):
+    """Süperadmin ya da sahip (admin=True)."""
+    return bool(_yk(yk_veya_metin).get('admin'))
+
+
+def rol_kodu(metin):
+    """'sahip' | 'superadmin' | 'proje' — Kullanıcılar sayfası ve onay kuralları için."""
+    parsed = coz(metin)
+    return 'sahip' if parsed['sahip'] else 'superadmin' if parsed['admin'] else 'proje'
+
+
+ROL_ADLARI = {'sahip': 'Sahip', 'superadmin': 'Süperadmin', 'proje': 'Proje kullanıcısı'}
+
+
+def rol_etiketi(yk):
+    """Başlıktaki rol etiketi; kişinin gerçek yetkisinden türetilir (herkese aynı metin yazılmaz)."""
+    yk = yk or {}
+    if yk.get('sahip'):
+        return 'Sahip'
+    if yk.get('admin'):
+        return 'Süperadmin'
+    projeler = yk.get('projeler') or {}
+    if any('kt' in a for a in projeler.values()):
+        return 'Takım lideri'
+    if any('duzenle' in a for a in projeler.values()):
+        return 'Düzenleyici'
+    return 'Görüntüleyici'
+
+
 def ozet(metin):
     parsed = coz(metin)
+    if parsed['sahip']:
+        return 'Sahip — her şey, süperadminleri ve API anahtarlarını yönetir'
     if parsed['admin']:
         return 'Süperadmin — tüm projeler ve yönetim'
     if not parsed['gecerli']:
@@ -81,7 +147,7 @@ def eski_wildcardlari_sabitle(conn, codes):
     from . import db
     if db.ayar_al(conn, 'rol_gecis_21') == '1':
         return
-    codes = [p for p in codes if _CODE.fullmatch(p) and p not in ('ADMIN', 'SUPERADMIN')]
+    codes = [p for p in codes if _CODE.fullmatch(p) and p not in _ROL_KODLARI]
     for user in conn.execute('SELECT kullanici_adi,yetki FROM panel_kullanicilari').fetchall():
         match = re.fullmatch(r'\*(?::([a-z_,]+))?', user['yetki'] or '')
         if not match:

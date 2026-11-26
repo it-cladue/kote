@@ -415,7 +415,9 @@ def test_tek_ifade_yardimcisi():
 # ---------------------------------------------------------------- yönetim sayfası
 
 def test_yonetim_sayfasi_olustur_goster_iptal(web):
+    from app import kullanicilar
     c, a = web
+    kullanicilar.guncelle(a, 'testadmin', yetki='sahip')  # 2.4.0: API anahtarları yalnız sahibe açık
     login(c)
     r = c.get('/yonetim/api-anahtarlari')
     assert r.status_code == 200 and 'API anahtarı oluştur'.encode() in r.data and b'API anahtarlar' in r.data
@@ -433,7 +435,8 @@ def test_yonetim_sayfasi_olustur_goster_iptal(web):
     assert k.encode() not in sayfa and ('kp_' + k[3:11]).encode() in sayfa and b'GET /api/v1/ozet' in sayfa
     assert c.post('/yonetim/api-anahtarlari', data={'csrf': csrf(c), 'islem': 'olustur', 'ad': 'x', 'kapsam': 'secili', 'projeler': ['YOKPROJE']}).status_code == 400
     assert c.post('/yonetim/api-anahtarlari', data={'islem': 'iptal', 'id': row['id']}).status_code == 400  # CSRF
-    assert c.post('/yonetim/api-anahtarlari', data={'csrf': csrf(c), 'islem': 'iptal', 'id': row['id']}).status_code == 302
+    assert c.post('/yonetim/api-anahtarlari', data={'csrf': csrf(c), 'islem': 'iptal', 'id': row['id']}).status_code == 400  # 2.4.0: yazılı onay
+    assert c.post('/yonetim/api-anahtarlari', data={'csrf': csrf(c), 'islem': 'iptal', 'id': row['id'], 'onay': 'Rapor'}).status_code == 302
     assert c.get('/api/v1/ozet', headers=B(k)).status_code == 401
     adlar = {d['islem'] for d in satirlar(a, 'SELECT islem FROM denetim')}
     assert {'api_anahtar_olustur', 'api_anahtar_iptal'} <= adlar

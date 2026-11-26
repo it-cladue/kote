@@ -170,8 +170,9 @@ def _ready(conn):
         # 2.3.1: hesap_surumu sütunu; bayrak yükseltilmeden _add_columns canlı (core_schema_21=1 yazılı) DB'de hiç çalışmazdı.
         # 2.3.2: api_anahtarlari / api_gunlugu tabloları (core_schema_24). İki bayrak birlikte aranır: biri eksikse geçiş yeniden koşar.
         # 2.3.3: hatirlatma_isaret tablosu (2 saat hatırlatmasının kime hangi kayıt için gittiği; core_schema_25).
+        # 2.4.0 (B1): api_anahtarlari.izinli_ipler sütunu (anahtar başına IP listesi; core_schema_240_erisim).
         return (ayar_al(conn, 'core_schema_23') == '1' and ayar_al(conn, 'core_schema_24') == '1'
-                and ayar_al(conn, 'core_schema_25') == '1')
+                and ayar_al(conn, 'core_schema_25') == '1' and ayar_al(conn, 'core_schema_240_erisim') == '1')
     except sqlite3.OperationalError:
         return False
 
@@ -209,12 +210,14 @@ def baglan(yol):
             _add_columns(conn, 'tg_kullanicilar', [('ana_proje','TEXT')])
             _add_columns(conn, 'panel_kullanicilari', [('hesap_surumu','INTEGER DEFAULT 1')])  # iyimser kilit sayacı; çıkış bunu artırmaz
             _add_columns(conn, 'denetim', [('sonuc',"TEXT DEFAULT 'ok'"),('hedef_turu','TEXT'),('hedef_id','TEXT'),('aciklama','TEXT')])
+            _add_columns(conn, 'api_anahtarlari', [('izinli_ipler','TEXT')])  # 2.4.0: boş = anahtar için ek IP sınırı yok
             from . import katalog, donusum_isleri, yetki
             katalog.ensure_schema(conn)
             donusum_isleri.ensure_schema(conn)
             yetki.eski_wildcardlari_sabitle(conn, [p['code'] for p in katalog.list_projects(conn)])
             ayar_yaz(conn, 'core_schema_21', '1'); ayar_yaz(conn, 'core_schema_23', '1'); ayar_yaz(conn, 'core_schema_24', '1')
             ayar_yaz(conn, 'core_schema_25', '1')
+            ayar_yaz(conn, 'core_schema_240_erisim', '1')
         return conn
     except BaseException:
         conn.close()

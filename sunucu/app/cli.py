@@ -32,7 +32,8 @@ def main():
     parser=_TurkceParser(prog='python -m app.cli',description='Kanıt Paneli sunucu araçları',epilog='Örnek: KANIT_PW=GucluParola1 python -m app.cli sifre-sifirla admin --password-env KANIT_PW --kalici')
     sub=parser.add_subparsers(dest='command',required=True,title='Komutlar',metavar='KOMUT')
     admin=_alt(sub,'admin-ekle','İlk veya ek panel hesabını oluştur')
-    admin.add_argument('ad',nargs='?',default='admin',help='Kullanıcı adı (varsayılan: admin)'); admin.add_argument('--yetki',default='admin',help="Yetki: admin (süperadmin) veya 'OF:oku,kt' gibi proje kapsamı")
+    admin.add_argument('ad',nargs='?',default='admin',help='Kullanıcı adı (varsayılan: admin)'); admin.add_argument('--yetki',default='admin',help="Yetki: admin (süperadmin), sahip veya 'OF:oku,kt' gibi proje kapsamı")
+    admin.add_argument('--sahip',action='store_true',help='Hesabı sahip rolüyle aç (süperadminin üstü; API anahtarları ve erişim sınırı). --yetki sahip ile aynı')
     reset=_alt(sub,'sifre-sifirla','Mevcut hesabın parolasını sıfırla ve hesabı aktif et');reset.add_argument('ad',help='Kullanıcı adı')
     for command in (admin,reset):
         command.add_argument('--password-env',metavar='DEGISKEN',help='Parolanın okunacağı ortam değişkeninin adı; parolayı komut satırına yazmayın')
@@ -60,6 +61,13 @@ def main():
     kat.add_argument('--donustur',action='append',default=[],metavar='"ESKI=YENI"',help='ESKI değerini (harf duyarsız, baş/son boşluksuz) YENI katalog kategorisine (kod ya da görünen ad) çevir; (boş) yapmak için YENI yerine (boş). Birden çok kez verilebilir')
     kat.add_argument('--onizle',action='store_true',help='Yalnız kaç kaydın değişeceğini göster, hiçbir şey yazma')
     kat.add_argument('--kim',default='sunucu-cli',metavar='AD',help='İşlem Geçmişi\'ne yazılacak kullanıcı adı (varsayılan sunucu-cli)')
+    rol=_alt(sub,'kullanici-rol','Hesabın rolünü değiştir (2.4.0): sahip, admin (süperadmin) ya da proje yetki metni. Hesabın açık oturumları kapanır')
+    rol.add_argument('ad',help='Kullanıcı adı');rol.add_argument('rol',help="sahip | admin | 'OF:oku,kt;PA:oku' gibi yetki metni")
+    eri=_alt(sub,'erisim-izin','Erişim sınırı (IP izin listesi) acil durum aracı (2.4.0): göster, adres ekle ya da temizle')
+    eri.add_argument('--goster',action='store_true',help='Panel ve API listelerini ve kaynağını göster (varsayılan)')
+    eri.add_argument('--temizle',action='store_true',help='Listeyi boşalt: sınır kalkar (.env değeri de geçersiz olur)')
+    eri.add_argument('--ekle',action='append',default=[],metavar='IP',help='Listeye adres ya da blok ekle (ör. 85.105.12.34 veya 85.105.12.0/24); birden çok kez verilebilir')
+    eri.add_argument('--tur',choices=('panel','api','hepsi'),default=None,metavar='TUR',help='Hangi liste: panel, api ya da hepsi (varsayılan: --temizle için hepsi, --ekle için panel)')
     _alt(sub,'durum','Kayıt sayısı, dosya yolları ve bot gelen kutusu özeti');_alt(sub,'veritabani-kur','Veritabanı dosyasını ve şemayı oluştur')
     args=parser.parse_args()
     if args.command in ('admin-ekle','sifre-sifirla'):
@@ -75,15 +83,24 @@ def main():
         try:
             if args.command=='admin-ekle':
                 # admin-ekle ile verilen parola sunucu operatörüne aittir; kalıcıdır.
-                kullanicilar.ekle(AYAR,args.ad,args.yetki,password,olusturan='sunucu-cli')
+                kullanicilar.ekle(AYAR,args.ad,'sahip' if args.sahip else args.yetki,password,olusturan='sunucu-cli')
                 kullanicilar.guncelle(AYAR,args.ad,sifre_degistir=0)
             else:
                 kullanicilar.guncelle(AYAR,args.ad,sifre=password,sifre_degistir=0 if args.kalici else 1,aktif=1,islem_yapan='sunucu-cli')
         except ValueError as e: raise SystemExit('Hata: '+str(e))
         print('Panel hesabı hazır:',args.ad,'(parola kalıcı)' if args.kalici or args.command=='admin-ekle' else '(ilk girişte parola değiştirilecek)');return
+    if args.command=='kullanici-rol':
+        try:
+            u=kullanicilar.bul(AYAR,args.ad)
+            if not u: raise ValueError('Kullanıcı bulunamadı: '+args.ad)
+            u=kullanicilar.guncelle(AYAR,args.ad,islem_yapan='sunucu-cli',yetki=args.rol)
+        except ValueError as e: raise SystemExit('Hata: '+str(e))
+        from . import yetki
+        print('Rol güncellendi:',u['kullanici_adi'],'→',yetki.ozet(u['yetki']),'(hesabın açık oturumları kapandı)');return
     c=db.baglan(AYAR['DB'])
     try:
-        if args.command=='ice-aktar':
+        if args.command=='erisim-izin': _erisim_izin(c,args)
+        elif args.command=='ice-aktar':
             from . import ice_aktar,gorsel
             report=ice_aktar.calistir(AYAR,c,AYAR['ONBELLEK'],gorsel.GorselCozucu(AYAR,AYAR['ONBELLEK']),kaynak=args.kaynak)
             print(json.dumps(report,ensure_ascii=False,indent=2))
@@ -158,6 +175,31 @@ def main():
         elif args.command=='kategori-temizle': _kategori_temizle(c,args)
         elif args.command=='veritabani-kur': print('Veritabanı hazır:',AYAR['DB'])
     finally:c.close()
+
+def _erisim_izin(c,args):
+    """stdout: okunur durum. Kendini panelden dışarıda bırakan sahip için: sunucuda (SSH) liste gösterilir, adres eklenir ya da temizlenir."""
+    from . import erisim
+    if args.temizle and args.ekle: raise SystemExit('Hata: --temizle ile --ekle birlikte kullanılamaz.')
+    try:
+        if args.temizle:
+            for tur in (('panel','api') if (args.tur or 'hepsi')=='hepsi' else (args.tur,)):
+                erisim.ayar_yaz(c,tur,'','sunucu-cli',aciklama=erisim.TURLER[tur][2]+' erişim listesi sunucudan temizlendi (erisim-izin --temizle)')
+                print('TEMIZLENDI:',erisim.TURLER[tur][2],'listesi boş; sınır yok.')
+        elif args.ekle:
+            tur=args.tur or 'panel'
+            if tur=='hepsi': raise SystemExit('Hata: --ekle için --tur panel ya da --tur api seçin.')
+            mevcut=erisim.ayar_oku(c,tur)
+            yeni=erisim.ayar_yaz(c,tur,mevcut['metin']+'\n'+'\n'.join(args.ekle),'sunucu-cli',aciklama=erisim.TURLER[tur][2]+' erişim listesine sunucudan adres eklendi (erisim-izin --ekle)')
+            print('EKLENDI:',erisim.TURLER[tur][2],'listesi:',yeni.replace('\n',', '))
+    except ValueError as e: raise SystemExit('Hata: '+str(e))
+    kaynak={'veritabani':'panelden/komuttan kaydedildi','ortam':'.env (IZINLI_IPLER / API_IZINLI_IPLER)','yok':'sınır yok'}
+    for tur in ('panel','api'):
+        d=erisim.ayar_oku(c,tur)
+        print('%s listesi (%s): %s' % (erisim.TURLER[tur][2],kaynak.get(d['kaynak'],d['kaynak']),', '.join(erisim.ag_metni(a) for a in d['aglar']) if d['aglar'] else '— (her adres)'))
+        if d['hata']: print('  UYARI:',d['hata'])
+    print('Sunucunun kendisinden doğrudan gelen istekler', 'muaf (ERISIM_LOOPBACK_SERBEST=1).' if erisim.dongu_serbest() else 'muaf DEĞİL (ERISIM_LOOPBACK_SERBEST=0); /saglik yine açık.')
+    if str(AYAR.get('TRUST_PROXY','0')).lower() not in ('1','true'):
+        print('UYARI: TRUST_PROXY=1 değil. Nginx arkasında panel herkesi 127.0.0.1 görür ve liste doluysa herkesi engeller.')
 
 def _kategori_temizle(c,args):
     """stdout: JSON (betikler okuyabilsin); stderr: kısa Türkçe özet/tablo. Hata: 'Hata: …' ve çıkış kodu 1."""

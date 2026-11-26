@@ -17,7 +17,7 @@ from werkzeug.datastructures import MultiDict
 from werkzeug.exceptions import SecurityError
 from functools import wraps
 from PIL import Image, UnidentifiedImageError
-from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari, personel_ozeti
+from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari, personel_ozeti, erisim
 from .settings import AYAR, ROOT
 
 SURUM = '2.3.8'
@@ -212,6 +212,12 @@ def before():
     if isinstance(getattr(request,'routing_exception',None),SecurityError):
         # Güvenilmeyen Host: oturum/CSRF akışına girmeden sade 400 (url_for çağrıları 500 üretirdi).
         g.yk=yetki.coz('');return _host_hatasi(request.routing_exception)
+    if not request.path.startswith('/api/'):
+        # 2.4.0: erişim sınırı (IP izin listesi) — /giris dahil her panel adresi; statik dosyalar ve sunucunun kendisinden
+        # gelen doğrudan istekler muaf (ayrıntı: app/erisim.py). API kendi listesini api.py'de uygular.
+        red=_erisim_denetimi()
+        if red is not None:
+            g.yk=yetki.coz('');return red
     if request.endpoint in CEREZSIZ_UCLAR:
         # Sağlık denetimi ve statik dosyalar oturum çerezi üretmez.
         g.yk=yetki.coz('');return None
@@ -234,6 +240,9 @@ def before():
         g.oturum_dustu=True
     g.yk=yetki.coz(g.k['yetki'] if g.k else '')
     session.setdefault('csrf',secrets.token_hex(24))
+    if g.k and request.endpoint in yetki.SAHIP_GEREKLI_EYLEMLER and not g.yk.get('sahip') and not g.k['sifre_degistir']:
+        # 2.4.0: yalnız sahibe açık uçlar (sahip_gerekli süsleyicisi ve başka modüllerin eklediği uç adları).
+        abort(403)
     if request.method in ('POST','PUT','PATCH','DELETE'):
         if not g.k and request.endpoint!='giris':
             # Oturumu olmayan her gönderim CSRF kontrolünden ÖNCE açıklamalı yanıt alır:
@@ -244,6 +253,23 @@ def before():
         if not secrets.compare_digest(token,session.get('csrf','')):
             if g.k:_csrf_hatasi_kaydet()
             abort(400,'Geçersiz CSRF. Sayfayı yenileyin.')
+
+def _erisim_denetimi():
+    """İzin listesi dışındaki adrese sade 403 sayfası; dakikada IP başına bir 'erisim_red' satırı. Liste boşsa hiçbir şey yapmaz."""
+    try:
+        c=baglanti();izinli,adres=erisim.panel_izinli(c,request)
+    except Exception as hata:
+        # Ayar okunamazsa (ör. veritabanı kilidi) panel kapanmaz; durum stderr'e yazılır.
+        print('Erişim sınırı okunamadı: '+type(hata).__name__,file=sys.stderr,flush=True);return None
+    if izinli:return None
+    erisim.red_kaydet(c,adres,request.method+' '+request.path)
+    guvenlik_gunlugu('ERISIM_RED')
+    from flask import make_response
+    if _json_bekleniyor():
+        resp=jsonify(ok=False,hata='Bu adresten erişim izinli değil (IP: '+str(adres or '?')+').',kod=403,neden='ip_izinsiz');resp.status_code=403
+    else:
+        resp=make_response(erisim.red_sayfasi(adres),403);resp.headers['Content-Type']='text/html; charset=utf-8'
+    return resp
 
 def _csrf_hatasi_kaydet():
     """Oturumlu kullanıcıdan geçersiz CSRF: denetime 'csrf_hata' (IP+kullanıcı başına dakikada en çok 1) ve stderr satırı."""
@@ -282,7 +308,7 @@ def context():
                 url_degistir=url_degistir,url_filtre=url_filtre,csrf=session.get('csrf',''),projeler=lambda:allowed,
                 proje_renkleri={p['code']:p['color'] for p in info},proje_bilgileri=info,
                 izin=lambda p,e:yetki.izin(g.yk,p,e),simdi=simdi,SURUM=SURUM,csp_nonce=g.get('csp_nonce',''),
-                rol_adi=('Süperadmin' if g.get('yk') and g.yk['admin'] else 'Admin') if g.get('k') else '',
+                rol_adi=yetki.rol_etiketi(g.get('yk')) if g.get('k') else '',
                 kanit_ekle_olur=bool(_ekleme_projeleri()) if g.get('k') else False)
 
 
@@ -304,6 +330,16 @@ def admin_gerekli(f):
     def wrapper(*a,**kw):
         if not g.yk['admin']: abort(403)
         return f(*a,**kw)
+    return wrapper
+
+def sahip_gerekli(f):
+    """2.4.0: yalnız sahip (süperadminin üstü). Ucu yetki.SAHIP_GEREKLI_EYLEMLER kümesine de ekler; before() orada da denetler."""
+    @admin_gerekli
+    @wraps(f)
+    def wrapper(*a,**kw):
+        if not g.yk.get('sahip'): abort(403)
+        return f(*a,**kw)
+    yetki.SAHIP_GEREKLI_EYLEMLER.add(f.__name__)
     return wrapper
 
 def kullanici_adi_gecerli(ad):
@@ -1350,6 +1386,7 @@ def _role_from_form():
     if 'rol' not in request.form and request.form.get('yetki'):
         return yetki.kanonikle(request.form['yetki'],projeler())
     if request.form.get('rol','admin')=='superadmin':return 'admin'
+    if request.form.get('rol','admin')=='sahip':return 'sahip'
     if request.form.get('rol','admin')!='admin':raise ValueError('Geçersiz rol.')
     selected=request.form.getlist('projeler')
     if not selected or any(p not in projeler() for p in selected):raise ValueError('Admin için en az bir tanımlı proje seçin.')
@@ -1402,10 +1439,15 @@ def _gecici_sifre_al():
     except ValueError:return None
     return data if isinstance(data,dict) and data.get('zaman','')>=(datetime.now()-timedelta(minutes=GECICI_SIFRE_OMRU_DK)).strftime('%Y-%m-%d %H:%M:%S') else None
 
+def _onay_kontrol(gerekce,beklenen):
+    """2.4.0: tehlikeli değişiklikte yazılı onay (sunucuda doğrulanır). Onay alanı boş ya da farklıysa ValueError."""
+    if gerekce and not kullanicilar.onay_dogru(beklenen,request.form.get('onay','')):
+        raise ValueError(gerekce+' yazılı onay ister: onay kutusuna "'+str(beklenen)+'" yazın.')
+
 @app.route('/yonetim/kullanicilar',methods=['GET','POST'])
 @admin_gerekli
 def yonetim_kullanicilar():
-    mesaj=None
+    mesaj=None;durum=200
     if request.method=='POST':
         try:
             op=request.form.get('islem')
@@ -1413,53 +1455,78 @@ def yonetim_kullanicilar():
             expected=request.form.get('expected_version',request.form.get('sv','-1'))
             actor=g.k['kullanici_adi']
             gorunen=db.metin_temizle(request.form.get('gorunen_ad') or '',120).strip()
+            hedef=kullanicilar.bul(AYAR,ad) if op in ('guncelle','yetki','sifre','pasif','sahip_ata') else None
+            if op in ('guncelle','yetki','sifre','pasif') and not hedef:raise ValueError('Hesap bulunamadı.')
             if op=='ekle':
+                rol=_role_from_form()
+                # 2.4.0: süperadmin/sahip hesabı yalnız sahip açar ve yazılı onay ister (yeni kullanıcı adını yazma).
+                kullanicilar.yonetim_denetimi(g.yk,None,rol)
+                _onay_kontrol(kullanicilar.onay_gerekli({'yetki':'','aktif':1},rol),ad)
                 uretildi=not request.form.get('sifre')
                 password=request.form.get('sifre') or secrets.token_urlsafe(15)
                 if not uretildi and kullanicilar.parola_politikasi(ad,password):raise ValueError(kullanicilar.parola_politikasi(ad,password))
                 # Hesap ilk girişte şifre değiştirmek zorunda açılır (kullanicilar.ekle → sifre_degistir=1).
-                kullanicilar.ekle(AYAR,ad,_role_from_form(),password,gorunen or ad,actor)
+                kullanicilar.ekle(AYAR,ad,rol,password,gorunen or ad,actor,ip=ip())
                 _gecici_sifre_sakla(ad,password,uretildi)
                 mesaj='Hesap açıldı: '+ad+'. İlk girişte değiştirilecek şifre aşağıdaki kutuda.'
             elif op=='guncelle':
                 fields=dict(yetki=_role_from_form(),aktif=1 if request.form.get('aktif')=='1' else 0,
                             sifre_degistir=1 if request.form.get('sifredegistir')=='1' else 0,
                             gorunen_ad=gorunen or ad)
+                kullanicilar.yonetim_denetimi(g.yk,hedef,fields['yetki'])
                 if ad==actor and not fields['aktif']:raise ValueError('Kendi hesabınızı kapatamazsınız.')
+                _onay_kontrol(kullanicilar.onay_gerekli(hedef,fields['yetki'],fields['aktif']),ad)
                 if request.form.get('sifre'):
                     if kullanicilar.parola_politikasi(ad,request.form['sifre']):raise ValueError(kullanicilar.parola_politikasi(ad,request.form['sifre']))
                     fields['sifre']=request.form['sifre']
                     if ad!=actor:fields['sifre_degistir']=1  # Admin'in bildiği parola kalıcı olamaz: ilk girişte değiştirilir.
-                kullanicilar.guncelle(AYAR,ad,expected_version=expected,islem_yapan=actor,**fields)
+                kullanicilar.guncelle(AYAR,ad,expected_version=expected,islem_yapan=actor,ip=ip(),**fields)
                 mesaj='Hesap ve açık proje kapsamı kaydedildi.'
             elif op=='yetki':
-                kullanicilar.guncelle(AYAR,ad,expected_version=expected,islem_yapan=actor,yetki=_role_from_form());mesaj='Yetki güncellendi.'
+                rol=_role_from_form();kullanicilar.yonetim_denetimi(g.yk,hedef,rol)
+                _onay_kontrol(kullanicilar.onay_gerekli(hedef,rol),ad)
+                kullanicilar.guncelle(AYAR,ad,expected_version=expected,islem_yapan=actor,ip=ip(),yetki=rol);mesaj='Yetki güncellendi.'
             elif op=='sifre':
+                kullanicilar.yonetim_denetimi(g.yk,hedef)
                 password=secrets.token_urlsafe(15)
-                kullanicilar.guncelle(AYAR,ad,expected_version=expected,islem_yapan=actor,sifre=password,sifre_degistir=1)
+                kullanicilar.guncelle(AYAR,ad,expected_version=expected,islem_yapan=actor,ip=ip(),sifre=password,sifre_degistir=1)
                 _gecici_sifre_sakla(ad,password,True)
                 mesaj=ad+' için geçici şifre üretildi; aşağıdaki kutudan kopyalayın.'
             elif op=='pasif':
                 if ad==actor:raise ValueError('Kendi hesabınızı kapatamazsınız.')
-                user=kullanicilar.bul(AYAR,ad)
-                if not user:raise ValueError('Hesap bulunamadı.')
-                kullanicilar.guncelle(AYAR,ad,expected_version=expected,islem_yapan=actor,aktif=0 if user['aktif'] else 1);mesaj='Hesap durumu değişti.'
+                kullanicilar.yonetim_denetimi(g.yk,hedef)
+                _onay_kontrol(kullanicilar.onay_gerekli(hedef,None,0 if hedef['aktif'] else 1),ad)
+                kullanicilar.guncelle(AYAR,ad,expected_version=expected,islem_yapan=actor,ip=ip(),aktif=0 if hedef['aktif'] else 1);mesaj='Hesap durumu değişti.'
+            elif op=='sahip_ata':
+                # İlk sahip ataması: etkin sahip yokken süperadmin tek bir hesabı (kendisi dahil) sahip yapar; sonrası yalnız sahipte.
+                if kullanicilar.aktif_sahip_var(AYAR):raise kullanicilar.Yasak('Zaten etkin bir sahip var; yeni sahip atamasını yalnız sahip, hesabın Düzenle formundan yapar.')
+                if not hedef:raise ValueError('Sahip yapılacak hesabı seçin.')
+                _onay_kontrol('Sahip ataması',ad)
+                u=kullanicilar.sahip_ata(AYAR,ad,actor,ip())
+                if ad==actor:session['sv']=u['session_version']  # kendini atayan oturumda kalır
+                mesaj=ad+' artık sahip. API anahtarları ve Erişim sınırı sayfaları yalnız sahibe açıktır.'
             else:raise ValueError('Bilinmeyen işlem.')
             flash(mesaj);return redirect(url_for('yonetim_kullanicilar'))
-        except ValueError as e:mesaj='Hata: '+str(e)
+        except kullanicilar.Yasak as e:mesaj='Hata: '+str(e);durum=403
+        except ValueError as e:mesaj='Hata: '+str(e);durum=200  # eski davranış: hata mesajıyla aynı sayfa (200)
     users=[]
+    ben_sahip=bool(g.yk.get('sahip'))
     for user in kullanicilar.hepsi(AYAR):
-        parsed=yetki.coz(user['yetki'])
+        parsed=yetki.coz(user['yetki']);rol=yetki.rol_kodu(user['yetki'])
         safe={k:v for k,v in user.items() if k!='sifre_hash'}
-        safe.update(ozet=yetki.ozet(user['yetki']),parsed_yetkiler=dict(rol='superadmin' if parsed['admin'] else 'admin',
+        safe.update(ozet=yetki.ozet(user['yetki']),rol=rol,rol_adi=yetki.ROL_ADLARI[rol],
+                    duzenlenebilir=ben_sahip or rol=='proje',
+                    parsed_yetkiler=dict(rol={'sahip':'sahip','superadmin':'superadmin'}.get(rol,'admin'),
                     projeler=list(parsed['projeler']),eylemler={p:list(a) for p,a in parsed['projeler'].items()}))
         users.append(safe)
     gecici=_gecici_sifre_al() if request.method=='GET' else None
-    return render_template('kullanicilar.html',kullanicilar=users,mesaj=mesaj,tum_projeler=projeler(),gecici_sifre=gecici)
+    sahip_var=kullanicilar.aktif_sahip_var(AYAR)
+    return render_template('kullanicilar.html',kullanicilar=users,mesaj=mesaj,tum_projeler=projeler(),gecici_sifre=gecici,
+                           ben_sahip=ben_sahip,sahip_var=sahip_var,sahip_adaylari=[u for u in users if u['aktif']]),durum
 
 
 @app.route('/yonetim/api-anahtarlari',methods=['GET','POST'])
-@admin_gerekli
+@sahip_gerekli
 def yonetim_api_anahtarlari():
     """2.3.2: dış sistemler için salt okunur API anahtarları. Yeni anahtar yalnız oluşturma yanıtında bir kez gösterilir (saklanmaz)."""
     c=baglanti();mesaj=None;yeni=None;durum=200
@@ -1470,19 +1537,73 @@ def yonetim_api_anahtarlari():
                 kapsam='*' if request.form.get('kapsam','secili')=='hepsi' else request.form.getlist('projeler')
                 kid,anahtar=api_anahtarlari.olustur(c,request.form.get('ad',''),kapsam,yalniz_onayli=request.form.get('yalniz_onayli')=='1',
                     sql_izni=request.form.get('sql_izni')=='1',gorsel_izni=request.form.get('gorsel_izni')=='1',
-                    son_kullanma=request.form.get('son_kullanma') or None,olusturan=kim,ip=ip(),tanimli_projeler=projeler())
+                    son_kullanma=request.form.get('son_kullanma') or None,olusturan=kim,ip=ip(),tanimli_projeler=projeler(),
+                    izinli_ipler=request.form.get('izinli_ipler',''))
                 yeni=dict(id=kid,anahtar=anahtar,ad=db.metin_temizle(request.form.get('ad',''),80).strip())
                 mesaj='Anahtar oluşturuldu. Aşağıdaki değeri şimdi kopyalayın; bir daha gösterilmez.'
-            elif op=='iptal':
+            elif op in ('iptal','ip'):
                 try:kid=int(request.form.get('id',''))
                 except ValueError:raise ValueError('Anahtar bulunamadı.')
-                mesaj='Anahtar iptal edildi; bu anahtarla gelen istekler artık reddedilir.' if api_anahtarlari.iptal(c,kid,kim,ip()) else 'Anahtar zaten iptal edilmişti.'
+                row=c.execute('SELECT ad,iptal FROM api_anahtarlari WHERE id=?',(kid,)).fetchone()
+                if not row:raise ValueError('Anahtar bulunamadı.')
+                if op=='iptal':
+                    # 2.4.0: iptal geri alınamaz; anahtarın adı yazılarak onaylanır (sunucuda doğrulanır).
+                    if not row['iptal'] and not kullanicilar.onay_dogru(row['ad'],request.form.get('onay','')):
+                        raise ValueError('İptal için onay kutusuna anahtarın adını ("'+row['ad']+'") yazın.')
+                    mesaj='Anahtar iptal edildi; bu anahtarla gelen istekler artık reddedilir.' if api_anahtarlari.iptal(c,kid,kim,ip()) else 'Anahtar zaten iptal edilmişti.'
+                else:
+                    yeni_liste=api_anahtarlari.ip_guncelle(c,kid,request.form.get('izinli_ipler',''),kim,ip())
+                    mesaj=('"'+row['ad']+'" anahtarı artık yalnız şu adreslerden kullanılabilir: '+yeni_liste.replace('\n',', ')) if yeni_liste else ('"'+row['ad']+'" anahtarı için ek IP sınırı kaldırıldı.')
                 flash(mesaj);return redirect(url_for('yonetim_api_anahtarlari'))
             else:raise ValueError('Bilinmeyen işlem.')
         except ValueError as e:mesaj='Hata: '+str(e);durum=400
+    # Oluşturma hatasında girilenler forma geri yazılır (ad, kapsam, projeler, izinler, tarih, IP listesi).
+    giris=request.form if (request.method=='POST' and durum==400 and request.form.get('islem')=='olustur') else None
     return render_template('api_anahtarlari.html',anahtarlar=api_anahtarlari.listele(c),gunluk=api_anahtarlari.son_gunluk(c,50),
-                           tum_projeler=projeler(),yeni=yeni,mesaj=mesaj,api_acik=api.acik_mi(),dakika_siniri=api.dakika_siniri(),
-                           bugun=datetime.now().strftime('%Y-%m-%d'),kilavuz=_api_kilavuz()),durum
+                           tum_projeler=projeler(),yeni=yeni,mesaj=mesaj,giris=giris,api_acik=api.acik_mi(),dakika_siniri=api.dakika_siniri(),
+                           bugun=datetime.now().strftime('%Y-%m-%d'),kilavuz=_api_kilavuz(),erisim_durum=erisim.durum_ozeti(c,request)),durum
+
+
+# 2.4.0 — Erişim sınırı (IP izin listesi; yalnız sahip). Kayıt/okuma erisim.ayar_oku / erisim.ayar_yaz üzerinden
+# (genel Ayarlar sayfası da aynı işlevleri çağırabilir). Ayrıntı: app/erisim.py ve DEGISIKLIKLER_v2.4.0-B1.md.
+@app.route('/yonetim/erisim',methods=['GET','POST'])
+@sahip_gerekli
+def yonetim_erisim():
+    c=baglanti();mesaj=None;durum=200;form={}
+    if request.method=='POST':
+        form={k:request.form.get(k,'') for k in ('panel','api')}
+        try:
+            op=request.form.get('islem','kaydet');kim=g.k['kullanici_adi']
+            if op=='temizle':
+                tur=request.form.get('tur','panel')
+                if tur not in erisim.TURLER:raise ValueError('Bilinmeyen liste.')
+                if not kullanicilar.onay_dogru(kim,request.form.get('onay','')):
+                    raise ValueError('Listeyi temizlemek için onay kutusuna kendi kullanıcı adınızı ("'+kim+'") yazın.')
+                erisim.ayar_yaz(c,tur,'',kim,ip())
+                mesaj=erisim.TURLER[tur][2]+' erişim listesi temizlendi; artık her adresten erişilebilir.'
+            elif op=='kaydet':
+                panel_yeni=erisim.normalle(form['panel']);api_yeni=erisim.normalle(form['api'])
+                bilgi=erisim.istemci(request)
+                if panel_yeni:
+                    if bilgi['vekil_suphesi']:
+                        raise ValueError('Sunucu ziyaretçi adresini göremiyor (TRUST_PROXY=1 gerekli). Bu durumda liste herkesi engeller; '
+                                         'önce .env içinde TRUST_PROXY=1 yapıp kanit-web hizmetini yeniden başlatın.')
+                    if not erisim.muaf_mi(request) and not erisim.izinli_mi(bilgi['ip'],erisim.liste_coz(panel_yeni)) and request.form.get('kendimi_disarida')!='1':
+                        raise ValueError('Şu anki adresiniz ('+str(bilgi['ip'])+') panel listesinde yok; kaydederseniz panele bir daha giremezsiniz. '
+                                         'Adresinizi ekleyin ya da "Kendi adresimi dışarıda bırakmayı anlıyorum" kutusunu işaretleyin.')
+                eski_panel=erisim.ayar_oku(c,'panel')['metin'];eski_api=erisim.ayar_oku(c,'api')['metin']
+                if eski_panel and not panel_yeni or eski_api and not api_yeni:
+                    if not kullanicilar.onay_dogru(kim,request.form.get('onay','')):
+                        raise ValueError('Dolu bir listeyi boşaltmak sınırı kaldırır; onay kutusuna kendi kullanıcı adınızı ("'+kim+'") yazın.')
+                erisim.ayar_yaz(c,'panel',panel_yeni,kim,ip());erisim.ayar_yaz(c,'api',api_yeni,kim,ip())
+                mesaj='Erişim sınırı kaydedildi. '+('Panel: '+str(len(panel_yeni.split())) +' adres/blok.' if panel_yeni else 'Panel: sınır yok.')+' '+('API: '+str(len(api_yeni.split()))+' adres/blok.' if api_yeni else 'API: genel sınır yok.')
+            else:raise ValueError('Bilinmeyen işlem.')
+            flash(mesaj);return redirect(url_for('yonetim_erisim'))
+        except ValueError as e:mesaj='Hata: '+str(e);durum=400
+    d=erisim.durum_ozeti(c,request)
+    anahtar_listeleri=[a for a in api_anahtarlari.listele(c) if a.get('izinli_ipler') and a['durum']=='etkin']
+    return render_template('erisim.html',d=d,mesaj=mesaj,form=form,anahtar_listeleri=anahtar_listeleri,
+                           trust_proxy=str(AYAR.get('TRUST_PROXY','0')).lower() in ('1','true')),durum
 
 def _api_kilavuz():
     """2.3.5: Kullanım kılavuzu kartı (örnekler panelin dış adresiyle: request.url_root; TRUST_PROXY ile X-Forwarded-* dikkate alınır)."""
@@ -1526,24 +1647,76 @@ def bot_sayfasi():
 def bot_islemler_json():
     return jsonify(islemler=bot_yonetim.son_islemler(baglanti()),bekleyen=0)
 
-@app.route('/denetim')
-@giris_gerekli
-def denetim():
-    from .guvenli_log import log_row
+# 2.4.0 — İşlem Geçmişi: serbest arama (kayıt no/anahtar, personel, kullanıcı, açıklama, IP), IP sütunu (yalnız yönetici),
+# okunur ayrıntı (rol, onay, ayar, alan değişiklikleri; "Ham" düğmesiyle özgün değer), CSV ve hızlı tarih düğmeleri.
+ISLEM_ADLARI.update({'sahip_atama':'Sahip atadı','erisim_ayar':'Erişim sınırını değiştirdi','erisim_red':'İzinsiz adresten erişim engellendi',
+                     'api_anahtar_ip':'API anahtarının IP listesini değiştirdi','denetim_aktar':'İşlem Geçmişi CSV indirdi'})
+DENETIM_ADLARI.update({'sahip_atama':'Sahip ataması','erisim_ayar':'Erişim sınırı ayarı','erisim_red':'Erişim engeli (IP)',
+                       'api_anahtar_ip':'API anahtarı IP listesi','denetim_aktar':'İşlem Geçmişi CSV'})
+DENETIM_ALAN_ADLARI={'yetki':'Rol','aktif':'Durum','ad':'Görünen ad','sifre_degistir':'İlk girişte şifre değiştirme','parola_degisti':'Parola',
+                     'personel':'Personel','kategori':'Kategori','aciklama':'Açıklama','tarih':'Tarih','uye_id':'Üye no','ana_uye_id':'Ana üye no',
+                     'lead_id':'Lead','link':'Link','proje':'Proje','izinli_ipler':'İzinli adresler','adresler':'Adresler','projeler':'Projeler',
+                     'yalniz_onayli':'Yalnız onaylı','sql_izni':'SQL izni','gorsel_izni':'Görsel izni','son_kullanma':'Son kullanma','onek':'Önek',
+                     'hatali_giris':'Hatalı deneme','kilit_bitis':'Kilit bitişi','liste':'Liste','kaynak':'Kaynak'}
+CSV_EN_COK_SATIR=50000
+
+def _json_sozluk(value):
+    try:data=json.loads(value) if isinstance(value,str) else value
+    except (ValueError,TypeError):return None
+    return data if isinstance(data,dict) else None
+
+def _denetim_deger(alan,value):
+    if alan=='yetki':return yetki.ozet(value) if value is not None else '—'
+    if alan=='aktif':return 'Aktif' if value in (1,True,'1') else 'Pasif'
+    if alan in ('sifre_degistir','yalniz_onayli','sql_izni','gorsel_izni'):return 'evet' if value in (1,True,'1') else 'hayır'
+    if alan=='parola_degisti':return 'değiştirildi'
+    if isinstance(value,list):return ', '.join(str(x) for x in value) if value else '(boş — sınır yok)' if alan in ('adresler','izinli_ipler') else '(boş)'
+    if value is None or value=='':return '—'
+    return str(value)
+
+def _denetim_okunur(item):
+    """İşlem Geçmişi okunur satırları (ham JSON yerine). Liste ya da None (özel biçim yok → eski 'Önceki / yeni' gösterimi)."""
+    code=str(item.get('islem') or '');eski=_json_sozluk(item.get('eski'));yeni=_json_sozluk(item.get('yeni'))
+    if code in ('onayla','onay_kaldir','sil','geri_al','bildirim_okundu'):return None
+    if code=='erisim_ayar' and (eski or yeni):
+        liste=(yeni or eski or {}).get('liste','')
+        return [liste+' listesi: '+_denetim_deger('adresler',(eski or {}).get('adresler',[]))+' → '+_denetim_deger('adresler',(yeni or {}).get('adresler',[]))]
+    if eski is None and yeni is None:return None
+    eski=eski or {};yeni=yeni or {};lines=[]
+    for alan in list(dict.fromkeys([*eski.keys(),*yeni.keys()])):
+        ad=DENETIM_ALAN_ADLARI.get(alan,alan.replace('_',' '))
+        if alan in eski and alan in yeni:
+            if eski[alan]==yeni[alan]:lines.append(ad+': değiştirildi');continue  # gizlenen değerler ([GİZLİ]) aynı görünür
+            lines.append(ad+': '+_denetim_deger(alan,eski[alan])+' → '+_denetim_deger(alan,yeni[alan]))
+        elif alan in yeni:lines.append(ad+': '+_denetim_deger(alan,yeni[alan]))
+        else:lines.append(ad+' (önceki): '+_denetim_deger(alan,eski[alan]))
+    return lines or None
+
+def _denetim_sorgu(args):
+    """(where listesi, parametreler, filtreler, uyarı). Kapsam kuralları: süperadmin hepsini, diğerleri yalnız yetkili projelerin kayıtlarını görür."""
     allowed=_allowed();where=['1=1'];params=[]
     if not g.yk['admin']:
         if not allowed:abort(403)
         where.append('k.proje IN ('+','.join('?' for _ in allowed)+')');params.extend(allowed)
         gizli_sql,gizli_par=_gizli_kayit_sql('k',allowed,sol_birlesim=True)
         if gizli_sql:where.append(gizli_sql);params.extend(gizli_par)
-    filters={key:request.args.get(key,'')[:100] for key in ('q','kullanici','islem','proje','tarih1','tarih2')}
+    filters={key:args.get(key,'')[:100] for key in ('q','kullanici','islem','proje','tarih1','tarih2')}
     if filters['proje']:
         if filters['proje'] not in allowed:abort(403)
         where.append('d.proje=?');params.append(filters['proje'])
     for key in ('kullanici','islem'):
         if filters[key]:where.append('d.'+key+' LIKE ?');params.append('%'+filters[key]+'%')
-    if filters['q']:
-        where.append('(d.kullanici LIKE ? OR d.islem LIKE ? OR d.anahtar LIKE ?)');params.extend(['%'+filters['q']+'%']*3)
+    q=filters['q'].strip()
+    if q:
+        # LIKE joker karakterleri (% _ \) kaçışlanır: 'tg:1_2' araması 'tg:1x2' ile eşleşmesin.
+        like='%'+q.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+        kosul=["d.kullanici LIKE ? ESCAPE '\\'","d.islem LIKE ? ESCAPE '\\'","d.anahtar LIKE ? ESCAPE '\\'","d.hedef_id LIKE ? ESCAPE '\\'","k.personel LIKE ? ESCAPE '\\'","d.aciklama LIKE ? ESCAPE '\\'"]
+        par=[like]*6
+        if g.yk['admin']:kosul.append("d.ip LIKE ? ESCAPE '\\'");par.append(like)
+        no=q.lstrip('#').strip()
+        # 19+ haneli sayı SQLite INTEGER'a sığmaz (OverflowError → 500); o zaman yalnız LIKE aramaları kullanılır.
+        if no.isascii() and no.isdigit() and len(no)<=18:kosul.append('k.id=?');par.append(int(no))
+        where.append('('+' OR '.join(kosul)+')');params.extend(par)
     uyari=None
     for key,op,tail in (('tarih1','>=',' 00:00:00'),('tarih2','<=',' 23:59:59')):
         if filters[key]:
@@ -1553,24 +1726,65 @@ def denetim():
     if filters['tarih1'] and filters['tarih2'] and filters['tarih1']>filters['tarih2']:
         # Bildirimler sayfasıyla aynı kural: tam sayfa 400 yerine formda uyarı; form değerleri korunur.
         uyari='Başlangıç tarihi bitişten sonra olamaz.'
+    return where,params,filters,uyari
+
+def _denetim_satiri(row):
+    from .guvenli_log import log_row
+    item=log_row(row)
+    if item['record_id']:item.update(hedef_turu='kayit',hedef_id=str(item['record_id']))
+    elif item.get('hedef_turu')=='kayit':
+        # Kayıt tablosunda karşılığı olmayan hedef: proje kaydı ya da artık bulunmayan kayıt anahtarı.
+        item['hedef_turu']='proje' if str(item.get('islem') or '').startswith('katalog_proje') else 'anahtar'
+    if 'hata' in item['islem']:item['sonuc']='hata'
+    item['sonuc']={'ok':'Başarılı','hata':'Hata','uyari':'Uyarı'}.get(item.get('sonuc'),item.get('sonuc') or 'Tamamlandı')
+    item['islem_adi']=islem_adi(item['islem'],DENETIM_ADLARI);item['islem_bilinen']=item['islem'] in DENETIM_ADLARI
+    item['ayrinti'],item['ayrinti_katla']=_denetim_ayrinti(item)
+    item['okunur']=_denetim_okunur(item)
+    item['sebep_etiketi']='Sebep' if item['islem'] in ('sil','geri_al') else 'Açıklama'
+    if not g.yk['admin']:item['ip']=None  # IP adresleri yalnız yöneticiye görünür
+    return item
+
+DENETIM_SORGU_KAYNAK=' FROM denetim d LEFT JOIN kayitlar k ON k.anahtar=d.anahtar WHERE '
+
+@app.route('/denetim')
+@giris_gerekli
+def denetim():
+    where,params,filters,uyari=_denetim_sorgu(request.args)
     try:page=max(1,min(1000000,int(request.args.get('s','1'))))
     except ValueError:abort(400)
-    source=' FROM denetim d LEFT JOIN kayitlar k ON k.anahtar=d.anahtar WHERE '+' AND '.join(where)
+    source=DENETIM_SORGU_KAYNAK+' AND '.join(where)
     total=0 if uyari else baglanti().execute('SELECT COUNT(*)'+source,params).fetchone()[0]
-    rows=[]
-    for row in ([] if uyari else baglanti().execute('SELECT d.*,k.id record_id'+source+' ORDER BY d.id DESC LIMIT 50 OFFSET ?',[*params,(page-1)*50])):
-        item=log_row(row)
-        if item['record_id']:item.update(hedef_turu='kayit',hedef_id=str(item['record_id']))
-        elif item.get('hedef_turu')=='kayit':
-            # Kayıt tablosunda karşılığı olmayan hedef: proje kaydı ya da artık bulunmayan kayıt anahtarı.
-            item['hedef_turu']='proje' if str(item.get('islem') or '').startswith('katalog_proje') else 'anahtar'
-        if 'hata' in item['islem']:item['sonuc']='hata'
-        item['sonuc']={'ok':'Başarılı','hata':'Hata','uyari':'Uyarı'}.get(item.get('sonuc'),item.get('sonuc') or 'Tamamlandı')
-        item['islem_adi']=islem_adi(item['islem'],DENETIM_ADLARI);item['islem_bilinen']=item['islem'] in DENETIM_ADLARI
-        item['ayrinti'],item['ayrinti_katla']=_denetim_ayrinti(item)
-        item['sebep_etiketi']='Sebep' if item['islem'] in ('sil','geri_al') else 'Açıklama'
-        rows.append(item)
-    return render_template('denetim.html',logs=rows,kayitlar=rows,toplam=total,sayfa=page,sayfa_sayisi=max(1,(total+49)//50),filters=filters,q=filters['q'],islem_adlari=DENETIM_ADLARI,uyari=uyari)
+    rows=[_denetim_satiri(row) for row in ([] if uyari else baglanti().execute('SELECT d.*,k.id record_id,k.personel kayit_personel'+source+' ORDER BY d.id DESC LIMIT 50 OFFSET ?',[*params,(page-1)*50]))]
+    bugun=datetime.now().date()
+    hizli=[('Bugün',bugun,bugun),('Son 7 gün',bugun-timedelta(days=6),bugun),('Son 30 gün',bugun-timedelta(days=29),bugun),('Bu ay',bugun.replace(day=1),bugun)]
+    hizli_tarih=[dict(ad=ad,tarih1=t1.isoformat(),tarih2=t2.isoformat(),secili=filters['tarih1']==t1.isoformat() and filters['tarih2']==t2.isoformat()) for ad,t1,t2 in hizli]
+    csv_args={k:v for k,v in filters.items() if v}
+    return render_template('denetim.html',logs=rows,kayitlar=rows,toplam=total,sayfa=page,sayfa_sayisi=max(1,(total+49)//50),filters=filters,q=filters['q'],
+                           islem_adlari=DENETIM_ADLARI,uyari=uyari,ip_goster=bool(g.yk['admin']),hizli_tarih=hizli_tarih,csv_url=url_for('denetim_csv',**csv_args))
+
+@app.route('/denetim.csv')
+@giris_gerekli
+def denetim_csv():
+    """Süzülmüş İşlem Geçmişi: UTF-8 BOM + ';' + CRLF (Türkçe Excel), formül enjeksiyonuna karşı güvenli hücreler, en çok 50.000 satır."""
+    import csv
+    from flask import Response
+    where,params,filters,uyari=_denetim_sorgu(request.args)
+    if uyari:abort(400,uyari)
+    source=DENETIM_SORGU_KAYNAK+' AND '.join(where)
+    ip_goster=bool(g.yk['admin'])
+    out=io.StringIO();w=csv.writer(out,delimiter=';',lineterminator='\r\n',quoting=csv.QUOTE_MINIMAL)
+    w.writerow(['Zaman','Kullanıcı','İşlem','İşlem kodu','Hedef','Proje','Personel','Sonuç','Ayrıntı','Açıklama']+(['IP'] if ip_goster else []))
+    adet=0
+    for row in baglanti().execute('SELECT d.*,k.id record_id,k.personel kayit_personel'+source+' ORDER BY d.id DESC LIMIT ?',[*params,CSV_EN_COK_SATIR]):
+        r=_denetim_satiri(row);adet+=1
+        hedef=('Kayıt #'+str(r['hedef_id'])) if r.get('hedef_turu')=='kayit' and r.get('hedef_id') else (r.get('hedef_id') or r.get('anahtar') or '')
+        ayrinti=' | '.join(r['okunur'] or r['ayrinti'] or [])
+        hucreler=[r.get('zaman'),r.get('kullanici'),r.get('islem_adi'),r.get('islem'),hedef,r.get('proje'),r.get('kayit_personel'),r.get('sonuc'),ayrinti,r.get('aciklama')]+([r.get('ip')] if ip_goster else [])
+        w.writerow([personel_ozeti.guvenli_hucre('' if v is None else str(v)) for v in hucreler])
+    db.denetim_yaz(baglanti(),g.k['kullanici_adi'],'denetim_aktar',yeni='csv:%d' % adet,ip=ip(),hedef_turu='sistem',aciklama='İşlem Geçmişi CSV')
+    resp=Response(('\ufeff'+out.getvalue()).encode('utf-8'),mimetype='text/csv; charset=utf-8')
+    resp.headers['Content-Disposition']='attachment; filename="islem-gecmisi-%s.csv"' % datetime.now().strftime('%Y%m%d-%H%M')
+    return resp
 
 
 @app.route('/durum.json')
@@ -2195,6 +2409,10 @@ def sunucu_ayarlari():
         # bağlantıda güvenilir; aynı makinedeki başka bir süreç ('*' iken mümkündü) IP sahteleyemez.
         ayar.update(trusted_proxy=(os.getenv('GUVENILEN_PROXY','').strip() or '127.0.0.1'),trusted_proxy_count=1,
                     trusted_proxy_headers={'x-forwarded-for','x-forwarded-proto','x-forwarded-host'})
+    else:
+        # 2.4.0: TRUST_PROXY=0 iken waitress X-Forwarded-For'u silmesin (adres yine bağlantıdan alınır, başlık uygulanmaz);
+        # böylece erişim sınırı 'döngü + X-Forwarded-For' durumunu görüp muafiyet vermez ve "TRUST_PROXY=1 gerekli" uyarır.
+        ayar.update(clear_untrusted_proxy_headers=False)
     return ayar
 
 def calistir():

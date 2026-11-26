@@ -18,6 +18,13 @@ from tests.test_web import web, login  # noqa: F401
 BLOKLAR = ('curl', 'powershell', 'python', 'excel', 'sheets')
 
 
+@pytest.fixture(autouse=True)
+def _testadmin_sahip(request):
+    """2.4.0: API anahtarları sayfası yalnız sahibe açık; bu dosyadaki testlerde testadmin sahip olur."""
+    if 'web' in request.fixturenames:
+        kullanicilar.guncelle(request.getfixturevalue('web')[1], 'testadmin', yetki='sahip')
+
+
 def ornek_veri(a):
     """api_kilavuz.ORNEK_* ile aynı iki kayıt."""
     c = db.baglan(a['DB'])

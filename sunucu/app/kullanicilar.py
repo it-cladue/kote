@@ -41,7 +41,7 @@ def _canonical(conn, role):
     return yetki.kanonikle(role, codes)
 
 
-def ekle(ayar, ad, yetki_metni, sifre, gorunen_ad=None, olusturan=None):
+def ekle(ayar, ad, yetki_metni, sifre, gorunen_ad=None, olusturan=None, ip=None):
     ad = (ad or '').strip().lower()
     if not re.fullmatch(r'[a-z0-9_.]{1,40}', ad):
         raise ValueError('Kullanıcı adı a-z, rakam, nokta/alt çizgi olmalı.')
@@ -54,12 +54,12 @@ def ekle(ayar, ad, yetki_metni, sifre, gorunen_ad=None, olusturan=None):
             raise ValueError('Bu kullanıcı adı zaten var.')
         conn.execute('INSERT INTO panel_kullanicilari(kullanici_adi,ad,sifre_hash,yetki,olusturma,sifre_degistir) VALUES(?,?,?,?,?,1)',
                      (ad, (gorunen_ad or ad)[:120], hash_value, role, db.simdi()))
-        db.denetim_yaz(conn, olusturan or 'sunucu-cli', 'kullanici_ekle', anahtar=ad,
+        db.denetim_yaz(conn, olusturan or 'sunucu-cli', 'kullanici_ekle', anahtar=ad, ip=ip,
                        yeni={'ad': gorunen_ad or ad, 'yetki': role, 'aktif': 1}, hedef_turu='hesap', hedef_id=ad)
         db.degisti(conn)
 
 
-def guncelle(ayar, ad, expected_version=None, islem_yapan=None, **alanlar):
+def guncelle(ayar, ad, expected_version=None, islem_yapan=None, ip=None, **alanlar):
     ad = str(ad or '').strip().lower()
     if 'gorunen_ad' in alanlar:
         # 'ad' konumsal parametre kullanıcı adıdır; görünen ad alanı 'gorunen_ad' anahtarıyla gelir.
@@ -90,6 +90,11 @@ def guncelle(ayar, ad, expected_version=None, islem_yapan=None, **alanlar):
             count = sum(yetki.coz(r['yetki'])['admin'] for r in conn.execute('SELECT yetki FROM panel_kullanicilari WHERE aktif=1'))
             if count <= 1:
                 raise ValueError('Son süperadmin kapatılamaz veya yetkisi kaldırılamaz.')
+        # 2.4.0: son etkin sahip de kapatılamaz/düşürülemez (sahip hiç yoksa kural uygulanmaz; ilk atama ayrı adımdır).
+        was_sahip = yetki.coz(user['yetki'])['sahip'] and user['aktif']
+        will_sahip = yetki.coz(alanlar.get('yetki', user['yetki']))['sahip'] and alanlar.get('aktif', user['aktif'])
+        if was_sahip and not will_sahip and aktif_sahip_sayisi(conn) <= 1:
+            raise ValueError('Son sahip hesabı kapatılamaz veya rolü düşürülemez. Önce başka bir hesabı sahip yapın.')
         changed = {key: value for key, value in alanlar.items() if user[key] != value}
         # "Kaydet" kilidi de açar: hiçbir alan değişmese bile kilitli ya da hatalı giriş sayacı dolu hesap sıfırlanır (Kullanıcılar sayfası etiketi bunu söyler).
         kilit_acilir = bool(user['kilit_bitis']) or (user['hatali_giris'] or 0) > 0
@@ -102,14 +107,14 @@ def guncelle(ayar, ad, expected_version=None, islem_yapan=None, **alanlar):
             after = {key: changed[key] for key in public_keys}
             if password_changed:
                 after['parola_degisti'] = True
-            db.denetim_yaz(conn, islem_yapan or ad, 'kullanici_guncelle', anahtar=ad,
+            db.denetim_yaz(conn, islem_yapan or ad, 'kullanici_guncelle', anahtar=ad, ip=ip,
                            eski=before, yeni=after, hedef_turu='hesap', hedef_id=ad)
             db.degisti(conn)
         elif kilit_acilir:
             conn.execute('UPDATE panel_kullanicilari SET hatali_giris=0,kilit_bitis=NULL WHERE kullanici_adi=?', (ad,))
         if kilit_acilir:
             aciklama = ('%d hatalı deneme sayacı sıfırlandı' % (user['hatali_giris'] or 0)) + ('; kilit %s kadar sürecekti' % user['kilit_bitis'][11:16] if kilitli_mi(user) else '')
-            db.denetim_yaz(conn, islem_yapan or ad, 'kilit_ac', anahtar=ad, eski={'hatali_giris': user['hatali_giris'], 'kilit_bitis': user['kilit_bitis']},
+            db.denetim_yaz(conn, islem_yapan or ad, 'kilit_ac', anahtar=ad, ip=ip, eski={'hatali_giris': user['hatali_giris'], 'kilit_bitis': user['kilit_bitis']},
                            yeni={'hatali_giris': 0, 'kilit_bitis': None}, hedef_turu='hesap', hedef_id=ad, aciklama=aciklama)
             db.degisti(conn)
     return bul(ayar, ad)
@@ -190,3 +195,73 @@ def dogrula(ayar, ad, sifre, ip=None):
             db.denetim_yaz(conn, ad, 'giris_kilit', ip=ip, sonuc='uyari', hedef_turu='hesap', hedef_id=ad,
                            aciklama='%d hatalı deneme; %d dakika kilit' % (KILIT_DENEME, KILIT_DAKIKA))
         return None, GENEL_HATA
+
+
+# ------------------------------------------------------------------ 2.4.0: sahip rolü, yönetim izinleri ve yazılı onaylar
+
+class Yasak(PermissionError):
+    """İşlemi yapanın rolü bu işleme yetmiyor (panel 403 döner)."""
+
+
+SAHIP_GEREKLI_MESAJ = ('Bu işlemi yalnız sahip yapabilir: süperadmin/sahip hesaplarını ekleme, düzenleme, pasife alma, '
+                       'şifre sıfırlama ve bu rollere yükseltme ya da bu rollerden düşürme.')
+
+
+def _yonetici_rolu(metin):
+    return yetki.rol_kodu(metin) in ('sahip', 'superadmin')
+
+
+def yonetim_denetimi(islem_yapan_yk, hedef=None, yeni_yetki=None):
+    """Süperadmin/sahip hesaplarına ve bu rollere geçişe dokunan her işlem yalnız sahibe açıktır (aksi hâlde Yasak).
+    hedef: mevcut hesap satırı (ekleme için None); yeni_yetki: kanonik yeni yetki metni (yetki değişmiyorsa None)."""
+    if yetki.sahip_mi(islem_yapan_yk):
+        return
+    if hedef is not None and _yonetici_rolu(hedef.get('yetki')):
+        raise Yasak(SAHIP_GEREKLI_MESAJ)
+    if yeni_yetki is not None and _yonetici_rolu(yeni_yetki):
+        raise Yasak(SAHIP_GEREKLI_MESAJ)
+
+
+def onay_gerekli(hedef, yeni_yetki=None, yeni_aktif=None):
+    """Yazılı onay (hedef kullanıcı adını yazma) isteyen tehlikeli değişiklik mi? Açıklama metni ya da None.
+    Kurallar: rol sınıfı değişikliği (proje kullanıcısı ↔ süperadmin ↔ sahip) ve süperadmin/sahip hesabını pasife alma."""
+    eski_rol = yetki.rol_kodu(hedef.get('yetki'))
+    if yeni_yetki is not None:
+        yeni_rol = yetki.rol_kodu(yeni_yetki)
+        if yeni_rol != eski_rol:
+            return 'Rol değişikliği: %s → %s' % (yetki.ROL_ADLARI[eski_rol], yetki.ROL_ADLARI[yeni_rol])
+    if yeni_aktif is not None and not yeni_aktif and hedef.get('aktif') and eski_rol != 'proje':
+        return '%s hesabını pasife alma' % yetki.ROL_ADLARI[eski_rol]
+    return None
+
+
+def onay_dogru(beklenen, yazilan):
+    """Yazılı onay: baş/son boşluk ve büyük-küçük harf önemsiz, aksi hâlde birebir aynı olmalı."""
+    return bool(str(beklenen or '').strip()) and str(yazilan or '').strip().casefold() == str(beklenen).strip().casefold()
+
+
+def aktif_sahip_sayisi(conn):
+    return sum(1 for r in conn.execute('SELECT yetki FROM panel_kullanicilari WHERE aktif=1') if yetki.coz(r['yetki'])['sahip'])
+
+
+def aktif_sahip_var(ayar):
+    with connection(ayar) as conn:
+        return aktif_sahip_sayisi(conn) > 0
+
+
+def sahip_ata(ayar, ad, islem_yapan, ip=None):
+    """İlk sahip ataması (kurulum adımı): etkin sahip yokken bir süperadmin TEK bir hesabı (kendisi dahil) sahip yapar.
+    Etkin sahip varsa ValueError. İşlem İşlem Geçmişi'ne 'sahip_atama' olarak yazılır; hedef hesabın oturumu düşer."""
+    ad = str(ad or '').strip().lower()
+    with connection(ayar) as conn, db.transaction(conn):
+        if aktif_sahip_sayisi(conn):
+            raise ValueError('Zaten etkin bir sahip hesabı var; yeni sahip atamasını yalnız sahip, Kullanıcılar listesinden yapar.')
+        user = conn.execute('SELECT * FROM panel_kullanicilari WHERE kullanici_adi=?', (ad,)).fetchone()
+        if not user or not user['aktif']:
+            raise ValueError('Sahip yapılacak hesap bulunamadı ya da pasif.')
+        conn.execute("UPDATE panel_kullanicilari SET yetki='sahip',session_version=session_version+1,hesap_surumu=hesap_surumu+1 "
+                     "WHERE kullanici_adi=?", (ad,))
+        db.denetim_yaz(conn, islem_yapan or 'sunucu-cli', 'sahip_atama', anahtar=ad, ip=ip, eski={'yetki': user['yetki']},
+                       yeni={'yetki': 'sahip'}, hedef_turu='hesap', hedef_id=ad, aciklama='İlk sahip ataması (etkin sahip yokken)')
+        db.degisti(conn)
+    return bul(ayar, ad)

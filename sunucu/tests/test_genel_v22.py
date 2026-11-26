@@ -38,7 +38,7 @@ def test_menu_links_per_role_and_version(web):
     assert 'href="/disa-aktar"' in html and '>Kayıtlar<' in html
     for text in ('href="/yonetim/katalog"', 'href="/yonetim/kullanicilar"', 'href="/bot"', 'href="/arsiv"', 'Yönetim <span'):
         assert text not in html, text
-    assert 'kullanici-rol">Admin<' in html
+    assert 'kullanici-rol" data-rol="Takım lideri">Takım lideri<' in html  # 2.4.0: etiket yetkiden türetilir (OF:kt → Takım lideri)
 
 
 def test_beta_project_seeded_once_and_admin_choice_respected(tmp_path):

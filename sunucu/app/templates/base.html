@@ -14,7 +14,7 @@
 <body>
 {% if k %}
 {% set ep = request.endpoint or '' %}
-{% set yonetim_aktif = ep in ('katalog_yonetim','kategori_temizligi','yonetim_kullanicilar','bot_sayfasi','bot_kullanici_detay','arsiv','yonetim_api_anahtarlari') %}
+{% set yonetim_aktif = ep in ('katalog_yonetim','kategori_temizligi','yonetim_kullanicilar','bot_sayfasi','bot_kullanici_detay','arsiv','yonetim_api_anahtarlari','yonetim_erisim') %}
 <header class="ust" id="ust-menu" data-ana-menu>
   <a class="marka" href="{{ url_for('ana') }}" aria-label="Kanıt Paneli ana sayfa"><span class="marka-isaret" aria-hidden="true">K</span>Kanıt <span>Paneli</span></a>
   <nav class="menu" id="ana-menu" aria-label="Ana menü">
@@ -29,17 +29,21 @@
     <div class="yonetim-menu">
       <button type="button" class="menu-baglanti {{ 'aktif' if yonetim_aktif }}" data-acilir="yonetim-acilir" aria-expanded="false" aria-controls="yonetim-acilir" aria-haspopup="true">Yönetim <span aria-hidden="true">▾</span></button>
       <div id="yonetim-acilir" class="yonetim-acilir" hidden>
-        <small>Süperadmin</small>
+        <small>{{ 'Sahip' if yk.sahip else 'Süperadmin' }}</small>
         <a href="{{ url_for('katalog_yonetim') }}" class="{{ 'aktif' if ep in ('katalog_yonetim','kategori_temizligi') }}">Proje / Kategoriler</a>
         <a href="{{ url_for('yonetim_kullanicilar') }}" class="{{ 'aktif' if ep == 'yonetim_kullanicilar' }}">Kullanıcılar</a>
         <a href="{{ url_for('bot_sayfasi') }}" class="{{ 'aktif' if ep in ('bot_sayfasi','bot_kullanici_detay') }}">Bot</a>
         <a href="{{ url_for('arsiv') }}" class="{{ 'aktif' if ep == 'arsiv' }}">Arşiv</a>
+        {% if yk.sahip %}{# 2.4.0: API anahtarları ve erişim sınırı yalnız sahibe görünür #}
+        <small>Yalnız sahip</small>
         <a href="{{ url_for('yonetim_api_anahtarlari') }}" class="{{ 'aktif' if ep == 'yonetim_api_anahtarlari' }}">API anahtarları</a>
+        <a href="{{ url_for('yonetim_erisim') }}" class="{{ 'aktif' if ep == 'yonetim_erisim' }}">Erişim sınırı</a>
+        {% endif %}
       </div>
     </div>
     {% endif %}
     <div class="menu-mobil-alt">
-      <div class="kullanici-kimlik"><span class="kullanici-adi">{{ k.ad or k.kullanici_adi }}</span><span class="kullanici-rol">{{ rol_adi }}</span></div>
+      <div class="kullanici-kimlik"><span class="kullanici-adi">{{ k.ad or k.kullanici_adi }}</span><span class="kullanici-rol" data-rol="{{ rol_adi }}">{{ rol_adi }}</span></div>
       <a class="btn kucuk" href="{{ url_for('sifre_degistir') }}">Şifre</a>
       <form method="post" action="{{ url_for('cikis') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn kucuk">Çıkış</button></form>
       <button type="button" class="btn kucuk tema-dugmesi" data-tema-toggle>Koyu tema</button>
@@ -48,7 +52,7 @@
   <div class="kullanici">
     <button type="button" class="btn kucuk tema-dugmesi" data-tema-toggle>Koyu tema</button>
     <button type="button" id="zil" class="zil" aria-label="Bildirimleri aç" aria-expanded="false" aria-controls="bildirim-kutu" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span class="zil-metin" aria-hidden="true">Bildirimler</span><span id="zil-sayi" class="zil-sayi gizli">0</span></button>
-    <div class="kullanici-kimlik" title="{{ k.kullanici_adi }}"><span class="kullanici-adi">{{ k.ad or k.kullanici_adi }}</span><span class="kullanici-rol">{{ rol_adi }}</span></div>
+    <div class="kullanici-kimlik" title="{{ k.kullanici_adi }}"><span class="kullanici-adi">{{ k.ad or k.kullanici_adi }}</span><span class="kullanici-rol" data-rol="{{ rol_adi }}">{{ rol_adi }}</span></div>
     <a class="btn kucuk sifre-baglanti" href="{{ url_for('sifre_degistir') }}">Şifre</a>
     <form method="post" action="{{ url_for('cikis') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn kucuk">Çıkış</button></form>
   </div>

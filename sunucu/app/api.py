@@ -20,7 +20,7 @@ from flask import Blueprint, current_app, g, jsonify, request, send_file
 from werkzeug.exceptions import HTTPException
 
 from . import api_anahtarlari as aa
-from . import db
+from . import db, erisim
 
 bp = Blueprint('api', __name__, url_prefix='/api/v1')
 
@@ -140,6 +140,11 @@ def _bearer():
     return parca[1].strip()
 
 
+def _ip_red(ip):
+    return _hata(403, 'Bu adresten API erişimi izinli değil (IP: ' + str(ip or '?') + '). Panel sahibi Yönetim → Erişim sınırı '
+                 'ya da API anahtarları sayfasından adresi ekleyebilir.', neden='ip_izinsiz', ip=str(ip or ''))
+
+
 @bp.before_request
 def _kimlik():
     g.api_basla = time.perf_counter(); g.api_anahtar = None; g.api_satir = None; g.api_gunluk = False
@@ -148,7 +153,20 @@ def _kimlik():
     buyuk = request.content_length is not None and request.content_length > EN_BUYUK_GOVDE
     request.max_content_length = EN_BUYUK_GOVDE
     c = _panel().baglanti()
+    # 2.4.0: IP izin listesi — genel API listesi anahtar doğrulamasından ÖNCE (izinsiz adres anahtar deneyemez),
+    # anahtarın kendi listesi doğrulamadan sonra ve kapsam/hız denetiminden önce. Adres panelle aynı: request.remote_addr.
+    istemci_ip = request.remote_addr
+    izinli, _ = erisim.api_izinli(c, istemci_ip)
+    if not izinli:
+        erisim.red_kaydet(c, istemci_ip, request.method + ' ' + request.path, 'api')
+        return _ip_red(istemci_ip)
     anahtar, neden = aa.dogrula(c, _bearer())
+    if anahtar:
+        izinli, _ = erisim.api_izinli(c, istemci_ip, anahtar)
+        if not izinli:
+            g.api_anahtar = anahtar; g.api_gunluk = True
+            erisim.red_kaydet(c, istemci_ip, request.method + ' ' + request.path, 'api')  # anahtara özel liste de İşlem Geçmişi'ne düşsün
+            return _ip_red(istemci_ip)
     if not anahtar:
         # Kimliksiz/geçersiz istek (413 dahil): IP başına sınır; aşan istekler günlüğe yazılmadan 429 alır.
         izin, bekle = YETKISIZ_HIZ.dene('ip:' + str(request.remote_addr), YETKISIZ_IP_SINIRI)
