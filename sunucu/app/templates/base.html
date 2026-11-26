@@ -53,6 +53,13 @@
   </div>
   <button type="button" class="menu-dugme" data-menu-dugme aria-expanded="false" aria-controls="ana-menu" aria-label="Menüyü aç"><span></span><span></span><span></span></button>
 </header>
+<div id="bildirim-kutu" class="bildirim-kutu gizli" role="dialog" aria-label="Son bildirimler">
+  <div class="bildirim-baslik"><b>Bildirimler <span id="bildirim-kutu-sayi" class="kucukyazi"></span></b><span class="bildirim-ayar"><span id="bildirim-izin" class="gizli"><button type="button" class="btn kucuk" id="bildirim-izin-btn">Masaüstü bildirimlerini aç</button></span><label class="ses-anahtar" for="bildirim-ses" title="Yeni bildirimde kısa ses çal (bu tarayıcı için)"><input type="checkbox" id="bildirim-ses" role="switch" checked> Ses</label></span></div>
+  <ul id="bildirim-liste"><li class="bos">Yükleniyor…</li></ul>
+  <div class="bildirim-alt"><a href="{{ url_for('bildirim_sayfasi') }}" class="btn kucuk hayalet">Tüm bildirimler</a><button type="button" class="btn kucuk" id="bildirim-temizle">Tümünü okundu say</button></div>
+</div>
+{# 2.3.3: yeni bildirim kartları (zilin altında); sekme sırasında sayfa içeriğinden önce gelsin diye başlığın hemen ardında #}
+<div id="bildirim-popuplar" class="bildirim-popuplar" role="region" aria-label="Yeni bildirimler" aria-live="polite" aria-relevant="additions"></div>
 {% if k.sifre_degistir %}
 <div class="uyari-serit" role="status">Geçici şifre ile girdiniz. <a href="{{ url_for('sifre_degistir') }}">Şifrenizi değiştirin</a>.</div>
 {% endif %}
@@ -65,10 +72,14 @@
 </main>
 <div id="toast" class="toast gizli" role="status" aria-live="polite"></div>
 {% if k %}
-<div id="bildirim-kutu" class="bildirim-kutu gizli" role="dialog" aria-label="Son bildirimler">
-  <div class="bildirim-baslik"><b>Bildirimler <span id="bildirim-kutu-sayi" class="kucukyazi"></span></b><span id="bildirim-izin" class="gizli"><button type="button" class="btn kucuk" id="bildirim-izin-btn">Masaüstü bildirimlerini aç</button></span></div>
-  <ul id="bildirim-liste" aria-live="polite"><li class="bos">Yükleniyor…</li></ul>
-  <div class="bildirim-alt"><a href="{{ url_for('bildirim_sayfasi') }}" class="btn kucuk hayalet">Tüm bildirimler</a><button type="button" class="btn kucuk" id="bildirim-temizle">Tümünü okundu say</button></div>
+{# 2.3.3: bekleyen kontroller hatırlatma penceresi #}
+<div id="hatirlatma-popup" class="hp-perde gizli" aria-hidden="true">
+  <div class="hp-pencere" role="dialog" aria-modal="true" aria-labelledby="hp-baslik" aria-describedby="hp-aciklama" tabindex="-1">
+    <div class="hp-ust"><div><h2 id="hp-baslik">Bekleyen kontroller hatırlatması</h2><span id="hp-sayi" class="kucukyazi"></span></div><button type="button" class="btn kucuk hayalet" data-hp-kapat>Kapat</button></div>
+    <p id="hp-aciklama" class="hp-aciklama">Aşağıdaki kayıtların kontrolü bekliyor. Kayda gitmek için “Aç”a basın.</p>
+    <ul id="hp-liste" class="hp-liste"></ul>
+    <div class="hp-alt"><a class="btn kucuk hayalet" href="{{ url_for('bildirim_sayfasi', okundu='0', tur='hatirlatma') }}">Tüm hatırlatmalar</a><span class="hp-alt-sag"><button type="button" class="btn kucuk" data-hp-sonra title="Bugün bu hatırlatmalar için pencere yeniden açılmaz">Daha sonra</button><button type="button" class="btn kucuk birincil" data-hp-okundu>Tümünü okundu say</button></span></div>
+  </div>
 </div>
 <div id="degisiklik-serit" class="degisiklik-serit gizli" role="status">Yeni kayıt veya değişiklik var. <button type="button" class="serit-dugme" id="degisiklik-yenile">Sonuçları yenile</button></div>
 {% endif %}

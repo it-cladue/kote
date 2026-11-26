@@ -286,6 +286,8 @@ Beklenen: `DRY-RUN_TAMAM`, `GÜNCELLEME_TAMAM`, `OK`, iki `active`. 2.3.1'e öze
 
 2.3.2 ile gelenler (aynı indirme + güncelleme yolu): Snappark/Teamzone görselleri panelde içeride açılır ve gece planı onları da kopyalar; sunucudan kontrol: `curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' --max-time 20 https://img.snappark.net/s/MduBQ4TiGc/raw/` → `200 image/png`. API anahtarları: Yönetim → API anahtarları; kullanım `API_KULLANIM.md`; API'yi kapatmak için `.env`'e `API_ACIK=0`. Ayrıntı: `DEGISIKLIKLER_v2.3.2.md`.
 
+2.3.3 ile gelenler (aynı indirme + güncelleme yolu; veritabanı ve `.env` değişmez, yeni ayar yok): yeni bildirimler sağ üstte zilin altında pop-up kart olarak ve kısa bir sesle gelir; okunmamış hatırlatma varsa ortada "Bekleyen kontroller hatırlatması" penceresi açılır (**Daha sonra** o gün için kapatır, **Tümünü okundu say** okundu sayar). Ekibe söylenecekler: ses tarayıcı kuralı gereği sayfaya bir kez tıkladıktan sonra çalar; sesi kapatmak için zil → **Ses**; masaüstü bildirimi için zil → **Masaüstü bildirimlerini aç** → İzin ver. Güncellemeden sonra kontrol: panel açıkken Telegram'dan bir deneme kanıtı ekletin; o projede onay yetkisi olan hesabın panelinde 10 sn içinde sağ üstte kart çıkmalı. Ayrıntı: `DEGISIKLIKLER_v2.3.3.md`.
+
 ## Sorun çıkarsa
 
 - Güncelleme hatası: betik kendisi geri alır; notu `/var/backups/kanit-paneli/<tarih>/GERI_DONUS_NOTU.txt`.

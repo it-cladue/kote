@@ -389,6 +389,181 @@ window.Panel = (function () {
     if(e.target.closest&&e.target.closest('a,button,input,select,textarea,label'))return;var satir=e.target.closest&&e.target.closest('.bildirim-satir[data-bildirim-hedef]');if(satir)git(satir.getAttribute('data-bildirim-hedef'),satir.getAttribute('data-bildirim-key'));});
     function git(target,key){if(!target)return;postBildirim({ids:[key]},{id:key}).then(function(){window.location.href=target;}).catch(function(){window.location.href=target;});}
     document.addEventListener('keydown',function(e){if(e.key!=='Enter'&&e.key!==' ')return;var t=e.target;if(!t||!t.classList||!t.classList.contains('bildirim-satir')||!t.getAttribute('data-bildirim-hedef'))return;e.preventDefault();git(t.getAttribute('data-bildirim-hedef'),t.getAttribute('data-bildirim-key'));});if(all)all.addEventListener('click',function(){all.disabled=true;postBildirim({hepsi:true},{hepsi:'1'}).then(function(){Array.prototype.forEach.call(document.querySelectorAll('.bildirim-satir.okunmamis'),function(row){row.classList.remove('okunmamis');var b=row.querySelector('[data-bildirim-okundu]');if(b)b.remove();});toast('Bildirimler okundu işaretlendi.');}).catch(function(e){toast(e.message,true);}).then(function(){all.disabled=false;});});}
+  /* ===== 2.3.3: bildirim pop-up kartları, ses ve hatırlatma penceresi (başlangıç) =====
+     Yeni bildirim sağ üstte kart olarak çıkar (zilin altında) ve kısa bir ses çalar; hatırlatmalar ayrıca ortada pencere açar.
+     Ses Web Audio ile üretilir (dosya yok); tarayıcı kuralı gereği sayfaya bir kez tıklanmadan/tuşa basılmadan çalmaz. */
+  var SES_ANAHTAR='kanit-bildirim-ses';
+  function sesAcik(){try{return localStorage.getItem(SES_ANAHTAR)!=='0';}catch(_){return true;}}
+  function sesAyarla(acik){try{localStorage.setItem(SES_ANAHTAR,acik?'1':'0');}catch(_){}}
+  var sesBaglam=null;
+  /* 2.3.3: AudioContext ilk kullanıcı hareketinde (tıklama/tuş/dokunma) bir kez kurulur ve resume() edilir. */
+  function sesHazirla(){try{if(!sesBaglam){var AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;sesBaglam=new AC();}if(sesBaglam.state!=='running'&&sesBaglam.resume){var p=sesBaglam.resume();if(p&&p.catch)p.catch(function(){});}}catch(_){sesBaglam=null;}}
+  var ILK_HAREKET=['pointerdown','keydown','touchstart'];
+  function ilkHareket(){ILK_HAREKET.forEach(function(ad){document.removeEventListener(ad,ilkHareket,true);});sesHazirla();}
+  ILK_HAREKET.forEach(function(ad){document.addEventListener(ad,ilkHareket,{capture:true,passive:true});});
+  /* 2.3.3: normal bildirim iki tonlu (~0,3 sn), hatırlatma üç tonlu yumuşak zil; ses kapalıysa ya da bağlam çalışmıyorsa sessizce atlanır. */
+  function sesCal(hatirlatma){
+    if(!sesAcik())return false;
+    try{
+      var c=sesBaglam;if(!c||c.state!=='running')return false;
+      var notalar=hatirlatma?[[659.25,0,.2],[783.99,.15,.2],[1046.5,.3,.28]]:[[880,0,.14],[1318.5,.12,.18]];
+      var t0=c.currentTime+.02;
+      notalar.forEach(function(n){var o=c.createOscillator(),g=c.createGain(),s=t0+n[1],d=n[2];o.type='sine';o.frequency.setValueAtTime(n[0],s);g.gain.setValueAtTime(.0001,s);g.gain.exponentialRampToValueAtTime(.12,s+.015);g.gain.exponentialRampToValueAtTime(.0001,s+d);o.connect(g);g.connect(c.destination);o.start(s);o.stop(s+d+.03);});
+      return true;
+    }catch(_){return false;}
+  }
+  function hatirlatmaMi(n){return !!n&&n.tur==='hatirlatma';}
+  function bildirimAnahtari(n){return n.key||n.bildirim_id||'';}
+  /* 2.3.3: bugünün bildiriminde yalnız saat (10:14), eski günlerde tarih + saat. */
+  function kisaZaman(z){z=String(z||'');if(z.length<16)return z;return z.slice(0,10)===bugunTarih()?z.slice(11,16):z.slice(0,16);}
+  function bugunTarih(){var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
+  /* 2.3.3: kullanıcı bir alana yazıyorsa (metin/arama/sayı/tarih, textarea, select, düzenlenebilir alan) odak çalınmaz. */
+  function yaziyor(t){if(!t)return false;if(t.isContentEditable)return true;var n=(t.tagName||'').toLowerCase();if(n==='textarea'||n==='select')return true;if(n!=='input')return false;return !/^(checkbox|radio|button|submit|reset|range|file|color|image|hidden)$/i.test(t.type||'');}
+  function acikPencereVar(){var m=document.getElementById('modal'),l=document.getElementById('lightbox');return !!((m&&!m.classList.contains('gizli'))||(l&&!l.classList.contains('gizli')));}
+
+  function bildirimPopup(api){
+    var kutu=document.getElementById('bildirim-popuplar'),hp=document.getElementById('hatirlatma-popup');
+    var EN_COK=4,SURE=15000,sonListe=[],bekleyenKartlar=[],hpBekliyor=null,hpOnceki=null,izinGosterildi=false;
+    var ertKey='kanit-hatirlatma-sonra:'+(window.PANEL_KULLANICI||'');
+    var TUR=api.turAdlari;
+    function renk(n){return (window.PROJE_RENKLERI||{})[n.proje]||'#64748b';}
+    function rozet(n){var c=renk(n);return '<span class="rozet" style="background:'+esc(c)+';color:'+yaziRengi(c)+'">'+esc(n.proje||'—')+'</span>';}
+    function hedef(n){return n.url||api.recordURL(n);}
+    function kayitSatiri(n){if(n.ozet)return '';var kid=n.kayit_id||n.id,p=[];if(kid)p.push('#'+esc(kid));if(n.personel)p.push(esc(n.personel));if(n.kategori)p.push(esc(n.kategori));return p.length?'<div class="bp-kayit"><b>'+p.join(' · ')+'</b></div>':'';}
+
+    /* ---- kartlar: en çok 4; normal kart 15 sn sonra kapanır (üzerindeyken/odaktayken durur), hatırlatma kartı kendiliğinden kapanmaz ---- */
+    function kartlar(){return kutu?Array.prototype.slice.call(kutu.querySelectorAll('.bp-kart')):[];}
+    function kartKaldir(k){if(!k||!k.parentNode||k._gidiyor)return;k._gidiyor=true;clearTimeout(k._zaman);var odakta=k.contains(document.activeElement);k.classList.add('cikiyor');setTimeout(function(){if(k.parentNode)k.parentNode.removeChild(k);},180);if(odakta){var z=document.getElementById('zil');if(z)z.focus();}}
+    function zamanla(k){clearTimeout(k._zaman);if(k._kalici)return;k._bas=Date.now();k._zaman=setTimeout(function(){kartKaldir(k);},k._kalan);}
+    function durdur(k){if(k._kalici||!k._bas)return;clearTimeout(k._zaman);k._kalan=Math.max(2000,k._kalan-(Date.now()-k._bas));k._bas=0;}
+    function kartEkle(html,sinif,etiket,kalici,anahtar){
+      if(!kutu)return null;
+      var k=document.createElement('div');k.className='bp-kart'+(sinif?' '+sinif:'');k.setAttribute('role','group');k.setAttribute('aria-label',etiket);k.tabIndex=-1;if(typeof anahtar==='string'&&anahtar)k.setAttribute('data-bp-key',anahtar);else if(anahtar&&anahtar.length)k.setAttribute('data-bp-keys',anahtar.join(' '));
+      k.innerHTML=html;k._kalici=!!kalici;k._kalan=SURE;
+      kutu.insertBefore(k,kutu.firstChild);
+      var hepsi=kartlar().filter(function(x){return !x._gidiyor;});
+      while(hepsi.length>EN_COK){var eski=hepsi.filter(function(x){return !x._kalici&&x!==k;}).pop()||hepsi[hepsi.length-1];clearTimeout(eski._zaman);if(eski.parentNode)eski.parentNode.removeChild(eski);hepsi=kartlar().filter(function(x){return !x._gidiyor;});}
+      k.addEventListener('mouseenter',function(){durdur(k);});k.addEventListener('mouseleave',function(){if(!k.contains(document.activeElement))zamanla(k);});
+      k.addEventListener('focusin',function(){durdur(k);});k.addEventListener('focusout',function(e){if(!k.contains(e.relatedTarget)&&!k.matches(':hover'))zamanla(k);});
+      zamanla(k);return k;
+    }
+    function tekKart(n){
+      var id=bildirimAnahtari(n),hat=hatirlatmaMi(n),etiket=TUR[n.tur]||n.etiket||'Yeni bildirim',kim=(n.kim&&n.kim!=='sistem')?' · '+esc(n.kim):'';
+      var html='<div class="bp-ust">'+rozet(n)+'<b class="bp-tur">'+esc(etiket)+kim+'</b><small class="bp-zaman" title="'+esc(n.zaman||n.tarih||'')+'">'+esc(kisaZaman(n.zaman||n.tarih))+'</small><button type="button" class="bp-kapat" data-bp-kapat aria-label="Bildirimi kapat">×</button></div>'+
+        kayitSatiri(n)+'<p class="bp-metin">'+esc(n.metin||'Kayıt hareketi')+'</p>'+
+        '<div class="bp-eylem"><a class="btn kucuk birincil" href="'+esc(hedef(n))+'" data-bp-ac="'+esc(id)+'">Aç</a><button type="button" class="btn kucuk hayalet" data-bp-okundu="'+esc(id)+'">Okundu</button></div>';
+      kartEkle(html,hat?'hatirlatma':'',(hat?'Hatırlatma':'Yeni bildirim')+': '+etiket+((n.kayit_id&&!n.ozet)?' · Kayıt #'+n.kayit_id:''),hat,id);
+    }
+    function ozetKart(liste){
+      var hat=liste.filter(hatirlatmaMi).length,metin=liste.length+' yeni bildirim'+(hat?' ('+hat+' hatırlatma)':'');
+      var izin=!izinGosterildi&&window.Notification&&Notification.permission==='default';if(izin)izinGosterildi=true;
+      var html='<div class="bp-ust"><b class="bp-tur">'+esc(metin)+'</b><button type="button" class="bp-kapat" data-bp-kapat aria-label="Bildirimi kapat">×</button></div>'+
+        '<p class="bp-metin">'+esc(liste.slice(0,3).map(function(n){return (n.proje||'')+' · '+(TUR[n.tur]||n.etiket||'Bildirim');}).join(', '))+(liste.length>3?' …':'')+'</p>'+
+        '<div class="bp-eylem"><button type="button" class="btn kucuk birincil" data-bp-kutu>Bildirimleri aç</button><a class="btn kucuk ikincil" href="/bildirimler?okundu=0">Tümünü gör</a>'+(izin?'<button type="button" class="btn kucuk hayalet" data-bp-izin>Masaüstü bildirimlerini aç</button>':'')+'</div>';
+      /* Özet kart kapsadığı anahtarları taşır; hepsi okununca (pencereden/zilden/başka sekmeden) kendiliğinden kalkar. */
+      kartEkle(html,'ozet'+(hat?' hatirlatma':''),metin,hat>0,liste.map(bildirimAnahtari).filter(Boolean));
+    }
+    /* 1-2 yeni satır tek tek, 3 ve üzeri tek özet kart (hatırlatma partileri 20 ayrı kart üretmesin). */
+    function kartGoster(liste){if(!liste.length)return;if(liste.length>=3)ozetKart(liste);else liste.forEach(tekKart);}
+    if(kutu){
+      kutu.addEventListener('click',function(e){
+        var t=e.target,k=t.closest&&t.closest('.bp-kart');if(!k)return;
+        var a=t.closest('[data-bp-ac]');if(a){e.preventDefault();kartKaldir(k);api.markRead(a.getAttribute('data-bp-ac'),a.href);return;}
+        var o=t.closest('[data-bp-okundu]');if(o){e.preventDefault();o.disabled=true;kartKaldir(k);api.markRead(o.getAttribute('data-bp-okundu'),null);return;}
+        if(t.closest('[data-bp-kapat]')){kartKaldir(k);return;}
+        if(t.closest('[data-bp-kutu]')){kartKaldir(k);api.openBox(true);return;}
+        var iz=t.closest('[data-bp-izin]');if(iz){iz.disabled=true;api.izinIste();}
+      });
+      kutu.addEventListener('keydown',function(e){if(e.key!=='Escape')return;var k=e.target.closest&&e.target.closest('.bp-kart');if(k){e.preventDefault();e.stopPropagation();kartKaldir(k);}});
+    }
+    /* Artık okunmamış listede olmayan bildirimlerin kartları (zilden/başka sekmeden okundu) kendiliğinden kalkar. */
+    function kartAnahtarlari(k){var a=k.getAttribute('data-bp-key');if(a)return [a];return (k.getAttribute('data-bp-keys')||'').split(' ').filter(Boolean);}
+    function kartTemizle(items){var var_={};items.forEach(function(n){if(!n.okundu)var_[bildirimAnahtari(n)]=1;});kartlar().forEach(function(k){var a=kartAnahtarlari(k);if(a.length&&!a.some(function(x){return var_[x];}))kartKaldir(k);});}
+
+    /* ---- hatırlatma penceresi ---- */
+    var hpListe=hp&&hp.querySelector('#hp-liste'),hpPencere=hp&&hp.querySelector('.hp-pencere');
+    function hpAcik(){return !!hp&&!hp.classList.contains('gizli');}
+    function hatirlatmalar(){return sonListe.filter(function(n){return hatirlatmaMi(n)&&!n.okundu;});}
+    function ertelemeOku(){try{var d=JSON.parse(localStorage.getItem(ertKey)||'null');return d&&d.gun===bugunTarih()?d:null;}catch(_){return null;}}
+    /* "Daha sonra": aynı gün, o an listelenen hatırlatmalar için pencere yeniden açılmaz; yeni hatırlatma gelirse açılır. */
+    function ertelenmis(liste){var d=ertelemeOku();if(!d)return false;var b={};(d.anahtarlar||[]).forEach(function(x){b[x]=1;});return liste.every(function(n){return b[bildirimAnahtari(n)];});}
+    var hpImza=null;
+    function hpCiz(){
+      var liste=hatirlatmalar(),imza=liste.map(bildirimAnahtari).join(',');
+      /* Liste değişmediyse yeniden çizilmez (odaktaki düğme kaybolmasın); değiştiyse odak aynı satıra geri konur. */
+      if(imza===hpImza&&hpListe.firstChild)return liste;hpImza=imza;
+      var odak=document.activeElement,odakKey=odak&&hpListe.contains(odak)?odak.getAttribute('data-hp-ac'):null;
+      hpListe.innerHTML=liste.map(function(n){var id=bildirimAnahtari(n),kid=n.kayit_id||n.id,bas=n.ozet?esc(n.proje||'')+' · Proje özeti':'Kayıt #'+esc(kid)+(n.personel?' · '+esc(n.personel):'');
+        return '<li class="'+(n.ozet?'ozet':'')+'">'+rozet(n)+'<span class="hp-metin"><b>'+bas+'</b> <span>'+esc(n.metin||'')+'</span></span><a class="btn kucuk ikincil" href="'+esc(hedef(n))+'" data-hp-ac="'+esc(id)+'">'+(n.ozet?'Bekleyenleri aç':'Aç')+'</a></li>';}).join('')||'<li class="bos">Bekleyen hatırlatma kalmadı.</li>';
+      var s=document.getElementById('hp-sayi');if(s)s.textContent=liste.length?liste.length+' hatırlatma':'';
+      if(odakKey!==null){var geri=hpListe.querySelector('[data-hp-ac="'+odakKey+'"]')||hpListe.querySelector('[data-hp-ac]')||hp.querySelector('[data-hp-sonra]');if(geri)geri.focus();}
+      return liste;
+    }
+    function hpKapat(ertele){
+      if(!hpAcik())return;
+      if(ertele){try{localStorage.setItem(ertKey,JSON.stringify({gun:bugunTarih(),anahtarlar:hatirlatmalar().map(bildirimAnahtari)}));}catch(_){}}
+      hp.classList.add('gizli');hp.setAttribute('aria-hidden','true');document.body.classList.remove('hatirlatma-acik');
+      var geri=hpOnceki;hpOnceki=null;if(geri&&geri.focus&&geri!==document.body&&document.contains(geri))geri.focus();
+    }
+    function hpAc(sesli){
+      if(!hp)return;
+      if(!hatirlatmalar().length){hpBekliyor=null;return;}
+      /* Kayıt penceresi/görsel büyütme açıkken, kullanıcı bir alana yazarken ya da sekme arka plandayken ertelenir. */
+      if(acikPencereVar()||yaziyor(document.activeElement)||document.hidden){hpBekliyor={sesli:(hpBekliyor&&hpBekliyor.sesli)||!!sesli};return;}
+      hpBekliyor=null;hpCiz();
+      if(!hpAcik()){hpOnceki=document.activeElement;hp.classList.remove('gizli');hp.setAttribute('aria-hidden','false');document.body.classList.add('hatirlatma-acik');var ilk=hp.querySelector('[data-hp-ac]')||hp.querySelector('button');if(ilk)ilk.focus();}
+      if(sesli)sesCal(true);
+    }
+    function bekleyeniDene(){if(hpBekliyor)hpAc(hpBekliyor.sesli);}
+    if(hp){
+      hp.addEventListener('click',function(e){
+        var t=e.target;if(!t.closest)return;
+        var a=t.closest('[data-hp-ac]');if(a){e.preventDefault();hpKapat(false);api.markRead(a.getAttribute('data-hp-ac'),a.href);return;}
+        if(t.closest('[data-hp-sonra]')){hpKapat(true);return;}
+        if(t.closest('[data-hp-kapat]')){hpKapat(false);return;}
+        var o=t.closest('[data-hp-okundu]');if(o){var ids=hatirlatmalar().map(bildirimAnahtari);if(!ids.length){hpKapat(false);return;}o.disabled=true;
+          postBildirim({ids:ids},{id:ids[0]}).then(function(){var b={};ids.forEach(function(x){b[x]=1;});sonListe=sonListe.filter(function(n){return !b[bildirimAnahtari(n)];});kartTemizle(sonListe);hpKapat(false);toast(ids.length+' hatırlatma okundu sayıldı.');api.poll(true);}).catch(function(err){toast(err.message,true);}).then(function(){o.disabled=false;});return;}
+        if(t===hp)hpKapat(false);
+      });
+      /* Odak tuzağı: Tab pencere içinde döner, Esc kapatır; tuşlar alttaki sayfa kısayollarına ulaşmaz. */
+      hp.addEventListener('keydown',function(e){
+        if(e.key==='Escape'){e.preventDefault();e.stopPropagation();hpKapat(false);return;}
+        if(e.key==='Tab'){var f=focusables(hpPencere),ilk=f[0],son=f[f.length-1];if(!f.length){e.preventDefault();return;}if(e.shiftKey&&(document.activeElement===ilk||!hpPencere.contains(document.activeElement))){e.preventDefault();son.focus();}else if(!e.shiftKey&&document.activeElement===son){e.preventDefault();ilk.focus();}}
+        e.stopPropagation();
+      });
+      /* Kayıt penceresi ya da görsel büyütme kapanınca bekleyen hatırlatma penceresi açılır. */
+      if(window.MutationObserver)['modal','lightbox'].forEach(function(id){var el=document.getElementById(id);if(el)new MutationObserver(function(){if(hpBekliyor&&!acikPencereVar())setTimeout(bekleyeniDene,150);}).observe(el,{attributes:true,attributeFilter:['class']});});
+    }
+
+    /* ---- masaüstü bildirimi (izin verilmişse); tıklanınca sekmeye dönüp bağlantıyı açar ---- */
+    function masaustu(baslik,govde,etiket,id,url){
+      if(!(window.Notification&&Notification.permission==='granted'))return;
+      try{var bn=new Notification(baslik,{body:govde,tag:'kanit-'+(window.PANEL_KULLANICI||'')+'-'+etiket});bn.onclick=function(){try{window.focus();}catch(_){}try{bn.close();}catch(_){}if(id)api.markRead(id,url);else window.location.href=url;};}catch(_){}
+    }
+    function masaustuBildir(liste){
+      if(liste.length>=3){var hat=liste.filter(hatirlatmaMi).length;masaustu('Kanıt Paneli',liste.length+' yeni bildirim'+(hat?' ('+hat+' hatırlatma)':''),'toplu',null,'/bildirimler?okundu=0');return;}
+      liste.forEach(function(n){var id=bildirimAnahtari(n),kid=n.kayit_id||n.id,ozet=(kid&&!n.ozet?'#'+kid+' · ':'')+(n.personel&&!n.ozet?n.personel+' · ':'')+(n.metin||n.kim||'');masaustu('Kanıt Paneli · '+(hatirlatmaMi(n)?'Hatırlatma · ':'')+(n.proje||''),ozet||'Yeni bildirim',id,id,hedef(n));});
+    }
+
+    /* Her yoklamada çağrılır. yeniler = bu oturumda ilk kez görülen satırlar (sayfanın ilk yoklamasında boş). */
+    function yoklama(items,yeniler,ilk){
+      sonListe=items.slice();kartTemizle(items);
+      if(yeniler.length){
+        var hatYeni=yeniler.some(hatirlatmaMi);
+        /* Arka plan sekmesinde de ses ve masaüstü bildirimi hemen; kartlar sekme öne gelince. */
+        sesCal(hatYeni);masaustuBildir(yeniler);
+        if(document.hidden)bekleyenKartlar=bekleyenKartlar.concat(yeniler);else kartGoster(yeniler);
+        if(hatYeni)hpAc(false);
+      }
+      if(ilk){var h=hatirlatmalar();if(h.length&&!ertelenmis(h))hpAc(true);}
+      else if(hpAcik()){if(!hpCiz().length)hpKapat(false);}
+      else bekleyeniDene();
+    }
+    /* Arka planda biriken kartlar sekme öne gelince gösterilir (düşürülmez; bu arada okunanlar atlanır). */
+    function gorunur(){if(bekleyenKartlar.length){var b={};sonListe.forEach(function(n){b[bildirimAnahtari(n)]=1;});var liste=bekleyenKartlar.filter(function(n){return b[bildirimAnahtari(n)];});bekleyenKartlar=[];kartGoster(liste);}bekleyeniDene();}
+    return {yoklama:yoklama,gorunur:gorunur};
+  }
+  /* ===== 2.3.3: bildirim pop-up bloğu (son) ===== */
   function bildirimler(){
     var zil=document.getElementById('zil'), box=document.getElementById('bildirim-kutu'), list=document.getElementById('bildirim-liste'), count=document.getElementById('zil-sayi'), boxCount=document.getElementById('bildirim-kutu-sayi');
     if(!zil||!box||!list)return;
@@ -396,10 +571,16 @@ window.Panel = (function () {
     try{seen=JSON.parse(sessionStorage.getItem(key)||'{}');}catch(_){}
     var permission=document.getElementById('bildirim-izin'), permissionBtn=document.getElementById('bildirim-izin-btn'), clean=document.getElementById('bildirim-temizle');
     if(window.Notification&&Notification.permission==='default'&&permission)permission.classList.remove('gizli');
-    if(permissionBtn)permissionBtn.addEventListener('click',function(){window.Notification.requestPermission().then(function(){permission.classList.add('gizli');});});
+    /* 2.3.3: izin düğmesi izin 'default' kaldıkça (pencere kapatıldıysa) görünür kalır. */
+    function izinIste(){if(!window.Notification||!Notification.requestPermission)return;try{var p=Notification.requestPermission(function(){});if(p&&p.then)p.then(izinGuncelle,izinGuncelle);}catch(_){}}
+    function izinGuncelle(){if(permission)permission.classList.toggle('gizli',!(window.Notification&&Notification.permission==='default'));}
+    if(permissionBtn)permissionBtn.addEventListener('click',izinIste);
+    /* 2.3.3: "Ses" anahtarı (tarayıcı başına, varsayılan açık); açılınca kısa bir örnek ses çalar. */
+    var sesKutu=document.getElementById('bildirim-ses');
+    if(sesKutu){sesKutu.checked=sesAcik();sesKutu.addEventListener('change',function(){sesAyarla(sesKutu.checked);if(sesKutu.checked){sesHazirla();setTimeout(function(){sesCal(false);},60);}toast(sesKutu.checked?'Bildirim sesi açıldı.':'Bildirim sesi kapatıldı.');});}
     function openBox(open){box.classList.toggle('gizli',!open);zil.setAttribute('aria-expanded',String(open));if(open){poll(true);var ilk=list.querySelector('li[tabindex]')||box.querySelector('a,button');if(ilk)setTimeout(function(){if(!box.classList.contains('gizli'))ilk.focus();},0);}}
     zil.addEventListener('click',function(){openBox(box.classList.contains('gizli'));});
-    document.addEventListener('click',function(e){if(box.classList.contains('gizli'))return;if(box.contains(e.target)||zil.contains(e.target))return;openBox(false);});
+    document.addEventListener('click',function(e){if(box.classList.contains('gizli'))return;if(box.contains(e.target)||zil.contains(e.target))return;/* 2.3.3: özet karttaki "Bildirimleri aç" listeyi hemen geri kapatmasın. */if(e.target.closest&&e.target.closest('#bildirim-popuplar'))return;openBox(false);});
     document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!box.classList.contains('gizli')){openBox(false);zil.focus();}});
     if(clean)clean.addEventListener('click',function(){clean.disabled=true;postBildirim({hepsi:true},{hepsi:'1'}).then(function(){last=null;render({bildirimler:[],okunmamis:0,sayac:null,degisiklik:stamp});toast('Tüm bildirimler okundu sayıldı.');openBox(false);}).catch(function(e){toast(e.message,true);}).then(function(){clean.disabled=false;});});
     var TUR_ADLARI={soru:'Soru',yanit:'Yanıt',yorum:'Yorum',onay:'Onay',onay_kaldir:'Onay kaldırıldı',kanit:'Yeni kanıt',hatirlatma:'Hatırlatma'};
@@ -410,10 +591,10 @@ window.Panel = (function () {
       var items=data.bildirimler||[];var sig=JSON.stringify(items.map(function(n){return n.key||n.bildirim_id;}))+':'+unread;
       var LIMIT=15, shown=items.slice(0,LIMIT), kalan=Math.max(items.length,unread)-shown.length;
       if(sig!==last){last=sig;list.innerHTML=shown.map(function(n){var id=n.key||n.bildirim_id||'', label=TUR_ADLARI[n.tur]||n.etiket||'Yeni kayıt', color=(window.PROJE_RENKLERI||{})[n.proje]||'#64748b', kid=n.kayit_id||n.id, hedef=n.url||recordURL(n), kayit=n.ozet?'':(kid?'#'+esc(kid):'')+(n.personel?(kid?' · ':'')+esc(n.personel):''), kim=(n.kim&&n.kim!=='sistem')?' · '+esc(n.kim):'';return '<li class="tiklanir '+(n.okundu?'':'okunmamis')+(n.tur==='hatirlatma'?' hatirlatma':'')+'" data-notify-hedef="'+esc(hedef)+'" data-notify-id="'+esc(id)+'" tabindex="0" role="link" aria-label="'+esc(label)+(kid&&!n.ozet?' · Kayıt #'+esc(kid):'')+' — aç"><span class="rozet" style="background:'+esc(color)+';color:'+yaziRengi(color)+'">'+esc(n.proje||'—')+'</span> <b>'+esc(label)+kim+'</b>'+(kayit?'<span class="bildirim-kayit"><b>'+kayit+'</b>'+(n.kategori?' <small>'+esc(n.kategori)+'</small>':'')+'</span>':'')+'<p>'+esc(n.metin||'Kayıt hareketi')+'</p><div class="bildirim-eylem"><small>'+esc(n.zaman||n.tarih||'')+'</small><span><a class="btn kucuk ikincil" href="'+esc(hedef)+'" data-notify="'+esc(id)+'">'+(n.ozet?'Bekleyenleri aç':(n.yorum_id?'Yorumu aç':'Kaydı aç'))+'</a> <button type="button" class="btn kucuk hayalet" data-notify-okundu="'+esc(id)+'" aria-label="Okundu işaretle">Okundu</button></span></div></li>';}).join('')||'<li class="bos">Okunmamış bildirim yok.</li>';if(kalan>0)list.innerHTML+='<li class="tumu"><a class="btn kucuk hayalet" href="/bildirimler?okundu=0">'+kalan+' bildirim daha · Tümünü gör</a></li>';}
-      /* Yeni satırlar: 1-2 ise tek tek, 3 ve üzeri ise tek özet tost/masaüstü bildirimi (hatırlatma partileri 20 ayrı tost üretmesin). */
+      /* 2.3.3: yeni satırlar artık alttaki tost yerine sağ üstte pop-up kart + ses (+ izin varsa masaüstü bildirimi) olarak gösterilir. */
       var yeniler=items.filter(function(n){var id=n.key||n.bildirim_id;if(seen[id])return false;seen[id]=true;return !initial;});
-      if(yeniler.length>=3){var hat=yeniler.filter(function(n){return n.tur==='hatirlatma';}).length,ozetMetin=yeniler.length+' yeni bildirim'+(hat?' ('+hat+' hatırlatma)':'');toast(ozetMetin);if(window.Notification&&Notification.permission==='granted'){try{new Notification('Kanıt Paneli',{body:ozetMetin,tag:'kanit-'+(window.PANEL_KULLANICI||'')+'-toplu'});}catch(_){}}setChangeStrip(true);}
-      else yeniler.forEach(function(n){var id=n.key||n.bildirim_id,kid=n.kayit_id||n.id,ozet=(kid&&!n.ozet?'#'+kid+' · ':'')+(n.personel&&!n.ozet?n.personel+' · ':'')+(n.metin||n.kim||'');toast((n.tur==='hatirlatma'?'Hatırlatma: ':'Yeni bildirim: ')+(n.proje||'')+' · '+ozet);if(window.Notification&&Notification.permission==='granted'){try{new Notification('Kanıt Paneli · '+(n.proje||''),{body:ozet||'Yeni bildirim',tag:'kanit-'+(window.PANEL_KULLANICI||'')+'-'+id});}catch(_){}}setChangeStrip(true);});
+      if(yeniler.length)setChangeStrip(true);
+      if(popup)popup.yoklama(items,yeniler,initial);
       try{sessionStorage.setItem(key,JSON.stringify(seen));}catch(_){}
       if(data.degisiklik&&stamp&&stamp!==data.degisiklik)document.dispatchEvent(new CustomEvent('kp:degisti',{detail:data}));
       if(data.degisiklik)stamp=data.degisiklik;initial=false;
@@ -423,9 +604,12 @@ window.Panel = (function () {
       /* 2.3.1: bildirimin kendisine (düğme dışı alan) tıklamak da okundu işaretleyip hedefe gider; telefonda geniş dokunma alanı. */
       if(e.target.closest&&e.target.closest('a,button'))return;var li=e.target.closest&&e.target.closest('li[data-notify-hedef]');if(li){e.preventDefault();markRead(li.getAttribute('data-notify-id'),li.getAttribute('data-notify-hedef'));}});
     list.addEventListener('keydown',function(e){if(e.key!=='Enter'&&e.key!==' ')return;var li=e.target;if(!li||!li.getAttribute||!li.getAttribute('data-notify-hedef'))return;e.preventDefault();markRead(li.getAttribute('data-notify-id'),li.getAttribute('data-notify-hedef'));});
-    function schedule(){clearTimeout(timer);timer=setTimeout(poll,10000);}
-    function poll(force){if(document.hidden&&!force){schedule();return;}if(running)return;running=true;fetch('/bildirim.json',{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}}).then(function(r){if(r.status===401){return r.json().catch(function(){return {};}).then(function(d){oturumDustu(d&&d.hata,d&&d.giris);return null;});}return r.ok?r.json():null;}).then(function(d){if(d)render(d);}).catch(function(){}).then(function(){running=false;schedule();});}
-    document.addEventListener('visibilitychange',function(){if(!document.hidden){clearTimeout(timer);poll();}});poll();
+    /* 2.3.3: arka plan sekmesi de yoklanır (10 sn yerine 30 sn); window.KP_YOKLAMA_MS testler için aralığı değiştirir. */
+    var ARALIK=(+window.KP_YOKLAMA_MS>0)?+window.KP_YOKLAMA_MS:10000;
+    function schedule(){clearTimeout(timer);timer=setTimeout(poll,document.hidden?ARALIK*3:ARALIK);}
+    function poll(force){if(running)return;running=true;fetch('/bildirim.json',{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}}).then(function(r){if(r.status===401){return r.json().catch(function(){return {};}).then(function(d){oturumDustu(d&&d.hata,d&&d.giris);return null;});}return r.ok?r.json():null;}).then(function(d){if(d)render(d);}).catch(function(){}).then(function(){running=false;schedule();});}
+    var popup=bildirimPopup({turAdlari:TUR_ADLARI,recordURL:recordURL,markRead:markRead,openBox:openBox,poll:poll,izinIste:izinIste});
+    document.addEventListener('visibilitychange',function(){if(!document.hidden){clearTimeout(timer);if(popup)popup.gorunur();poll();}});poll();
   }
   function menu(){
     var header=document.getElementById('ust-menu');if(!header)return;
