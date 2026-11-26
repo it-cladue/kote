@@ -1291,6 +1291,7 @@ def arsiv_tara(ayar, conn, cozucu):
 
 # ------------------------------------------------------------------ Toplu Gyazo ön-indirme (CLI: gyazo-onbellekle)
 _GYAZO_SEBEP = {404: "Gyazo'da görsel yok (404)", 410: "Gyazo görseli kaldırmış (410)", 403: "Gyazo erişimi reddetti (403)",
+                503: "Gyazo'da görsel yok ya da yanıt vermedi (HTTP 503; silinmiş olabilir)",
                 429: "Gyazo hız sınırı (429)", "hata": "ağ hatası / zaman aşımı",
                 "erisim": "bağlantı kurulamadı (DNS / bağlantı reddi / zaman aşımı)", "ic_adres": "iç ağ adresine çözülüyor (güvenlik nedeniyle indirilmedi)",
                 "izinsiz": "izin verilmeyen adrese yönlendirme (güvenlik nedeniyle izlenmedi)", "zaman_asimi": "indirme 30 sn'de bitmedi"}
@@ -1363,7 +1364,7 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
                     r.close()
                 except Exception:
                     pass
-            log("Gyazo erişimi: tamam (deneme isteği HTTP %s)" % durum_kodu)
+            log("Gyazo erişimi: ulaşıldı (deneme isteği HTTP %s; var olmayan kimlik için 503/404 normaldir)" % durum_kodu)
         except Exception as hata:
             sayac["bitis_nedeni"] = "erisim"
             sayac["durduruldu"] = ("Gyazo'ya ulaşılamıyor (%s: %s). Sunucunun dış HTTPS erişimini kontrol edin: "
@@ -1487,8 +1488,8 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
             _yok_sil(kimlik, tur)
             yol, durum = _dene(k, tur)
             if not yol and (durum in ("hata", "erisim") or (isinstance(durum, int) and durum >= 500)):
-                log("%d/%d %s… geçici hata (%s); 5 sn sonra bir kez daha" % (i, toplam, etiket, _gyazo_sebep(durum, servis)))
-                uyku(5)
+                log("%d/%d %s… geçici hata (%s); 1 sn sonra bir kez daha" % (i, toplam, etiket, _gyazo_sebep(durum, servis)))
+                uyku(1)
                 _yok_sil(kimlik, tur)
                 yol, durum = _dene(k, tur)
             for bekle in GYAZO_TOPLU_429_BEKLEME:

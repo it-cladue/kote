@@ -142,7 +142,7 @@ def test_gecici_hata_bir_kez_daha_denenir_ve_en_cok_sinirlar(ortam):
     c._http = Kopuk({kimlik(1): [SahteYanit(200, jpeg())]})
     uykular = []
     r = gorsel.gyazo_toplu_indir(conn, c, ayar, en_cok=1, uyku=uykular.append)
-    assert (r["baglanti"], r["indirilen"], r["acilamayan"]) == (1, 1, 0) and uykular == [5]
+    assert (r["baglanti"], r["indirilen"], r["acilamayan"]) == (1, 1, 0) and uykular == [1]
     assert (Path(c.gyazo_klasor) / (kimlik(1) + ".jpg")).is_file()
 
 

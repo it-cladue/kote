@@ -73,7 +73,7 @@ def test_on_kontrol_erisim_yoksa_hic_denemez(ortam):
     # ön kontrol geçerse (404 bile) indirme sürer
     c._http = SahteOturum({"0" * 32: [SahteYanit(404)], kimlik(1): [SahteYanit(200, jpeg())]})
     r2 = gorsel.gyazo_toplu_indir(conn, c, ayar, on_kontrol=True, en_cok=1, uyku=lambda s: None, log=loglar.append)
-    assert r2["indirilen"] == 1 and any("Gyazo erişimi: tamam" in m for m in loglar)
+    assert r2["indirilen"] == 1 and any("Gyazo erişimi: ulaşıldı" in m for m in loglar)
 
 
 def test_cli_pencere_disinda_hic_calismaz(tmp_path):
