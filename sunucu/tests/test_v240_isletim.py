@@ -457,6 +457,8 @@ class panel_istek:
 
 def test_ayarlar_sayfasi_sahip_duzenler_superadmin_salt_okur(web, monkeypatch):
     c, a = web
+    from app import kullanicilar
+    kullanicilar.guncelle(a, 'testadmin', yetki='sahip')  # 2.4.0 (B1): ayarları yalnız sahip değiştirir
     login(c)
     html = c.get('/yonetim/ayarlar').get_data(as_text=True)
     for grup in ('Hatırlatmalar', 'Bildirimler', 'Görünürlük', 'API', 'Görseller'):
@@ -541,6 +543,8 @@ def test_tarayicida_sistem_durumu_ayarlar_yedekler(web, tmp_path):
     from waitress.server import create_server
     from app import panel
     c, a = web
+    from app import kullanicilar
+    kullanicilar.guncelle(a, 'testadmin', yetki='sahip')  # 2.4.0 (B1): ayarlar sayfasını yalnız sahip düzenler
     insert(a)
     yedek.yedek_al(a, 'testadmin')
     con = db.baglan(a['DB'])

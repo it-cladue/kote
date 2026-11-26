@@ -20,6 +20,7 @@ Kurallar (ayarlar .env'den, settings.AYAR):
   Yaş hesabı sunucunun yerel saatiyle yapılır (db.simdi() ile aynı saat).
 - Gün sonu: İstanbul saatiyle GUN_SONU_SAAT (18:00) geçince, İstanbul günü başına bir kez, yöneticilere (ya da GUN_SONU_ALICILAR)
   'gun-sonu:<YYYY-AA-GG>' özeti: kaç kayıt onaylanmadı, proje dağılımı, bugün eklenen/onaylanan, 2 saatten uzun bekleyen.
+  2.4.0: varsayılan alıcılar yöneticiler + onay (kt) yetkisi olan herkes; her alıcı kendi onay projelerini görür.
 
 2.3.8 — Bekleyen özeti (ayrıntı: _bekleyen_ozet_adimi):
 - İstanbul saatiyle BEKLEYEN_OZET_PENCERE (08:00-20:00) içinde, pencere başından itibaren BEKLEYEN_OZET_SAAT (2) saatte bir
@@ -159,7 +160,10 @@ def ayarlar(ayar=None, conn=None):
                 gizle=str(ayar.get('ONAYSIZ_GORUNUM', 'uyar') or '').strip().lower() == 'gizle',
                 ozet_saat=oku('BEKLEYEN_OZET_SAAT', VARSAYILAN_OZET_SAAT, en_az=0, en_cok=EN_COK_OZET_SAAT),
                 ozet_pencere=_ozet_penceresi(ayar.get('BEKLEYEN_OZET_PENCERE', VARSAYILAN_OZET_PENCERE)),
-                ozet_yonetici=_evet(ayar.get('BEKLEYEN_OZET_YONETICI', '1')))
+                ozet_yonetici=_evet(ayar.get('BEKLEYEN_OZET_YONETICI', '1')),
+                # 2.4.0: Kayıtlar "Bekleme" rozeti turuncu eşiği (saat) ve onay bildirimleri (BILDIRIM_ONAY=1 iken diğer sorumlulara).
+                bekleme_uyari_saat=oku('BEKLEME_UYARI_SAAT', 2, en_cok=EN_COK_SAAT),
+                bildirim_onay=_evet(ayar.get('BILDIRIM_ONAY', '0'), varsayilan=False))
 
 
 def _ekle(conn, alici, kayit_id, proje, olay, metin, en_cok=300, zaman=None):
@@ -401,10 +405,16 @@ def gun_sonu_metni(gun, toplam, dagilim, eklenen, onaylanan, uzun, saat, en_cok_
     return metin + '.'
 
 
+def _onay_yetkili_mi(yk):
+    return any(yetki.izin(yk, p, 'kt') for p in yk.get('projeler', {}))
+
+
 def _alicilar(conn, a):
-    """Varsayılan: aktif yöneticiler (süperadmin). GUN_SONU_ALICILAR doluysa bu listenin YERİNE o adlar (yok/pasif olan atlanır)."""
+    """2.4.0 varsayılan: aktif yöneticiler (süperadmin) + en az bir projede onay (kt) yetkisi olan aktif kullanıcılar; her biri
+    yalnız onay yetkisi olan projelerinin özetini alır (yönetici: tüm projeler). GUN_SONU_ALICILAR doluysa bu listenin YERİNE
+    o adlar (yok/pasif olan atlanır; bu adlara eskisi gibi görebildikleri projelerin özeti gider)."""
     if a['gun_sonu_alicilar'] is None:
-        return [(ad, yk) for ad, yk in _kullanicilar(conn) if yk.get('admin')]
+        return [(ad, yk) for ad, yk in _kullanicilar(conn) if yk.get('admin') or _onay_yetkili_mi(yk)]
     kayitli = {u['kullanici_adi']: u for u in conn.execute('SELECT kullanici_adi,yetki,aktif FROM panel_kullanicilari')}
     sonuc = []
     for ad in a['gun_sonu_alicilar']:
@@ -464,6 +474,8 @@ def _gun_sonu_adimi(conn, a, an, yerel_tz=None, tz=None, zorla=False):
         tum = set(bekleyen) | set(eklenen) | set(onaylanan)
         for ad, yk in alicilar:
             gorur = [p for p in tum if yetki.izin(yk, p, 'oku')]
+            if a['gun_sonu_alicilar'] is None and not yk.get('admin'):
+                gorur = [p for p in gorur if yetki.izin(yk, p, 'kt')]  # 2.4.0: varsayılan alıcı yalnız onaylayabildiği projeleri görür
             if a.get('gizle'):
                 # ONAYSIZ_GORUNUM=gizle: kt yetkisi olmayan projelerin onaysız kayıtları bu kişiye hiç gösterilmez;
                 # özet de yalnız onay yetkisi olan projeleri sayar (yoksa satır zilde görünmez, yazılmaz).

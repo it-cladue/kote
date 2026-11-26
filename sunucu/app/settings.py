@@ -75,6 +75,11 @@ def settings():
         # 2.3.6 — Panelden eklenen kanıtların kategorisi (varsayılan SMS). Katalogda yoksa açılışta oluşturulur
         # (etkin, tüm etkin projelere bağlı). Asıl okuma katalog.panel_kategori_etiketi() içindedir; burası bilgi amaçlıdır.
         'PANEL_EKLEME_KATEGORI': (os.getenv('PANEL_EKLEME_KATEGORI', '') or '').strip() or 'SMS',
+        # 2.4.0 — Onay / onay kaldırma diğer proje sorumlularına zil bildirimi olarak da gitsin mi (1/0; varsayılan 0 = gitmez;
+        # işlem geçmişine her durumda yazılır) ve Kayıtlar'daki "Bekleme" rozetinin turuncuya döndüğü süre (saat; varsayılan 2).
+        # Rozet HATIRLATMA_GUN gün dolunca kırmızı olur. Doğrulama hatirlatma.ayarlar() içinde.
+        'BILDIRIM_ONAY': os.getenv('BILDIRIM_ONAY', '0'),
+        'BEKLEME_UYARI_SAAT': _pozitif('BEKLEME_UYARI_SAAT', 2),
     }
 
 AYAR = settings()

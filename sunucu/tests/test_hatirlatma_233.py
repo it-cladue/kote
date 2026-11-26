@@ -152,20 +152,23 @@ def test_gun_sonu_saat_sayilar_yinelenmez_ve_ertesi_gun(web):
     r = uret(a, datetime(2026, 11, 26, 17, 59, 59))
     assert r['gun_sonu']['durum'] == 'saati gelmedi' and r['gun_sonu']['istanbul_saati'] == '17:59' and gun_sonu_satirlari(a) == []
     r = uret(a, datetime(2026, 11, 26, 18, 0, 5))
-    assert r['gun_sonu']['bildirim'] == 2 and r['gun_sonu']['durum'] == 'gönderildi' and r['gun_sonu']['tarih'] == '2026-11-26'
+    # 2.4.0: varsayılan alıcılar yöneticiler + onay yetkisi olanlar; lider yalnız onaylayabildiği OF'u görür.
+    assert r['gun_sonu']['bildirim'] == 3 and r['gun_sonu']['durum'] == 'gönderildi' and r['gun_sonu']['tarih'] == '2026-11-26'
     satir = gun_sonu_satirlari(a)
-    assert [x['kullanici_adi'] for x in satir] == ['testadmin', 'yonetici2']   # yalnız yöneticiler; lider almaz
+    assert sorted(x['kullanici_adi'] for x in satir) == ['lider', 'testadmin', 'yonetici2']
     beklenen = 'Gün sonu 26.11.2026: 6 kayıt onaylanmadı (OF 3, PA 2, GA 1). Bugün eklenen 2, bugün onaylanan 1, 2 saatten uzun bekleyen 5.'
     for x in satir:
-        assert x['olay'] == 'gun-sonu:2026-11-26' and x['metin'] == beklenen and x['kim'] == 'sistem'
+        assert x['olay'] == 'gun-sonu:2026-11-26' and x['kim'] == 'sistem'
         assert x['proje'] == 'OF' and x['kayit_id'] == ids['of_eski']          # en kalabalık proje, en eski bekleyen kaydı
+        assert x['metin'] == (beklenen if x['kullanici_adi'] != 'lider' else
+                              'Gün sonu 26.11.2026: 3 kayıt onaylanmadı (OF 3). Bugün eklenen 2, bugün onaylanan 0, 2 saatten uzun bekleyen 2.')
     assert uret(a, datetime(2026, 11, 26, 18, 30))['gun_sonu']['bildirim'] == 0
-    assert uret(a, datetime(2026, 11, 26, 23, 59))['gun_sonu']['durum'] == 'bugün zaten gönderildi' and len(gun_sonu_satirlari(a)) == 2
+    assert uret(a, datetime(2026, 11, 26, 23, 59))['gun_sonu']['durum'] == 'bugün zaten gönderildi' and len(gun_sonu_satirlari(a)) == 3
     # Ertesi gün 18:00'dan önce yok, sonra yeni satır.
     assert uret(a, datetime(2026, 11, 27, 9, 0))['gun_sonu']['bildirim'] == 0
     r = uret(a, datetime(2026, 11, 27, 18, 4))
-    assert r['gun_sonu']['bildirim'] == 2
-    yeni = [x for x in gun_sonu_satirlari(a) if x['olay'] == 'gun-sonu:2026-11-27']
+    assert r['gun_sonu']['bildirim'] == 3
+    yeni = [x for x in gun_sonu_satirlari(a) if x['olay'] == 'gun-sonu:2026-11-27' and x['kullanici_adi'] != 'lider']
     assert len(yeni) == 2 and yeni[0]['metin'].startswith('Gün sonu 27.11.2026: 6 kayıt onaylanmadı (OF 3, PA 2, GA 1). Bugün eklenen 0, bugün onaylanan 0')
 
 

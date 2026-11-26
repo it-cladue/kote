@@ -228,7 +228,7 @@ def test_uyar_modu_rozet_serit_arama_uyarisi_ve_cikti(web):
     assert 'onaylı kanıt yok' not in c.get('/kayitlar?durum=hepsi&q=PA-1').data.decode()
     # Çıktı: "Takım lideri onayı" sütunu (Onaylı / YOK), özet satırı ve dosya adında onaysız sayısı.
     r = c.get('/disa-aktar.xlsx?durum=hepsi&proje=OF'); assert r.status_code == 200
-    assert 'kanit-kayitlari-ONAYSIZ-1.xlsx' in r.headers['Content-Disposition']
+    assert 'kanit-kayitlari-OF-hepsi-ONAYSIZ-1.xlsx' in r.headers['Content-Disposition']  # 2.4.0: ad süzgeçlerden kurulur
     wb = openpyxl.load_workbook(io.BytesIO(r.data)); ws = wb['Kayıtlar']; hdr = [x.value for x in ws[1]]
     assert hdr.index('Takım lideri onayı') == hdr.index('Durum') + 1
     satirlar = {row[hdr.index('Kayıt ID')]: row[hdr.index('Takım lideri onayı')] for row in ws.iter_rows(min_row=2, values_only=True)}
@@ -236,7 +236,7 @@ def test_uyar_modu_rozet_serit_arama_uyarisi_ve_cikti(web):
     ozet = list(wb['Proje özeti'].iter_rows(values_only=True))
     assert ozet[0] == ('Proje', 'Kayıt', 'KT onaylı', 'KT bekleyen') and ozet[1] == ('OF', 2, 1, 1) and ozet[-1][0].startswith('Takım lideri onayı YOK') and ozet[-1][1] == 1
     # Yalnız onaylı seçiminde dosya adı normal; etiketler istenen adlarla.
-    assert c.get('/disa-aktar.xlsx?durum=onayli&proje=OF').headers['Content-Disposition'].endswith('kanit-kayitlari.xlsx')
+    assert c.get('/disa-aktar.xlsx?durum=onayli&proje=OF').headers['Content-Disposition'].endswith('kanit-kayitlari-OF-onayli.xlsx')
     form = c.get('/disa-aktar').data.decode()
     for etiket in ('>Hepsi<', '>Onaylılar<', '>Onaysızlar (onay bekleyen)<', '>Silinenler<'):
         assert etiket in form, etiket
@@ -254,7 +254,7 @@ def test_uyar_modu_kt_yetkili_kullanici_etkilenmez(web):
     assert 'ONAY YOK' not in html and 'onaylı kanıt yok' not in html and 'Bekliyor</span>' in html
     assert c.get('/kayit/%d' % onaysiz, headers=XHR).json['onay_uyari'] is False
     r = c.get('/disa-aktar.xlsx?durum=hepsi&proje=OF')
-    assert r.headers['Content-Disposition'].endswith('kanit-kayitlari.xlsx')
+    assert r.headers['Content-Disposition'].endswith('kanit-kayitlari-OF-hepsi.xlsx')
     hdr = [x.value for x in openpyxl.load_workbook(io.BytesIO(r.data))['Kayıtlar'][1]]; assert 'Takım lideri onayı' in hdr and 'KT' not in hdr and len(hdr) == 29  # eski KT sütununun yerini aldı
 
 
@@ -285,7 +285,7 @@ def test_gizle_modu_liste_arama_ayrinti_gorsel_cikti_profil(web):
     # Çıktı: onaysız satır yok, bekleyen seçeneği yok, not var; dosya adı normal.
     r = c.get('/disa-aktar.xlsx?durum=hepsi&proje=OF'); ws = openpyxl.load_workbook(io.BytesIO(r.data))['Kayıtlar']; hdr = [x.value for x in ws[1]]
     ids = [row[hdr.index('Kayıt ID')] for row in ws.iter_rows(min_row=2, values_only=True)]
-    assert ids == sorted(ids) and onaysiz not in ids and tg_onaysiz not in ids and onayli in ids and r.headers['Content-Disposition'].endswith('kanit-kayitlari.xlsx')
+    assert ids == sorted(ids) and onaysiz not in ids and tg_onaysiz not in ids and onayli in ids and r.headers['Content-Disposition'].endswith('kanit-kayitlari-OF-onayli.xlsx')  # gizle: durum onaylıya sabit
     r = c.get('/disa-aktar.xlsx?durum=bekleyen&proje=OF'); ws = openpyxl.load_workbook(io.BytesIO(r.data))['Kayıtlar']
     assert [row[0] for row in ws.iter_rows(min_row=2, values_only=True)] == sorted([onayli, tg_onayli])  # bekleyen isteği onaylıya sabitlenir
     form = c.get('/disa-aktar').data.decode(); assert 'Onay bekleyen kayıtlar size gösterilmez' in form and 'value="bekleyen"' in form  # PA'da kt var → seçenekler kalır
@@ -350,7 +350,8 @@ def test_yorum_bildirimi_yorum_id_ve_hedef_baglanti(web):
 
 def test_bildirim_gecmisi_filtre_sql_ve_onay_bildirimi_hedefi(web):
     from app import panel, bildirim_gecmisi
-    c, a = web; account(a, 'ofadmin', 'OF:oku,kt'); login(c); kid = seed(a)
+    c, a = web; a['BILDIRIM_ONAY'] = '1'  # 2.4.0: onay bildirimi isteğe bağlı (varsayılan kapalı)
+    account(a, 'ofadmin', 'OF:oku,kt'); login(c); kid = seed(a)
     assert c.post('/kayit/%d/kt' % kid, data={'csrf': csrf(c)}).json['ok']
     logout(c); login(c, 'ofadmin')
     onay = next(x for x in c.get('/bildirim.json').json['bildirimler'] if x['tur'] == 'onay')

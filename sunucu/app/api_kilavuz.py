@@ -19,7 +19,7 @@ UCLAR = (
      'sayfa (1…), adet (1–500, varsayılan 100)', ''),
     ('GET', '/api/v1/kayit/<id>', 'Tek kayıt ve yorumları', '—', ''),
     ('GET', '/api/v1/personel-ozet', 'Personel (ya da ekleyen) × kategori (ya da tip) sayım tablosu',
-     'proje (tek), donem (bugun | hafta | ay | son30 | hepsi | ozel), tarih1, tarih2, durum, grup (personel | ekleyen), '
+     'proje (tek), donem (bugun | hafta | gecen_hafta | ay | gecen_ay | son30 | hepsi | ozel), tarih1, tarih2, durum, grup (personel | ekleyen), '
      'sutun (kategori | tip)', ''),
     ('GET', '/api/v1/gorsel/<id>', 'Kanıt görseli (dosya olarak)', 'ikinci=1 (ikinci görsel)', 'Görsel indirme'),
     ('POST', '/api/v1/sorgu', 'Salt okunur SQL (yalnız tek SELECT; en çok 1000 satır, 5 saniye)',

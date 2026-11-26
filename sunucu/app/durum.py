@@ -240,7 +240,8 @@ def ozet(rows):
 
 def _alicilar(conn):
     """Sahip / süperadminler (etkin). B1 'sahip' rolünü eklerse yetki metni 'admin' olmayan sahipler de buraya eklenmeli."""
-    return [r[0] for r in conn.execute("SELECT kullanici_adi FROM panel_kullanicilari WHERE aktif=1 AND yetki='admin' ORDER BY kullanici_adi")]
+    # 2.4.0 (B1): 'sahip' rolü de süperadmindir; sistem uyarıları ikisine de gider.
+    return [r[0] for r in conn.execute("SELECT kullanici_adi FROM panel_kullanicilari WHERE aktif=1 AND yetki IN ('admin','sahip') ORDER BY kullanici_adi")]
 
 
 def uyari_uret(conn, rows, simdi=None):

@@ -133,7 +133,7 @@ def test_project_chips_and_empty_selection_means_all(web):
 
 # ---------------------------------------------------------------- toplu onay
 def test_bulk_approve_rules_counts_and_permissions(web):
-    c, a = web; account(a, 'ofadmin', 'OF:oku,kt'); account(a, 'reader', 'OF:oku'); login(c)
+    c, a = web; a['BILDIRIM_ONAY'] = '1'; account(a, 'ofadmin', 'OF:oku,kt'); account(a, 'reader', 'OF:oku'); login(c)
     r1 = seed(a); r2 = insert(a, personel='B'); already = insert(a, personel='C', kt=1); gone = insert(a, personel='D', silindi=1); pa = seed(a, 'PA', 'pa:3')
     r = c.post('/kayitlar/toplu-kt', data={'csrf': csrf(c), 'ids': [r1, r2, already, gone, 424242], 'deger': '1'})
     assert r.status_code == 200

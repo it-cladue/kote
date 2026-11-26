@@ -38,6 +38,13 @@ window.Panel = (function () {
     t.className='toast hata';clearTimeout(toastTimer);toastTimer=setTimeout(function(){t.className='toast gizli';t.textContent='';},12000);
     t.querySelector('button').addEventListener('click',function(){clearTimeout(toastTimer);t.className='toast gizli';t.textContent='';fn();});
   }
+  /* 2.4.0: "Geri al" düğmeli bilgi tostu (Onayla ve sonraki); ms sonra kendiliğinden kapanır. */
+  function toastGeriAl(message,label,fn,ms){
+    var t=document.getElementById('toast');if(!t){toast(message);return;}
+    t.innerHTML=esc(message)+' <button type="button" data-toast-geri style="margin-left:10px;padding:4px 10px;border:1px solid rgba(255,255,255,.6);border-radius:6px;background:#fff;color:#0f172a;font:inherit;font-weight:700;cursor:pointer">'+esc(label)+'</button>';
+    t.className='toast';clearTimeout(toastTimer);toastTimer=setTimeout(function(){t.className='toast gizli';t.textContent='';},ms||5000);
+    t.querySelector('button').addEventListener('click',function(){clearTimeout(toastTimer);t.className='toast gizli';t.textContent='';fn();});
+  }
   var ISLEM_ADLARI={onayla:'Onaylandı',onay_kaldir:'Onay kaldırıldı',duzenle:'Düzenlendi',sil:'Silindi',geri_al:'Geri alındı',yorum_ekle:'Yorum eklendi',soru_yonelt:'Soru yöneltildi',yanit_ekle:'Yanıt eklendi',gyazo_istek:'Gyazo dönüşümü istendi',arsiv_esle:'Arşiv görseli eşlendi',ice_aktar:'İçe aktarıldı',telegram_kayit:'Telegram ile eklendi',bot_kayit:'Telegram ile eklendi',panel_kanit_ekle:'Panelden eklendi'};
   function islemAdi(code){return ISLEM_ADLARI[code]||String(code||'').replace(/_/g,' ');}
 
@@ -192,7 +199,7 @@ window.Panel = (function () {
   function kayitSayfasi(durumFiltresi) {
     var sayfa=document.getElementById('kayit-sayfa'),modal=document.getElementById('modal'); if(!modal)return;
     var dialog=modal.querySelector('.modal-icerik'),form=document.getElementById('m-duzenle'),yf=document.getElementById('m-yorum-form'),formHata=document.getElementById('m-duzenle-hata');
-    var acikId=null,acikKayit=null,acan=null,refreshRunning=false,openSerial=0,gorseller=[],gorselIdx=0,lightboxBekliyor=false;
+    var acikId=null,acikKayit=null,kayitYukleniyor=false,acan=null,refreshRunning=false,openSerial=0,gorseller=[],gorselIdx=0,lightboxBekliyor=false;
     /* 2.3.1 derin bağlantı: ?ac=<kayıt>&yorum=<yorum> → modal açılır, Konuşma bölümünde ilgili yorum kaydırılıp 3 sn vurgulanır (bir kez). */
     var ilkParam=new URLSearchParams(window.location.search),ilkAc=ilkParam.get('ac')||(sayfa&&sayfa.getAttribute('data-acik'))||'',yorumParam=ilkParam.get('yorum')||(sayfa&&sayfa.getAttribute('data-yorum'))||'',bekleyenYorum=/^\d{1,10}$/.test(yorumParam)?yorumParam:null;
     var lb=lightboxKur(document.getElementById('lightbox'));
@@ -242,7 +249,19 @@ window.Panel = (function () {
       if(modal.classList.contains('gizli'))return;
       if(e.key==='Escape'){e.preventDefault();closeRecord();return;}
       if(e.key==='Tab'){var items=focusables(dialog),first=items[0],last=items[items.length-1];if(!items.length)return;if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}return;}
-      if((e.key==='ArrowLeft'||e.key==='ArrowRight')&&!yaziAlani(e.target)&&!formOpen()){e.preventDefault();step(e.key==='ArrowLeft'?-1:1);}
+      if((e.key==='ArrowLeft'||e.key==='ArrowRight')&&!yaziAlani(e.target)&&!formOpen()){e.preventDefault();step(e.key==='ArrowLeft'?-1:1);return;}
+      /* 2.4.0 kısayollar: O onayla ve sonraki, S soru sor, D düzenle, Delete sil, ? yardım. Yazı alanında (input/textarea/select) çalışmaz. */
+      if(e.ctrlKey||e.metaKey||e.altKey||yaziAlani(e.target))return;
+      var tus=e.key;
+      if(tus==='?'){e.preventDefault();kisayolYardim();return;}
+      if(tus==='u'||tus==='U'){var gb=document.querySelector('#toast:not(.gizli) button[data-toast-geri]');if(gb){e.preventDefault();gb.click();return;}}  /* "Geri al" tostu açıkken U: modalın odak kapanı tosttaki düğmeye Tab ile ulaşılmasına izin vermez */
+      if(!acikKayit)return;
+      /* Sıradaki kayıt yüklenirken eski kaydın düğmeleri ekranda durur: kısayollar sessizce yok sayılır (yanlış kayıt onaylanmaz, "Geri al" tostu silinmez). */
+      if(kayitYukleniyor||onaySuruyor||String(acikKayit.id)!==String(acikId)){if(/^[oOsSdD]$/.test(tus)||tus==='Delete')e.preventDefault();return;}
+      if(tus==='o'||tus==='O'){e.preventDefault();if(e.repeat||formOpen())return;var b=islemDugmesi('kt-sonraki');if(b)b.click();else bilgiToast(acikKayit.kt?'Bu kayıt zaten onaylı.':acikKayit.silindi?'Silinmiş kayıt onaylanamaz.':'Bu projede onay yetkiniz yok.');return;}
+      if(tus==='s'||tus==='S'){e.preventDefault();if(yf.classList.contains('gizli')){bilgiToast('Bu kayıtta soru sorma yetkiniz yok.');return;}var kutu=document.getElementById('m-konusma-kutu');if(kutu)kutu.open=true;var alan=yf.elements.yorum;try{alan.scrollIntoView({block:'center'});}catch(_){}alan.focus();return;}
+      if(tus==='d'||tus==='D'){e.preventDefault();if(formOpen())return;var d=islemDugmesi('duzenle');if(d)d.click();else bilgiToast('Bu kayıtta düzenleme yetkiniz yok.');return;}
+      if(tus==='Delete'){e.preventDefault();var sl=islemDugmesi('sil');if(sl)sl.click();else bilgiToast('Bu kayıtta silme yetkiniz yok.');return;}
     });
     form.addEventListener('submit',function(e){e.preventDefault();saveEdit();});
     document.getElementById('m-duzenle-iptal').addEventListener('click',function(){form.classList.add('gizli');formHata.classList.add('gizli');});
@@ -272,18 +291,21 @@ window.Panel = (function () {
     function editDirty(){if(!acikKayit||!formOpen())return false;return ['personel','uye_id','ana_uye_id','lead_id','tip','kategori','aciklama'].some(function(n){return String(form.elements[n].value||'').trim()!==String(acikKayit[n]||'').trim();});}
     function leaveOk(){return !editDirty()||confirm('Kaydedilmemiş düzenleme var. Kaydetmeden devam ederseniz değişiklikler kaybolur. Yine de devam edilsin mi?');}
     var gyazoWatchSerial=0;
-    function closeRecord(force){if(!force&&!leaveOk())return;if(lb)lb.close();saveDraft();gyazoWatchSerial++;modal.classList.add('gizli');modal.setAttribute('aria-hidden','true');document.body.style.overflow='';var kapanan=acikId;acikId=null;acikKayit=null;urlAc(null);
+    function closeRecord(force){if(!force&&!leaveOk())return;if(lb)lb.close();saveDraft();gyazoWatchSerial++;modal.classList.add('gizli');modal.setAttribute('aria-hidden','true');document.body.style.overflow='';var kapanan=acikId;acikId=null;acikKayit=null;kayitYukleniyor=false;urlAc(null);
       /* Bildirimden (derin bağlantı) açılan pencerede tetikleyici yok: odak kaybolmasın, ilgili satıra ya da sonuç alanına dönsün. */
       var hedef=(acan&&typeof acan.focus==='function')?acan:(cardOf(kapanan)||resultRoot()||document.querySelector('h1'));
       if(hedef){if(!acan&&!hedef.hasAttribute('tabindex'))hedef.setAttribute('tabindex','-1');try{hedef.focus({preventScroll:true});}catch(_){hedef.focus();}}}
     function openRecord(id,trigger,buyut){
-      var serial=++openSerial;if(acikId&&acikId!==id){saveDraft();yf.reset();resetReply();}
-      acikId=id;if(trigger)acan=trigger;lightboxBekliyor=!!buyut;urlAc(id);
+      var serial=++openSerial;if(acikId&&acikId!==id){saveDraft();yf.reset();resetReply();}onizlemeKapat();
+      acikId=id;kayitYukleniyor=true;if(trigger)acan=trigger;lightboxBekliyor=!!buyut;urlAc(id);
+      Array.prototype.forEach.call(document.querySelectorAll('#m-butonlar button'),function(b){b.disabled=true;});  /* yüklenirken eski kaydın düğmelerine tıklanamaz */
       modal.classList.remove('gizli');modal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';form.classList.add('gizli');formHata.classList.add('gizli');
       document.getElementById('m-alanlar').innerHTML='<div class="genis"><dt>Yükleniyor</dt><dd>Kayıt ayrıntısı getiriliyor…</dd></div>';
       if(!lb||!lb.isOpen())modal.querySelector('.modal-kapat').focus();
-      kayitIstek('/kayit/'+id).then(function(k){if(acikId===id&&serial===openSerial)showRecord(k);}).catch(function(e){if(serial!==openSerial)return;if(oturumKontrol(e))return;modalHata(id,e);if(e.status===409)toastEylem(e.message,'Yenile',function(){openRecord(id,acan);});else toast(e.message,true);if(lb&&lb.isOpen())lb.open([],0,{baslik:'Kayıt #'+id,oncekiVar:neighbours().prev,sonrakiVar:neighbours().next});});
+      kayitIstek('/kayit/'+id).then(function(k){if(acikId===id&&serial===openSerial){kayitYukleniyor=false;showRecord(k);}}).catch(function(e){if(serial!==openSerial)return;kayitYukleniyor=false;if(oturumKontrol(e))return;modalHata(id,e);if(e.status===409)toastEylem(e.message,'Yenile',function(){openRecord(id,acan);});else toast(e.message,true);if(lb&&lb.isOpen())lb.open([],0,{baslik:'Kayıt #'+id,oncekiVar:neighbours().prev,sonrakiVar:neighbours().next});});
     }
+    /* 2.4.0: başlıktaki "Bekleme" rozeti (sunucu hesaplar: 45 dk / 5 sa / 3 gün; turuncu ve kırmızı eşikler ayarlardan). */
+    function beklemeYaz(bk){var mb=document.getElementById('m-bekleme');if(!mb)return;mb.className='bekleme-rozet'+(bk?(bk.seviye&&bk.seviye!=='normal'?' '+bk.seviye:''):' gizli');mb.textContent=bk?bk.etiket:'';if(bk){mb.title=bk.baslangic+' tarihinden beri onay bekliyor';mb.setAttribute('aria-label','Bekleme süresi '+bk.etiket);}else{mb.removeAttribute('title');mb.removeAttribute('aria-label');}}
     var MODAL_BOLUMLER=['m-onay-ozet','m-konusma-kutu','m-gecmis-kutu','m-gorsel-araclar','m-proje'];
     function modalBolumleriGoster(){MODAL_BOLUMLER.forEach(function(i){var x=document.getElementById(i);if(x)x.classList.remove('gizli');});}
     /* Kayıt açılamadı (yetki yok / bulunamadı / sunucu hatası): yalnız başlık + açıklama + Kapat kalır; şerit, düğmeler, görsel araçları ve bölümler temizlenip gizlenir. */
@@ -292,7 +314,7 @@ window.Panel = (function () {
       var proje=e&&e.veri&&e.veri.proje?String(e.veri.proje):'';
       document.getElementById('modal-baslik').textContent='Kayıt açılamadı';
       var p=document.getElementById('m-proje');p.textContent='';p.style.background='';p.style.color='';p.classList.add('gizli');
-      document.getElementById('m-kategori').textContent='';document.getElementById('m-kt').classList.add('gizli');document.getElementById('m-bekliyor').classList.add('gizli');document.getElementById('m-durum').innerHTML='';
+      document.getElementById('m-kategori').textContent='';document.getElementById('m-kt').classList.add('gizli');document.getElementById('m-bekliyor').classList.add('gizli');beklemeYaz(null);document.getElementById('m-durum').innerHTML='';
       var n=neighbours();document.getElementById('m-konum').textContent=n.i>=0?(n.i+1)+' / '+n.ids.length:'';modal.querySelector('.modal-onceki').disabled=!n.prev;modal.querySelector('.modal-sonraki').disabled=!n.next;
       var onay=document.getElementById('m-onay-ozet');onay.textContent='';onay.classList.remove('onayli');
       document.getElementById('m-butonlar').innerHTML='';var notu=document.getElementById('m-eylem-notu');notu.textContent='';notu.classList.add('gizli');
@@ -351,6 +373,7 @@ window.Panel = (function () {
       var p=document.getElementById('m-proje');p.textContent=k.proje||'—';p.style.background=k.renk||'#64748b';p.style.color=yaziRengi(k.renk);
       var mk=document.getElementById('m-kategori');mk.textContent=k.kategori||'';mk.classList.toggle('kategori-rozet',k.kaynak==='panel'&&!!k.kategori);
       document.getElementById('m-kt').classList.toggle('gizli',!k.kt);document.getElementById('m-bekliyor').classList.toggle('gizli',!!k.kt||!!k.silindi);
+      beklemeYaz(k.bekleme);
       var onayYok=document.getElementById('m-onay-yok');if(onayYok)onayYok.classList.toggle('gizli',!k.onay_uyari);
       var onay=document.getElementById('m-onay-ozet');onay.textContent=k.kt?(k.kt_kim?'Onaylayan: '+k.kt_kim+(k.kt_zaman?' · '+k.kt_zaman:''):'Eski kaynaktan onaylı aktarıldı; onaylayan kişi bilgisi yok.'):(k.silindi?'Silinmiş kayıt'+(k.silen?' · silen: '+k.silen:'')+(k.silme_zamani?' · '+k.silme_zamani:''):'Onay bekliyor');onay.classList.toggle('onayli',!!k.kt);
       var state=[];if(k.silindi)state.push('<span class="etiket-kucuk kirmizi-arka">Silindi'+(k.silen?' ('+esc(k.silen)+')':'')+'</span>');else if(k.excel_durum==='silinmis')state.push('<span class="etiket-kucuk gri-arka">Eski kaynakta yok</span>');if(k.bekleyen_hata)state.push('<span class="etiket-kucuk kirmizi-arka">İşlem hatası</span>');else if(k.bekleyen_islem)state.push('<span class="etiket-kucuk turuncu-arka">İşleniyor</span>');document.getElementById('m-durum').innerHTML=state.join(' ');
@@ -375,16 +398,18 @@ window.Panel = (function () {
       /* Eylemler */
       var buttons=[],notlar=[],gy=k.gyazo_is||null,gyPending=!!(gy&&gy.pending)||!!k.gyazo_bekliyor;
       if(!k.silindi){
-        if(k.izin_kt)buttons.push(k.kt?'<button class="btn" type="button" data-islem="kt" data-deger="0">Onayı kaldır</button>':'<button class="btn basari" type="button" data-islem="kt" data-deger="1">Onayla</button>');
+        /* 2.4.0: birincil "Onayla ve sonraki" (O); ikincil "Onayla" pencerede kalır. */
+        if(k.izin_kt)buttons.push(k.kt?'<button class="btn" type="button" data-islem="kt" data-deger="0">Onayı kaldır</button>':'<button class="btn basari" type="button" data-islem="kt-sonraki" data-deger="1" title="Onaylar ve bu sayfadaki sıradaki bekleyen kaydı açar (kısayol: O)">Onayla ve sonraki</button><button class="btn" type="button" data-islem="kt" data-deger="1" title="Onaylar, bu kayıtta kalır">Onayla</button>');
         if(k.izin_duzenle)buttons.push('<button class="btn" type="button" data-islem="duzenle">Düzenle</button>');
-        if(k.izin_gyazo&&!(gy&&gy.converted)){
-          if(!k.gyazo_hazir){buttons.push('<button class="btn" type="button" data-islem="gyazo" disabled>Gyazo’ya dönüştür</button>');notlar.push('Gyazo dönüştürme kapalı: sunucuda Gyazo anahtarı tanımlı değil; süperadmin ekleyebilir.');}
-          else if(gyPending)buttons.push('<button class="btn" type="button" data-islem="gyazo" disabled>Gyazo işlemi sürüyor</button>');
+        /* 2.4.0: sunucuda Gyazo anahtarı yoksa dönüştürme düğmesi hiç gösterilmez (yalnız evet/hayır bilgisi gelir, anahtar gelmez). */
+        if(k.izin_gyazo&&k.gyazo_hazir&&!(gy&&gy.converted)){
+          if(gyPending)buttons.push('<button class="btn" type="button" data-islem="gyazo" disabled>Gyazo işlemi sürüyor</button>');
           else if(gy&&gy.tekrar_olur)buttons.push('<button class="btn" type="button" data-islem="gyazo" data-tekrar="1">Gyazo’yu tekrar dene</button>');
           else buttons.push('<button class="btn" type="button" data-islem="gyazo">Gyazo’ya dönüştür</button>');
         }
         if(k.izin_sil)buttons.push('<button class="btn tehlike" type="button" data-islem="sil">Sil</button>');
         if(!buttons.length)notlar.push('Bu projede yalnız görüntüleme yetkiniz var; onaylama, düzenleme ve silme için proje yetkisi gerekir.');
+        if(bittiNotu===k.id)notlar.push('Bu sayfadaki bekleyenler bitti.');
       }else{
         if(k.izin_sil&&k.geri_al_olur){buttons.push('<button class="btn birincil" type="button" data-islem="geri_al">Geri al</button>');notlar.push('Silinmiş kayıtta onaylama ve düzenleme yapılmaz; önce "Geri al" ile kaydı geri getirin.');}
         else notlar.push('Bu kayıt silinmiş'+(k.silen?' ('+k.silen+')':'')+'. Geri alma yetkiniz olmadığı için işlem yapılamıyor; gerekirse proje sorumlusuna veya süperadmine bildirin.');
@@ -417,8 +442,22 @@ window.Panel = (function () {
       if(!d.personel&&!d.uye_id&&!d.ana_uye_id&&!d.lead_id){errors.push('Personel kodu, üye ID, ana üye ID veya lead ID alanlarından en az biri dolu olmalı.');form.elements.personel.classList.add('hatali');}
       ['uye_id','ana_uye_id','lead_id'].forEach(function(n){if(d[n]&&/\s/.test(d[n])){errors.push((n==='uye_id'?'Üye ID':n==='ana_uye_id'?'Ana üye ID':'Lead ID')+' boşluk içeremez.');form.elements[n].classList.add('hatali');}});
       return errors.filter(function(x,i,a){return a.indexOf(x)===i;});}
+    /* 2.4.0: Onayla ve sonraki → onay, 5 sn "Geri al" tostu, sayfadaki sıradaki bekleyen kayıt açılır; yoksa "bitti" notu. */
+    var bittiNotu=null,onaySuruyor=false;
+    function sonrakiBekleyen(id){var ids=recordIds(),i=ids.indexOf(id);for(var j=i+1;j<ids.length;j++){var c=cardOf(ids[j]);if(c&&c.getAttribute('data-kt')!=='1'&&c.getAttribute('data-silindi')!=='1'&&c.getAttribute('data-izin-kt')!=='0'&&!c.classList.contains('cikarildi'))return ids[j];}return null;}  /* yalnız okunan projelerin kayıtları atlanır (data-izin-kt="0") */
+    function onayGeriAl(id,surum){kayitPost('/kayit/'+id+'/kt',{deger:'0',surum:surum}).then(function(r){if(!r.ok)throw new Error(r.hata||'Onay geri alınamadı');kendiIslem(r);updateCard(id,'kt',{kt:0});bittiNotu=null;toast('Onay geri alındı; kayıt #'+id+' yeniden onay bekliyor.');openRecord(id,acan);}).catch(function(e){if(oturumKontrol(e))return;toast(e.message,true);});}
+    function onaylaVeSonraki(k){if(onaySuruyor)return;onaySuruyor=true;var dugmeler=Array.prototype.slice.call(document.querySelectorAll('#m-butonlar button'));dugmeler.forEach(function(b){b.disabled=true;});
+      kayitPost('/kayit/'+k.id+'/kt',{deger:'1',surum:k.surum}).then(function(r){if(!r.ok)throw new Error(r.hata||'İşlem yapılamadı');kendiIslem(r);updateCard(k.id,'kt',r);var sonraki=sonrakiBekleyen(k.id),surum=(+k.surum||0)+1;
+        toastGeriAl('Kayıt #'+k.id+' onaylandı.'+(sonraki?' Sıradaki bekleyen açıldı.':' Bu sayfadaki bekleyenler bitti.'),'Geri al',function(){onayGeriAl(k.id,surum);},5000);
+        if(sonraki){bittiNotu=null;openRecord(sonraki,null);}else{bittiNotu=k.id;openRecord(k.id,acan);}
+      }).catch(function(e){dugmeler.forEach(function(b){b.disabled=false;});if(oturumKontrol(e))return;toast(e.message,true);if(e.status===409)openRecord(k.id,acan);}).then(function(){onaySuruyor=false;});}
+    /* Kısayol bilgi notları ("zaten onaylı", "yetkiniz yok") açık "Geri al" tostunun yerine geçmez: yoksa U ile geri alma kaybolur. */
+    function bilgiToast(m){if(document.querySelector('#toast:not(.gizli) [data-toast-geri]'))return;toast(m);}
+    function islemDugmesi(ad){return document.querySelector('#m-butonlar button[data-islem="'+ad+'"]:not([disabled])');}
+    function kisayolYardim(goster){var p=document.getElementById('m-kisayollar');if(!p)return;p.classList.toggle('gizli',goster===undefined?!p.classList.contains('gizli'):!goster);}
     function recordAction(action,button){
       var k=acikKayit;if(!k)return;
+      if(action==='kt-sonraki'){onaylaVeSonraki(k);return;}
       if(action==='duzenle'){['personel','uye_id','ana_uye_id','lead_id','tip','aciklama'].forEach(function(n){form.elements[n].value=k[n]||'';form.elements[n].classList.remove('hatali');});kategoriSecenekleri(k);formHata.classList.add('gizli');form.classList.remove('gizli');form.elements.personel.focus();return;}
       if(action==='gyazo'&&!confirm((button.getAttribute('data-tekrar')?'Dönüşüm yeniden denenecek. ':'')+'Görsel Gyazo dış servisine gönderilecek; yerel görsel korunur. Dönüştürülsün mü?'))return;
       var data=action==='kt'?{deger:button.getAttribute('data-deger')}:{};
@@ -448,13 +487,25 @@ window.Panel = (function () {
       if(action==='geri_al'&&silindi){bump(kt?'onayli':'bekleyen',1);bump('silinen',-1);}
     }
     function applyCard(card,action,r){
-      if(action==='kt'){card.setAttribute('data-kt',r.kt?'1':'0');card.classList.toggle('onayli',!!r.kt);var rz=card.querySelector('.durum-rozet');if(rz){rz.className='durum-rozet '+(r.kt?'onayli':'bekliyor');rz.textContent=r.kt?'Onaylı':'Bekliyor';}}
+      if(action==='kt'){card.setAttribute('data-kt',r.kt?'1':'0');card.classList.toggle('onayli',!!r.kt);var rz=card.querySelector('.durum-rozet');if(rz){rz.className='durum-rozet '+(r.kt?'onayli':'bekliyor');rz.textContent=r.kt?'Onaylı':'Bekliyor';}var br=card.querySelector('.bekleme-rozet');if(br)br.classList.toggle('gizli',!!r.kt);}
       if(action==='sil'){card.setAttribute('data-silindi','1');card.classList.add('silik');}
       if(action==='geri_al'){card.setAttribute('data-silindi','0');card.classList.remove('silik');}
       var remove=(action==='kt'&&durumFiltresi==='bekleyen'&&r.kt)||(action==='kt'&&durumFiltresi==='onayli'&&!r.kt)||(action==='sil'&&durumFiltresi!=='hepsi'&&durumFiltresi!=='silinen')||(action==='geri_al'&&durumFiltresi==='silinen');
       if(remove)card.classList.add('cikarildi');
+      else if(action==='kt'&&((durumFiltresi==='bekleyen'&&!r.kt)||(durumFiltresi==='onayli'&&r.kt)))card.classList.remove('cikarildi');  /* 2.4.0: "Geri al" */
     }
     function updateCard(id,action,r){var card=cardOf(id);if(!card)return;sayacGuncelle(card,action,r);applyCard(card,action,r);}
+    /* 2.4.0: tablo görünümünde küçük resmin üzerine gelince ya da odaklanınca büyük önizleme (telefonda yok; Esc kapatır). */
+    var onizleme=document.getElementById('onizleme'),onizlemeImg=onizleme&&onizleme.querySelector('img'),onizlemeAktif=null;
+    function onizlemeKapat(){if(!onizleme||!onizlemeAktif)return;onizlemeAktif=null;onizleme.classList.add('gizli');onizleme.setAttribute('aria-hidden','true');onizlemeImg.removeAttribute('src');}
+    function onizlemeAc(el){if(!onizleme||window.matchMedia('(max-width: 900px)').matches||!modal.classList.contains('gizli'))return;var url=el.getAttribute('data-onizleme');if(!url)return;onizlemeAktif=el;if(onizlemeImg.getAttribute('src')!==url)onizlemeImg.src=url;onizleme.classList.remove('gizli');onizleme.setAttribute('aria-hidden','false');
+      var r=el.getBoundingClientRect(),w=Math.min(440,window.innerWidth-16),x=r.right+12;if(x+w>window.innerWidth-8)x=Math.max(8,r.left-w-12);var y=Math.max(8,Math.min(r.top-30,window.innerHeight-340));onizleme.style.left=x+'px';onizleme.style.top=y+'px';}
+    if(onizleme){
+      document.addEventListener('mouseover',function(e){var el=e.target.closest&&e.target.closest('#kayit-sonuclari [data-onizleme]');if(el){if(el!==onizlemeAktif)onizlemeAc(el);}else if(onizlemeAktif&&document.activeElement!==onizlemeAktif)onizlemeKapat();});
+      document.addEventListener('focusin',function(e){var el=e.target.closest&&e.target.closest('#kayit-sonuclari [data-onizleme]');if(el)onizlemeAc(el);else onizlemeKapat();});
+      document.addEventListener('keydown',function(e){if(e.key==='Escape'&&onizlemeAktif&&modal.classList.contains('gizli')){e.preventDefault();onizlemeKapat();}},true);
+      window.addEventListener('scroll',onizlemeKapat,true);
+    }
     var acParam=new URLSearchParams(window.location.search).get('ac')||(sayfa&&sayfa.getAttribute('data-acik'));
     if(acParam&&+acParam>0)openRecord(+acParam,null);
     initRecordFilters();
@@ -474,7 +525,27 @@ window.Panel = (function () {
     form.addEventListener('submit',function(){cleanEmpty();});
     window.addEventListener('pageshow',function(){busy=false;form.classList.remove('gonderiliyor');form.removeAttribute('aria-busy');Array.prototype.forEach.call(form.querySelectorAll('input,select'),function(el){el.disabled=false;});});
     var boy=document.getElementById('sayfa-boyu');if(boy)boy.addEventListener('change',function(){window.location.href=boy.value;});
+    /* 2.4.0: sıralama seçimi (Yenile sonrası da çalışsın diye belge düzeyinde) ve telefonda süzgeç panelini aç/kapat (tarayıcıda hatırlanır). */
+    document.addEventListener('change',function(e){if(e.target&&e.target.id==='siralama')window.location.href=e.target.value;});
+    var ac=document.getElementById('suzgec-ac'),kok=document.getElementById('kayit-sayfa');
+    if(ac&&kok)ac.addEventListener('click',function(){var kapali=kok.getAttribute('data-suzgec')==='kapali';if(kapali)kok.removeAttribute('data-suzgec');else kok.setAttribute('data-suzgec','kapali');ac.setAttribute('aria-expanded',String(kapali));try{localStorage.setItem('kp.kayitSuzgecAcik',kapali?'1':'0');}catch(_){}});
   }
+  /* ===== 2.4.0: hızlı tarih düğmeleri (Kayıtlar gelişmiş süzgeçleri, Çıktı sayfası). İstanbul takvimi, hafta pazartesi başlar.
+     window.KP_SIMDI (ms) testlerde saati sabitler. ===== */
+  function istanbulBugun(){var ms=(+window.KP_SIMDI>0)?+window.KP_SIMDI:Date.now();try{var p=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Istanbul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(ms));if(/^\d{4}-\d{2}-\d{2}$/.test(p))return p;}catch(_){}return new Date(ms+3*3600000).toISOString().slice(0,10);}
+  function donemAraligi(kod,bugun){var p=String(bugun).split('-').map(Number),d=new Date(Date.UTC(p[0],p[1]-1,p[2]));function f(x){return x.toISOString().slice(0,10);}function gun(x,n){return new Date(x.getTime()+n*86400000);}
+    var pzt=gun(d,-((d.getUTCDay()+6)%7)),ay1=new Date(Date.UTC(p[0],p[1]-1,1));
+    if(kod==='bugun')return [f(d),f(d)];if(kod==='bu_hafta')return [f(pzt),f(d)];if(kod==='gecen_hafta')return [f(gun(pzt,-7)),f(gun(pzt,-1))];
+    if(kod==='bu_ay')return [f(ay1),f(d)];if(kod==='gecen_ay'){var son=gun(ay1,-1);return [f(new Date(Date.UTC(son.getUTCFullYear(),son.getUTCMonth(),1))),f(son)];}
+    return null;}
+  function hizliDonemKur(){Array.prototype.forEach.call(document.querySelectorAll('[data-hizli-donem]'),function(grup){
+    var t1=document.getElementById(grup.getAttribute('data-hedef1')),t2=document.getElementById(grup.getAttribute('data-hedef2'));if(!t1||!t2)return;
+    function isaretle(){var b=istanbulBugun();Array.prototype.forEach.call(grup.querySelectorAll('[data-donem]'),function(x){var a=donemAraligi(x.getAttribute('data-donem'),b),on=!!a&&a[0]===t1.value&&a[1]===t2.value;x.classList.toggle('secili',on);x.setAttribute('aria-pressed',String(on));});}
+    grup.addEventListener('click',function(e){var x=e.target.closest&&e.target.closest('[data-donem]');if(!x)return;var a=donemAraligi(x.getAttribute('data-donem'),istanbulBugun());if(!a)return;var form=t1.form,ts=form&&form.querySelector('[name=tarihsiz]');
+      if(ts&&ts.checked){ts.checked=false;ts.dispatchEvent(new Event('change',{bubbles:true}));}
+      t1.value=a[0];t2.value=a[1];[t1,t2].forEach(function(el){el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});isaretle();
+      if(grup.getAttribute('data-gonder')==='1'&&form){if(form.requestSubmit)form.requestSubmit();else form.submit();}});
+    t1.addEventListener('input',isaretle);t2.addEventListener('input',isaretle);isaretle();});}
   function yaziRengi(hex){try{var h=(hex||'#64748b').replace('#','');if(h.length===3)h=h.replace(/(.)/g,'$1$1');var n=.299*parseInt(h.slice(0,2),16)+.587*parseInt(h.slice(2,4),16)+.114*parseInt(h.slice(4,6),16);return n>150?'#111827':'#fff';}catch(_){return'#fff';}}
   function kopyala(value){if(navigator.clipboard){navigator.clipboard.writeText(value).then(function(){toast('Kopyalandı');}).catch(function(){toast('Kopyalanamadı',true);});}else{var i=document.createElement('input');i.value=value;document.body.appendChild(i);i.select();document.execCommand('copy');i.remove();toast('Kopyalandı');}}
   function profilFiltresi(){var sel=document.getElementById('profil-proje');if(!sel)return;sel.addEventListener('change',function(){var selected=sel.options[sel.selectedIndex];if(selected&&selected.disabled){sel.value='';toast('Ana proje dışı filtresinde beklenen ana proje seçilemez.');}});}
@@ -489,6 +560,12 @@ window.Panel = (function () {
   var SES_ANAHTAR='kanit-bildirim-ses';
   function sesAcik(){try{return localStorage.getItem(SES_ANAHTAR)!=='0';}catch(_){return true;}}
   function sesAyarla(acik){try{localStorage.setItem(SES_ANAHTAR,acik?'1':'0');}catch(_){}}
+  /* 2.4.0: tür başına ses (tarayıcı başına, varsayılan açık). Onay bildirimleri hiç ses çalmaz; ana "Ses" kapalıysa hiçbiri çalmaz. */
+  var SES_TURLERI=[['kanit','Yeni kanıt'],['konusma','Soru / yanıt / yorum'],['hatirlatma','Hatırlatma ve özetler']];
+  function sesTuru(n){var t=n&&n.tur;if(t==='kanit'||t==='kayit')return 'kanit';if(t==='soru'||t==='yanit'||t==='yorum')return 'konusma';if(t==='hatirlatma')return 'hatirlatma';return null;}
+  function sesTuruAcik(tur){try{return localStorage.getItem(SES_ANAHTAR+':'+tur)!=='0';}catch(_){return true;}}
+  function sesTuruAyarla(tur,acik){try{localStorage.setItem(SES_ANAHTAR+':'+tur,acik?'1':'0');}catch(_){}}
+  function sesliMi(n){var t=sesTuru(n);return !!t&&sesTuruAcik(t);}
   var sesBaglam=null;
   /* 2.3.3: AudioContext ilk kullanıcı hareketinde (tıklama/tuş/dokunma) bir kez kurulur ve resume() edilir. */
   function sesHazirla(){try{if(!sesBaglam){var AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;sesBaglam=new AC();}if(sesBaglam.state!=='running'&&sesBaglam.resume){var p=sesBaglam.resume();if(p&&p.catch)p.catch(function(){});}}catch(_){sesBaglam=null;}}
@@ -621,7 +698,7 @@ window.Panel = (function () {
       if(!elle&&(acikPencereVar()||yaziyor(document.activeElement)||document.hidden)){hpBekliyor={sesli:(hpBekliyor&&hpBekliyor.sesli)||!!sesli};return;}
       hpBekliyor=null;var liste=hpCiz();gosterildiIsaretle(liste);
       if(!hpAcik()){hpOnceki=document.activeElement;hp.classList.remove('gizli');hp.setAttribute('aria-hidden','false');document.body.classList.add('hatirlatma-acik');var ilk=hp.querySelector('[data-hp-ac]')||hp.querySelector('button');if(ilk)ilk.focus();}
-      if(sesli)sesCal(true);
+      if(sesli&&sesTuruAcik('hatirlatma'))sesCal(true);
     }
     function bekleyeniDene(){if(hpBekliyor)hpAc(hpBekliyor.sesli);}
     if(hp){
@@ -661,7 +738,7 @@ window.Panel = (function () {
       if(yeniler.length){
         var hatYeni=yeniler.some(hatirlatmaMi);
         /* Arka plan sekmesinde de ses ve masaüstü bildirimi hemen; kartlar sekme öne gelince. */
-        sesCal(hatYeni);masaustuBildir(yeniler);
+        var sesliler=yeniler.filter(sesliMi);if(sesliler.length)sesCal(sesliler.some(hatirlatmaMi));masaustuBildir(yeniler);
         if(document.hidden)bekleyenKartlar=bekleyenKartlar.concat(yeniler);else kartGoster(yeniler);
         if(yeniler.some(pencereAcarMi))hpAc(false);
       }
@@ -689,7 +766,18 @@ window.Panel = (function () {
     if(permissionBtn)permissionBtn.addEventListener('click',izinIste);
     /* 2.3.3: "Ses" anahtarı (tarayıcı başına, varsayılan açık); açılınca kısa bir örnek ses çalar. */
     var sesKutu=document.getElementById('bildirim-ses');
-    if(sesKutu){sesKutu.checked=sesAcik();sesKutu.addEventListener('change',function(){sesAyarla(sesKutu.checked);if(sesKutu.checked){sesHazirla();setTimeout(function(){sesCal(false);},60);}toast(sesKutu.checked?'Bildirim sesi açıldı.':'Bildirim sesi kapatıldı.');});}
+    if(sesKutu){sesKutu.checked=sesAcik();sesKutu.addEventListener('change',function(){sesAyarla(sesKutu.checked);turleriGuncelle();if(sesKutu.checked){sesHazirla();setTimeout(function(){sesCal(false);},60);}toast(sesKutu.checked?'Bildirim sesi açıldı.':'Bildirim sesi kapatıldı.');});}
+    /* 2.4.0: "Ses" altında tür anahtarları (zil kutusuna eklenir). */
+    var sesGrup=null;
+    function turleriGuncelle(){if(!sesGrup)return;Array.prototype.forEach.call(sesGrup.querySelectorAll('[data-ses-turu]'),function(x){x.checked=sesTuruAcik(x.getAttribute('data-ses-turu'));x.disabled=!sesKutu.checked;});sesGrup.style.opacity=sesKutu.checked?'1':'.6';}
+    if(sesKutu){
+      sesGrup=document.createElement('div');sesGrup.className='ses-turleri';sesGrup.id='bildirim-ses-turleri';sesGrup.setAttribute('role','group');sesGrup.setAttribute('aria-label','Ses: hangi bildirimler ses çalsın');
+      sesGrup.style.cssText='display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;padding:6px 14px;border-bottom:1px solid var(--cizgi);font-size:12.5px;color:var(--soluk)';
+      sesGrup.innerHTML='<span>Ses:</span>'+SES_TURLERI.map(function(t){return '<label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:var(--yazi)"><input type="checkbox" role="switch" id="bildirim-ses-'+t[0]+'" data-ses-turu="'+t[0]+'"> '+esc(t[1])+'</label>';}).join('')+'<small>Onay bildirimleri ses çalmaz.</small>';
+      var bb=box.querySelector('.bildirim-baslik');if(bb&&bb.parentNode)bb.parentNode.insertBefore(sesGrup,bb.nextSibling);else box.insertBefore(sesGrup,box.firstChild);
+      sesGrup.addEventListener('change',function(e){var x=e.target,tur=x&&x.getAttribute&&x.getAttribute('data-ses-turu');if(!tur)return;sesTuruAyarla(tur,x.checked);var ad=(SES_TURLERI.filter(function(t){return t[0]===tur;})[0]||[])[1]||'';if(x.checked){sesHazirla();setTimeout(function(){sesCal(tur==='hatirlatma');},60);}toast(ad+' sesi '+(x.checked?'açıldı.':'kapatıldı.'));});
+      turleriGuncelle();
+    }
     function openBox(open){box.classList.toggle('gizli',!open);zil.setAttribute('aria-expanded',String(open));if(open){poll(true);var ilk=list.querySelector('li[tabindex]')||box.querySelector('a,button');if(ilk)setTimeout(function(){if(!box.classList.contains('gizli'))ilk.focus();},0);}}
     zil.addEventListener('click',function(){openBox(box.classList.contains('gizli'));});
     document.addEventListener('click',function(e){if(box.classList.contains('gizli'))return;if(box.contains(e.target)||zil.contains(e.target))return;/* 2.3.3: özet karttaki "Bildirimleri aç" listeyi hemen geri kapatmasın. */if(e.target.closest&&e.target.closest('#bildirim-popuplar'))return;openBox(false);});
@@ -747,5 +835,6 @@ window.Panel = (function () {
   document.addEventListener('input',function(e){var t=e.target;if(t&&t.setCustomValidity&&t.getAttribute&&(t.getAttribute('data-gecersiz')||t.getAttribute('data-bos')))t.setCustomValidity('');},true);
   document.addEventListener('change',function(e){var t=e.target;if(t&&t.setCustomValidity&&t.getAttribute&&(t.getAttribute('data-gecersiz')||t.getAttribute('data-bos')))t.setCustomValidity('');},true);
   document.addEventListener('submit',function(e){var f=e.target;if(f&&f.getAttribute&&f.getAttribute('data-onay')&&!confirm(f.getAttribute('data-onay')))e.preventDefault();});document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('[data-kopyala]');if(b){e.preventDefault();kopyala(b.getAttribute('data-kopyala'));return;}var t=e.target.closest&&e.target.closest('[data-ac]');if(t){var target=document.getElementById(t.getAttribute('data-ac'));if(target){e.preventDefault();var open=target.hidden;target.hidden=!open;Array.prototype.forEach.call(document.querySelectorAll('[data-ac="'+t.getAttribute('data-ac')+'"][aria-controls]'),function(x){x.setAttribute('aria-expanded',String(open));});if(open){var f=target.querySelector('input:not([type=hidden]),select,textarea,button');if(f)f.focus();}}return;}var g=e.target.closest&&e.target.closest('[data-geri]');if(g){if(window.history.length>1&&document.referrer&&document.referrer.indexOf(window.location.origin)===0){e.preventDefault();window.history.back();}}});
-  return {kayitSayfasi:kayitSayfasi,kanitEkle:kanitEkle,bildirimler:bildirimler,menu:menu,bildirimSayfasi:bildirimSayfasi,botsayfasi:botSayfasi,botSayfasi:botSayfasi,profilFiltresi:profilFiltresi,toast:toast,kopyala:kopyala};
+  hizliDonemKur();
+  return {donemAraligi:donemAraligi,istanbulBugun:istanbulBugun,kayitSayfasi:kayitSayfasi,kanitEkle:kanitEkle,bildirimler:bildirimler,menu:menu,bildirimSayfasi:bildirimSayfasi,botsayfasi:botSayfasi,botSayfasi:botSayfasi,profilFiltresi:profilFiltresi,toast:toast,kopyala:kopyala};
 })();

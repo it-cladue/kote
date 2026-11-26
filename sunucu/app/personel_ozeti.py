@@ -21,7 +21,9 @@ from fractions import Fraction
 
 from . import katalog
 
-DONEMLER = (('bugun', 'Bugün'), ('hafta', 'Bu hafta'), ('ay', 'Bu ay'), ('son30', 'Son 30 gün'), ('hepsi', 'Tümü'), ('ozel', 'Özel aralık'))
+# 2.4.0: "Geçen hafta" (önceki pazartesi–pazar) ve "Geçen ay" (önceki takvim ayı) eklendi.
+DONEMLER = (('bugun', 'Bugün'), ('hafta', 'Bu hafta'), ('gecen_hafta', 'Geçen hafta'), ('ay', 'Bu ay'), ('gecen_ay', 'Geçen ay'),
+            ('son30', 'Son 30 gün'), ('hepsi', 'Tümü'), ('ozel', 'Özel aralık'))
 DURUMLAR = (('hepsi', 'Tümü'), ('onayli', 'Onaylı'), ('bekleyen', 'Bekleyen'))
 GRUPLAR = (('personel', 'Personel'), ('ekleyen', 'Ekleyen'))
 SUTUNLAR = (('kategori', 'Kategori'), ('tip', 'Tip'))
@@ -80,8 +82,14 @@ def donem_araligi(donem, bugun, t1=None, t2=None):
         return bugun, bugun
     if donem == 'hafta':
         return bugun - timedelta(days=bugun.weekday()), bugun
+    if donem == 'gecen_hafta':
+        pazartesi = bugun - timedelta(days=bugun.weekday())
+        return pazartesi - timedelta(days=7), pazartesi - timedelta(days=1)
     if donem == 'ay':
         return bugun.replace(day=1), bugun
+    if donem == 'gecen_ay':
+        son = bugun.replace(day=1) - timedelta(days=1)
+        return son.replace(day=1), son
     if donem == 'son30':
         return bugun - timedelta(days=29), bugun
     if donem == 'ozel':
@@ -347,7 +355,8 @@ def tablo_satirlari(ozet):
 
 def onceki_aralik(f, bugun=None):
     """Önceki karşılaştırma dönemi (başlangıç, bitiş) ya da None.
-    bugun → dün; hafta → geçen haftanın pazartesisinden aynı haftanın aynı gününe; ay, son30 ve özel aralık → başlangıçtan
+    bugun → dün; hafta → geçen haftanın pazartesisinden aynı haftanın aynı gününe; gecen_hafta → ondan önceki hafta;
+    gecen_ay → ondan önceki takvim ayı; ay, son30 ve özel aralık → başlangıçtan
     hemen önceki eşit uzunlukta pencere (ay: ayın 1'inden önceki aynı sayıda gün). Tümü ya da başlangıcı olmayan özel aralık →
     None. Yalnız başlangıcı verilen özel aralıkta bitiş bugün sayılır."""
     bugun = bugun or date.today()
@@ -357,6 +366,10 @@ def onceki_aralik(f, bugun=None):
     if f.get('donem') == 'hafta':
         son = t2 or bugun
         return t1 - timedelta(days=7), son - timedelta(days=7)
+    if f.get('donem') == 'gecen_ay':
+        # 2.4.0: geçen ayın önceki dönemi bir önceki TAKVİM ayıdır (eşit gün sayısı değil); geçen hafta genel kuralla bir önceki hafta.
+        son = t1 - timedelta(days=1)
+        return son.replace(day=1), son
     son = max(t2 or bugun, t1)
     uzunluk = (son - t1).days + 1
     return t1 - timedelta(days=uzunluk), t1 - timedelta(days=1)

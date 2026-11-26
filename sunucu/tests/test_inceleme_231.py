@@ -114,7 +114,7 @@ def test_adil_sira_ve_ozet_sayisi_baglantiyla_ayni(web):
 
 # ---- 2. [ORTA] gizle: İşlem Geçmişi, Son işlemler, bildirim akışı ve kategori listesi onaysız kaydı göstermez
 def test_gizle_denetim_son_islemler_akis_ve_kategori(web):
-    c, a = web; a['ONAYSIZ_GORUNUM'] = 'gizle'; account(a, 'raporcu', 'OF:oku'); account(a, 'eskilider', 'OF:oku,kt')
+    c, a = web; a['ONAYSIZ_GORUNUM'] = 'gizle'; a['BILDIRIM_ONAY'] = '1'; account(a, 'raporcu', 'OF:oku'); account(a, 'eskilider', 'OF:oku,kt')
     gizli = seed(a, 'OF', 'gz:1'); acik = insert(a, personel='ACIK', kt=1, kategori='HGST')
     gizli_kat = insert(a, personel='GIZLIKAT', kategori='YALNIZGIZLIKAT')
     login(c)
@@ -215,7 +215,7 @@ def test_uyar_arama_uyarisi_sekmeden_bagimsiz(web):
     html = c.get('/kayitlar?durum=hepsi&q=U-55').data.decode()
     assert 'ONAY YOK' not in html and 'onaylı kanıt yok' not in html
     import io, openpyxl
-    r = c.get('/disa-aktar.xlsx?durum=hepsi&proje=OF'); assert 'kanit-kayitlari-ONAYSIZ-2.xlsx' in r.headers['Content-Disposition']
+    r = c.get('/disa-aktar.xlsx?durum=hepsi&proje=OF'); assert 'kanit-kayitlari-OF-hepsi-ONAYSIZ-2.xlsx' in r.headers['Content-Disposition']
     wb = openpyxl.load_workbook(io.BytesIO(r.data)); ws = wb['Kayıtlar']; hdr = [x.value for x in ws[1]]
     assert {row[hdr.index('Personel')]: row[hdr.index('Takım lideri onayı')] for row in ws.iter_rows(min_row=2, values_only=True)}['A4'] == 'Silindi'
     assert list(wb['Proje özeti'].iter_rows(values_only=True))[-1][1] == 2
@@ -227,7 +227,7 @@ def test_surum_ve_statik_surum_parametresi(web):
     from app import panel
     c, a = web; login(c)
     S = panel.SURUM
-    assert re.fullmatch(r'2\.3\.\d+', S) and S != '2.3.1' and c.get('/saglik').headers['X-Kanit-Paneli'] == S
+    assert re.fullmatch(r'2\.\d+\.\d+', S) and S != '2.3.1' and c.get('/saglik').headers['X-Kanit-Paneli'] == S
     for url, beklenen in (('/', (f'stil.css?v={S}', f'panel.js?v={S}', f'tema.js?v={S}')), ('/kayitlar?durum=hepsi', (f'kayit.css?v={S}',)), ('/yonetim/katalog', (f'katalog.js?v={S}',))):
         html = c.get(url).data.decode()
         for b in beklenen: assert b in html and 'v=2.3.0' not in html, (url, b)

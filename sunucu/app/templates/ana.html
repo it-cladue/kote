@@ -22,7 +22,7 @@
 </section>
 
 <section aria-label="Genel sayılar" class="kpi-izgara">
-  {% if bekleyen_baglanti %}<a class="kpi bekleyen" href="{{ url_for('kayitlar', durum='bekleyen') }}"><b data-kpi="bekleyen">{{ kpi.bekleyen }}</b><span>Onay bekleyen kayıt</span></a>{% else %}<div class="kpi bekleyen" title="Onay bekleyen kayıtlar size gösterilmez"><b data-kpi="bekleyen">{{ kpi.bekleyen }}</b><span>Onay bekleyen kayıt</span></div>{% endif %}
+  {% if bekleyen_baglanti %}<a class="kpi bekleyen" href="{{ url_for('kayitlar', durum='bekleyen') }}"><b data-kpi="bekleyen">{{ kpi.bekleyen }}</b><span>Onay bekleyen kayıt</span>{% if kpi.bekleyen_oku %}<small class="kpi-ek-not" id="kpi-bekleyen-oku" style="font-size:11.5px;color:var(--soluk)" title="Onay yetkiniz olmayan, yalnız görüntüleyebildiğiniz projelerdeki bekleyenler; ana sayıya katılmaz">+{{ kpi.bekleyen_oku }} görüntüleyebildiğiniz projelerde</small>{% endif %}</a>{% else %}<div class="kpi bekleyen" title="Onay bekleyen kayıtlar size gösterilmez"><b data-kpi="bekleyen">{{ kpi.bekleyen }}</b><span>Onay bekleyen kayıt</span>{% if kpi.bekleyen_oku %}<small class="kpi-ek-not" id="kpi-bekleyen-oku" style="font-size:11.5px;color:var(--soluk)">+{{ kpi.bekleyen_oku }} görüntüleyebildiğiniz projelerde</small>{% endif %}</div>{% endif %}
   <a class="kpi bugun" href="{{ url_for('kayitlar', durum='hepsi', tarih1=simdi()[:10], tarih2=simdi()[:10]) }}"><b>{{ kpi.bugun }}</b><span>Bugün eklenen</span></a>
   <a class="kpi onay" href="{{ url_for('kayitlar', durum='onayli') }}"><b>{{ kpi.bugun_onay }}</b><span>Bugün onaylanan</span></a>
   <a class="kpi soru" href="{{ url_for('bildirim_sayfasi', tur='soru', okundu='0') }}"><b>{{ kpi.acik_soru }}</b><span>Bana yöneltilmiş açık soru</span></a>

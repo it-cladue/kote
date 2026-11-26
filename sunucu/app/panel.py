@@ -8,7 +8,7 @@ import sys
 import time
 import unicodedata
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 from flask import Flask, g, request, session, redirect, url_for, render_template, jsonify, abort, send_file, flash
@@ -17,7 +17,7 @@ from werkzeug.datastructures import MultiDict
 from werkzeug.exceptions import SecurityError
 from functools import wraps
 from PIL import Image, UnidentifiedImageError
-from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari, personel_ozeti, erisim
+from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari, personel_ozeti, erisim, hatirlatma
 from .settings import AYAR, ROOT
 
 SURUM = '2.4.0'
@@ -145,8 +145,10 @@ def _scoped_categories(codes):
     names.update(r[0] for r in baglanti().execute("SELECT DISTINCT kategori FROM kayitlar WHERE proje IN ("+places+") AND kategori IS NOT NULL AND kategori<>''"+(' AND '+gizli_sql if gizli_sql else ''),[*codes,*gizli_par]))
     return sorted(names,key=str.casefold)
 
-def url_filtre(endpoint):
-    return url_for(endpoint,**request.args.to_dict(flat=False))
+def url_filtre(endpoint,**ek):
+    args=request.args.to_dict(flat=False)
+    for k,v in ek.items(): args[k]=[str(v)]
+    return url_for(endpoint,**args)
 
 
 def url_degistir(**kw):
@@ -495,6 +497,7 @@ def _denetim_ayrinti(item):
 def ana():
     cards=[];allowed=_allowed();kpi=dict(bekleyen=0,bugun=0,bugun_onay=0,toplam=0,onayli=0,geciken=0);gun=_hatirlatma_gun()
     gizli_sql,gizli_par=_gizli_kayit_sql('',allowed);gizli_projeler=set(gizli_par)  # gizle: kt'siz projelerde yalnız onaylılar sayılır
+    kt_var=bool(_kt_projeleri(allowed))
     for p in allowed:
         row=baglanti().execute('''SELECT SUM(kt=0 AND silindi=0) bekleyen,
             SUM(kt=1 AND silindi=0) onayli,SUM(silindi=1) silinen,
@@ -506,7 +509,14 @@ def ana():
         card['etiket']=next((x['label'] for x in _all_project_info() if x['code']==p),p)
         card['gizli']=p in gizli_projeler  # onay bekleyen/silinen bağlantıları üretilmez, sayaçlar 0
         cards.append(card)
-        for key in kpi:kpi[key]+=card[key]
+        card['kt']=yetki.izin(g.yk,p,'kt')
+        for key in list(kpi):
+            # 2.4.0: "Onay bekleyen" (ve gecikenler) yalnız onay yetkisi olan projeleri sayar; diğerleri ayrı notta.
+            # Hiçbir projede onay yetkisi olmayan kullanıcıda eskisi gibi tüm görebildiği bekleyenler sayılır (Kayıtlar sekmesiyle aynı).
+            if key.endswith('_oku'): continue
+            if key in ('bekleyen','geciken') and not card['kt'] and kt_var: kpi[key+'_oku']=kpi.get(key+'_oku',0)+card[key]; continue
+            kpi[key]+=card[key]
+    kpi.setdefault('bekleyen_oku',0); kpi.setdefault('geciken_oku',0)
     kpi['acik_soru']=_acik_sorular(allowed)
     bekleyen_baglanti=any(p not in gizli_projeler for p in allowed)
     po=_personel_ozet_hazirla(allowed,ana_sayfa=True) if allowed else None
@@ -758,10 +768,21 @@ def _bekleme_gun(args):
     except (TypeError,ValueError): return 0
     return n if 1<=n<=3650 else 0
 
-def _filtre_sql(args,izinli):
+def _tarih_alani(args):
+    """2.4.0 'tarih_alani': eklenme (varsayılan; kaydın tarihi) ya da onay (onay zamanı; yalnız onaylı kayıtlar)."""
+    return 'onay' if str(args.get('tarih_alani','') or '').strip().lower()=='onay' else 'eklenme'
+
+def _kt_projeleri(projeler_listesi):
+    """Verilen projelerden kullanıcının onay (kt) yetkisi olanlar (süperadmin: hepsi)."""
+    yk=g.get('yk') or yetki.coz('')
+    return [p for p in projeler_listesi if yetki.izin(yk,p,'kt')]
+
+def _filtre_sql(args,izinli,bekleyen_kapsam=False):
+    """bekleyen_kapsam=True (2.4.0, Kayıtlar listesi/sekme sayacı ve 'bu görünüm' Excel'i): proje seçilmemişken "Onay bekleyen"
+    yalnız kullanıcının onay yetkisi olan projeleri kapsar (en az bir onay projesi varsa); diğerleri f['bekleyen_disi']'na yazılır."""
     explicit=_explicit_projects(args,izinli)
     selected=explicit or list(izinli)
-    if not selected: return '1=0',[],dict(proje=[],proje_etkin=[],durum=args.get('durum','bekleyen'),kategori='',q='',ekleyen='',tarih1='',tarih2='',tarihsiz=False,bekleme=0,kt_yok=[],gizli_onaysiz=False,yalniz_onayli=False,personel='',ekleyen_ad='',tip='',silinmemis=False)
+    if not selected: return '1=0',[],dict(proje=[],proje_etkin=[],durum=args.get('durum','bekleyen'),kategori='',q='',ekleyen='',tarih1='',tarih2='',tarihsiz=False,bekleme=0,kt_yok=[],gizli_onaysiz=False,yalniz_onayli=False,personel='',ekleyen_ad='',tip='',silinmemis=False,tarih_alani=_tarih_alani(args),bekleyen_disi=[])
     where=['proje IN (%s)' % ','.join('?'*len(selected))]; par=list(selected)
     gizle=_onaysiz_modu()=='gizle'; kt_yok=_kt_yok(selected); yalniz_onayli=gizle and len(kt_yok)==len(selected)
     state=args.get('durum','bekleyen')
@@ -770,6 +791,12 @@ def _filtre_sql(args,izinli):
     elif state=='onayli': where.append('kt=1 AND silindi=0')
     elif state=='silinen': where.append('silindi=1')
     elif state!='hepsi': state='bekleyen'; where.append('kt=0 AND silindi=0')
+    bekleyen_disi=[]
+    if bekleyen_kapsam and state=='bekleyen' and not explicit:
+        kt_li=_kt_projeleri(selected)
+        if kt_li and len(kt_li)<len(selected):
+            bekleyen_disi=[p for p in selected if p not in kt_li]
+            where.append('proje IN (%s)' % ','.join('?'*len(kt_li))); par.extend(kt_li)
     if gizle and kt_yok and not yalniz_onayli:
         gizli_sql,gizli_par=_gizli_kayit_sql('',selected); where.append(gizli_sql); par.extend(gizli_par)
     bekleme=0 if yalniz_onayli else _bekleme_gun(args)  # onaylıya sabitlenen listede 'gündür bekleyen' süzgeci anlamsız: yok sayılır
@@ -797,16 +824,58 @@ def _filtre_sql(args,izinli):
         if args.get('tarih1') or args.get('tarih2'): abort(400,'Tarihsiz filtre tarih aralığıyla birleştirilemez.')
         where.append("(tarih IS NULL OR tarih='')")
     # 2.3.4: başlangıç 'YYYY-AA-GG' ile karşılaştırılır; eski Excel kayıtlarının saatsiz tarihi de başlangıç gününe dahil olur.
+    # 2.4.0: tarih_alani=onay → aynı kural onay zamanına (kt_zaman) uygulanır; onayı kaldırılmış kayıt sayılmaz (kt=1).
+    tarih_alani=_tarih_alani(args); kolon='kt_zaman' if tarih_alani=='onay' else 'tarih'
     for name,op,suffix in [('tarih1','>=',''),('tarih2','<=',' 23:59:59')]:
         v=args.get(name,'').strip()
         if v:
             try: datetime.strptime(v,'%Y-%m-%d')
             except ValueError: abort(400,'Geçersiz tarih.')
-            where.append(f'tarih {op} ?'); par.append(v+suffix)
+            where.append(f'{kolon} {op} ?'); par.append(v+suffix)
         dates[name]=v
+    if kolon=='kt_zaman' and (dates.get('tarih1') or dates.get('tarih2')): where.append('kt=1')
     if dates.get('tarih1') and dates.get('tarih2') and dates['tarih1']>dates['tarih2']:abort(400)
     return ' AND '.join(where),par,dict(proje=explicit,proje_etkin=selected,durum=state,kategori=cat,q=q,ekleyen=by,tarihsiz=undated,bekleme=bekleme,
-                                      kt_yok=kt_yok,gizli_onaysiz=gizle and bool(kt_yok),yalniz_onayli=yalniz_onayli,silinmemis=silinmemis,**tam,**dates)
+                                      kt_yok=kt_yok,gizli_onaysiz=gizle and bool(kt_yok),yalniz_onayli=yalniz_onayli,silinmemis=silinmemis,
+                                      tarih_alani=tarih_alani,bekleyen_disi=bekleyen_disi,**tam,**dates)
+
+def _su_an():
+    """Bekleme süresi hesabının 'şimdi'si: sunucu yerel saati (db.simdi() ve hatırlatmalarla aynı saat). Testler değiştirebilir."""
+    return datetime.now()
+
+def _bekleme_esikleri():
+    """(turuncu eşik saat, kırmızı eşik gün): BEKLEME_UYARI_SAAT (2) ve HATIRLATMA_GUN (3); istek başına bir kez okunur."""
+    if 'bekleme_esik' not in g:
+        a=hatirlatma.ayarlar(AYAR); g.bekleme_esik=(a['bekleme_uyari_saat'],a['gun'])
+    return g.bekleme_esik
+
+def _baslangic_zamani(d):
+    """hatirlatma.BASLANGIC_SQL ile aynı: COALESCE(ilk_gorulme, tarih, guncelleme) içinden ilk dolu değer; okunamazsa None."""
+    for ad in ('ilk_gorulme','tarih','guncelleme'):
+        v=str(d.get(ad) or '').strip()
+        if not v: continue
+        try: z=datetime.fromisoformat(v.replace('/','-'))
+        except ValueError: return None
+        return z.astimezone().replace(tzinfo=None) if z.tzinfo else z
+    return None
+
+def bekleme_etiketi(saniye):
+    """'45 dk' (1 saatten az), '5 sa' (1 günden az), '3 gün'."""
+    saniye=max(0,int(saniye))
+    if saniye<3600: return '%d dk' % max(1,saniye//60)
+    if saniye<86400: return '%d sa' % (saniye//3600)
+    return '%d gün' % (saniye//86400)
+
+def bekleme_bilgisi(d,an=None):
+    """2.4.0: onay bekleyen (kt=0, silindi=0) kayıt için {'etiket','seviye','sn','baslangic'}; diğerleri için None.
+    seviye: 'kirmizi' (≥ HATIRLATMA_GUN gün), 'turuncu' (≥ BEKLEME_UYARI_SAAT saat) ya da 'normal'."""
+    if d.get('kt') or d.get('silindi'): return None
+    bas=_baslangic_zamani(d)
+    if not bas: return None
+    sn=max(0,int(((an or _su_an())-bas).total_seconds()))
+    uyari_saat,kirmizi_gun=_bekleme_esikleri()
+    seviye='kirmizi' if sn>=kirmizi_gun*86400 else 'turuncu' if sn>=uyari_saat*3600 else 'normal'
+    return dict(etiket=bekleme_etiketi(sn),seviye=seviye,sn=sn,baslangic=bas.strftime('%d.%m.%Y %H:%M'))
 
 def kayit_izin(r,eylem):
     return yetki.izin(g.yk,r['proje'],eylem)
@@ -847,6 +916,7 @@ def kayit_sozluk(row):
     d['onay_uyari']=bool(_onaysiz_modu()=='uyar' and not d['izin_kt'] and not d['kt'] and not d['silindi'])
     link=d.get('link') or ''; d['dis_link']=link if re.match(r'^https?://',link) else None
     link2=d.get('gorsel2') or ''; d['dis_link2']=link2 if re.match(r'^https?://',link2) else None
+    d['bekleme']=bekleme_bilgisi(d)  # 2.4.0: "Bekleme" rozeti (liste ve ayrıntı penceresi)
     d['giris_tipi_metni']=GIRIS_TIPI_ADLARI.get(d.get('giris_tipi') or '',d.get('giris_tipi') or '')
     d['kaynak_metni']=KAYNAK_ADLARI.get(d.get('kaynak') or '',d.get('kaynak') or '')
     d.setdefault('gorsel_dosya_adi',os.path.basename(str(d['gorsel_dosya'])) if d.get('gorsel_dosya') else None)
@@ -874,20 +944,53 @@ def _kayit_args():
         args.setlist('tarihsiz',['']); uyari='Tarih aralığı girildiği için "yalnız tarihsiz kayıtlar" seçimi kaldırıldı.'
     return args,uyari
 
+# 2.4.0: liste sırası. eski = en uzun bekleyen önce (başlangıç zamanı hatırlatmalarla aynı ifade), yeni = en yeni tarih önce.
+SIRALAMALAR={'eski':"COALESCE("+hatirlatma.BASLANGIC_SQL+",'9999') ASC,id ASC",'yeni':"COALESCE(tarih,'0000') DESC,id DESC"}
+
+# 2.4.0: Kayıtlar gelişmiş süzgeçleri ve Çıktı sayfasındaki hızlı tarih düğmeleri (tarihleri panel.js İstanbul takvimiyle doldurur;
+# hafta pazartesi başlar). Kod adları panel.js HIZLI_DONEM ile aynıdır.
+HIZLI_DONEMLER=(('bugun','Bugün'),('bu_hafta','Bu hafta'),('gecen_hafta','Geçen hafta'),('bu_ay','Bu ay'),('gecen_ay','Geçen ay'))
+app.jinja_env.globals['hizli_donemler']=HIZLI_DONEMLER
+
+def _siralama(args,durum):
+    """'sirala' parametresi (eski|yeni); verilmemişse Onay bekleyen sekmesinde eski, diğerlerinde yeni."""
+    v=str(args.get('sirala','') or '').strip().lower()
+    if v in SIRALAMALAR: return v
+    return 'eski' if durum=='bekleyen' else 'yeni'
+
+def _etkin_suzgec_sayisi(f):
+    """Telefonda kapalı süzgeç düğmesindeki "N etkin" sayısı (proje seçimi, kategori, arama, tarih aralığı vb. birer sayılır)."""
+    adlar=('proje','kategori','q','ekleyen','tarihsiz','bekleme','personel','ekleyen_ad','tip','silinmemis')
+    n=sum(1 for ad in adlar if f.get(ad))
+    if f.get('tarih1') or f.get('tarih2'): n+=1
+    return n
+
+def _gyazo_hazir():
+    """Sunucuda Gyazo anahtarı tanımlı mı (yalnız evet/hayır; anahtarın kendisi sayfaya hiç yazılmaz)."""
+    return bool(os.environ.get('GYAZO_TOKEN','').strip())
+
 @app.route('/kayitlar')
 @giris_gerekli
 def kayitlar():
-    c=baglanti(); allowed=yetki.izinli_projeler(g.yk,projeler()); args,uyari=_kayit_args(); where,par,f=_filtre_sql(args,allowed)
+    c=baglanti(); allowed=yetki.izinli_projeler(g.yk,projeler()); args,uyari=_kayit_args(); where,par,f=_filtre_sql(args,allowed,bekleyen_kapsam=True)
     try: page=max(1,int(args.get('s','1')))
     except ValueError: abort(400,'Geçersiz sayfa.')
     size=_sayfa_boyu(args); total=c.execute(f'SELECT COUNT(*) FROM kayitlar WHERE {where}',par).fetchone()[0]
     pages=max(1,(total+size-1)//size); page=min(page,pages)
-    rows=c.execute(f"SELECT * FROM kayitlar WHERE {where} ORDER BY COALESCE(tarih,'0000') DESC,id DESC LIMIT ? OFFSET ?",(*par,size,(page-1)*size)).fetchall()
+    sirala=_siralama(args,f['durum'])
+    rows=c.execute(f"SELECT * FROM kayitlar WHERE {where} ORDER BY {SIRALAMALAR[sirala]} LIMIT ? OFFSET ?",(*par,size,(page-1)*size)).fetchall()
     cats=_scoped_categories(f.get('proje_etkin') or allowed)
     counts={}
     for s in ('bekleyen','onayli','silinen','hepsi'):
-        a=args.to_dict(flat=False); a['durum']=[s]; w,p,_=_filtre_sql(MultiDict(a),allowed)
+        a=args.to_dict(flat=False); a['durum']=[s]; w,p,_=_filtre_sql(MultiDict(a),allowed,bekleyen_kapsam=True)
         counts[s]=c.execute(f'SELECT COUNT(*) FROM kayitlar WHERE {w}',p).fetchone()[0]
+    # 2.4.0: "Onay bekleyen" sayısı yalnız onay yetkisi olan projeleri sayar; yalnız görüntüleyebildiği projelerdeki bekleyenler ayrı notta.
+    bekleyen_disi=None
+    a=args.to_dict(flat=False); a['durum']=['bekleyen']; _,_,fb=_filtre_sql(MultiDict(a),allowed,bekleyen_kapsam=True)
+    if fb.get('bekleyen_disi'):
+        a['proje']=list(fb['bekleyen_disi']); w,p,_=_filtre_sql(MultiDict(a),allowed)
+        n=c.execute(f'SELECT COUNT(*) FROM kayitlar WHERE {w}',p).fetchone()[0]
+        if n: bekleyen_disi=dict(adet=n,url=url_degistir(proje=list(fb['bekleyen_disi']),durum='bekleyen',s='',ac='',sirala=''),projeler=fb['bekleyen_disi'])
     records=[kayit_sozluk(r) for r in rows]
     toplu_kt=any(yetki.izin(g.yk,p,'kt') for p in (f.get('proje_etkin') or allowed))
     view=args.get('gorunum','tablo')
@@ -909,7 +1012,9 @@ def kayitlar():
         if listelenen and not onayli_tum: onaysiz_uyari='Aradığınız ID için onaylı kanıt yok; %d onaysız kayıt listelendi.' % listelenen
         elif onayli_tum and f['durum'] in ('bekleyen','silinen'): onayli_notu=onayli_tum
     ekle=_ekleme_baglami() if _ekleme_projeleri() else None  # 2.3.6: 'Kanıt ekle' düğmesi ve penceresi (jeton pencere açılınca alınır)
-    return render_template('kayitlar.html',ekle=ekle,kayitlar=records,toplam=total,sayfa=page,sayfa_sayisi=pages,f=f,izinli=allowed,kategoriler=cats,gorunum=view,sayac=counts,sayfa_boyu=size,sayfa_boylari=SAYFA_BOYLARI,toplu_kt=toplu_kt,uyari=uyari,acik_kayit=acik or None,acik_yorum=(yorum if acik and yorum else None),onaysiz_uyari=onaysiz_uyari,onayli_notu=onayli_notu,hatirlatma_gun=_hatirlatma_gun(),damga=_degisiklik_damgasi() or '',filtre_aktif=bool(f.get('q') or f.get('kategori') or f.get('ekleyen') or f.get('tarih1') or f.get('tarih2') or f.get('tarihsiz') or f.get('proje') or f.get('bekleme') or f.get('personel') or f.get('ekleyen_ad') or f.get('tip') or f.get('silinmemis')),bos_deger=personel_ozeti.BOS_DEGER)
+    etkin=_etkin_suzgec_sayisi(f)
+    return render_template('kayitlar.html',bekleyen_disi=bekleyen_disi,sirala=sirala,sirala_varsayilan=_siralama(MultiDict(),f['durum']),etkin_suzgec=etkin,
+                           gyazo_hazir=_gyazo_hazir(),bekleme_uyari_saat=_bekleme_esikleri()[0],ekle=ekle,kayitlar=records,toplam=total,sayfa=page,sayfa_sayisi=pages,f=f,izinli=allowed,kategoriler=cats,gorunum=view,sayac=counts,sayfa_boyu=size,sayfa_boylari=SAYFA_BOYLARI,toplu_kt=toplu_kt,uyari=uyari,acik_kayit=acik or None,acik_yorum=(yorum if acik and yorum else None),onaysiz_uyari=onaysiz_uyari,onayli_notu=onayli_notu,hatirlatma_gun=_hatirlatma_gun(),damga=_degisiklik_damgasi() or '',filtre_aktif=bool(f.get('q') or f.get('kategori') or f.get('ekleyen') or f.get('tarih1') or f.get('tarih2') or f.get('tarihsiz') or f.get('proje') or f.get('bekleme') or f.get('personel') or f.get('ekleyen_ad') or f.get('tip') or f.get('silinmemis')),bos_deger=personel_ozeti.BOS_DEGER)
 
 @app.route('/kayit/<int:kid>')
 @giris_gerekli
@@ -930,7 +1035,7 @@ def kayit_json(kid):
         from . import bot_bildirim; d['tg_ekleyen']=bool(d['izin_yorum'] and bot_bildirim.tg_hedef(r) and bot_bildirim.soru_acik())  # 2.4.0: "Ekleyene sor (Telegram)"
         from .guvenli_log import log_row
         d['soru_cevaplar']=_question_answers(r)
-        d['gyazo_hazir']=bool(os.environ.get('GYAZO_TOKEN','').strip())
+        d['gyazo_hazir']=_gyazo_hazir()
         try:
             job=baglanti().execute('SELECT * FROM donusum_isleri WHERE record_id=? ORDER BY id DESC LIMIT 1',(kid,)).fetchone()
             d['gyazo_bekliyor']=bool(job and job['durum'] not in ('tamam','hata','belirsiz','iptal') and job['expected_gorsel']==r['gorsel_dosya'])
@@ -963,6 +1068,19 @@ def _hatirlatmalari_kapat(c,kid):
     # 2.3.3: 2 saat hatırlatması ('hatirlatma-saat:<id>') da kapanır; toplu ve gün sonu satırları listeye bağlı olduğu için kalır.
     c.execute("UPDATE mesaj_bildirimleri SET okundu=1 WHERE kayit_id=? AND tur='hatirlatma' AND (olay LIKE 'hatirlatma:%' OR olay LIKE 'hatirlatma-saat:%') AND okundu=0",(kid,))
 
+def _kayit_bildirimlerini_kapat(c,kid):
+    """2.4.0: kayıt onaylanınca, onayı kaldırılınca, silinince ya da geri alınınca o kayda ait 'Yeni kanıt' satırları ve kayda özel
+    hatırlatmalar HERKES için okundu olur (zil bir daha bu kaydı göstermez). Soru / yanıt / yorum satırlarına dokunulmaz;
+    proje özeti, gün sonu ve bekleyen özeti gibi listeye bağlı satırlar da kalır (_hatirlatmalari_kapat ile aynı kural)."""
+    c.execute('UPDATE bildirimler SET okundu=1 WHERE kayit_id=? AND okundu=0',(kid,))
+    c.execute("UPDATE mesaj_bildirimleri SET okundu=1 WHERE kayit_id=? AND tur='kanit' AND okundu=0",(kid,))
+    _hatirlatmalari_kapat(c,kid)
+
+def _bildirim_onay_acik():
+    """2.4.0 BILDIRIM_ONAY (varsayılan 0): 1 ise onay / onay kaldırma diğer proje sorumlularına bildirim olarak da gider.
+    İşlem geçmişi (denetim) bu ayardan etkilenmez."""
+    return hatirlatma.ayarlar(AYAR)['bildirim_onay']
+
 def version_check(r):
     v=request.form.get('surum')
     if v is not None and str(r['surum'])!=v:
@@ -972,8 +1090,8 @@ def _kt_uygula(c,r,v):
     """Tek kayit icin onay/onay kaldirma; kayit_kt ve toplu-kt ayni kurali kullanir."""
     from . import discussion
     c.execute('UPDATE kayitlar SET kt=?,kt_kaynak=\'panel\',kt_kim=?,kt_zaman=?,surum=surum+1,guncelleme=? WHERE id=?',(v,g.k['kullanici_adi'],simdi(),simdi(),r['id']))
-    if v: _hatirlatmalari_kapat(c,r['id'])
-    discussion.approval_notice(c,r,g.k['kullanici_adi'],v,r['surum']+1)
+    _kayit_bildirimlerini_kapat(c,r['id'])  # 2.4.0: onayda da onay kaldırmada da kaydın "Yeni kanıt" / hatırlatma satırları okundu
+    if _bildirim_onay_acik(): discussion.approval_notice(c,r,g.k['kullanici_adi'],v,r['surum']+1)
     from . import bot_bildirim; bot_bildirim.onay_kuyruga(c,r,v)  # 2.4.0 (Takım C): Telegram ekleyene onay bildirimi
     db.denetim_yaz(c,g.k['kullanici_adi'],'onayla' if v else 'onay_kaldir',r['proje'],r['anahtar'],r['kt'],v,ip())
 
@@ -1321,7 +1439,7 @@ def _delete_state(kid,value):
         if bool(r['silindi'])==bool(value): return jsonify(ok=True,degisiklik=False)
         reason=db.metin_temizle(request.form.get('sebep') or '',300).strip()
         c.execute('UPDATE kayitlar SET silindi=?,silen=?,silme_zamani=?,surum=surum+1,guncelleme=? WHERE id=?',(value,g.k['kullanici_adi'] if value else None,simdi() if value else None,simdi(),kid))
-        if value: _hatirlatmalari_kapat(c,kid)
+        _kayit_bildirimlerini_kapat(c,kid)  # 2.4.0: silmede de geri almada da
         if value: from . import bot_bildirim; bot_bildirim.silme_kuyruga(c,r,reason)  # 2.4.0 (Takım C)
         db.denetim_yaz(c,g.k['kullanici_adi'],'sil' if value else 'geri_al',r['proje'],r['anahtar'],r['silindi'],value,ip(),aciklama=reason or None); db.degisti(c)
     return jsonify(ok=True,degisiklik=True,damga=_degisiklik_damgasi())
@@ -1963,9 +2081,9 @@ def _cikti_secimi(args):
     """Çıktı formunun gönderilen değerleri; hata/uyarı halinde form aynı değerlerle yeniden gösterilir."""
     today=datetime.now().date()
     if args is None:
-        return dict(proje=[],tarih1=(today-timedelta(days=30)).isoformat(),tarih2=today.isoformat(),durum='hepsi',kategori='',q='',ekleyen='',tarihsiz=False)
+        return dict(proje=[],tarih1=(today-timedelta(days=30)).isoformat(),tarih2=today.isoformat(),durum='hepsi',kategori='',q='',ekleyen='',tarihsiz=False,tarih_alani='eklenme')
     return dict(proje=[str(x).strip().upper() for x in args.getlist('proje') if str(x).strip()],tarih1=args.get('tarih1','').strip()[:10],tarih2=args.get('tarih2','').strip()[:10],
-                durum=args.get('durum','hepsi'),kategori=args.get('kategori','').strip()[:120],q=args.get('q','').strip()[:200],ekleyen=args.get('ekleyen','').strip()[:100],tarihsiz=args.get('tarihsiz')=='1')
+                durum=args.get('durum','hepsi'),kategori=args.get('kategori','').strip()[:120],q=args.get('q','').strip()[:200],ekleyen=args.get('ekleyen','').strip()[:100],tarihsiz=args.get('tarihsiz')=='1',tarih_alani=_tarih_alani(args))
 
 def _cikti_tarih_hatasi(args):
     if args.get('tarihsiz')=='1':
@@ -1996,7 +2114,7 @@ def _cikti_sayfasi(secim=None,hata=None,status=200):
 @giris_gerekli
 def disa_aktar_sayfasi():
     # 2.3.1: başka sayfadan (ör. ekleyen profili "Bu görünümü Excel'e aktar") gelen koşullar formu önceden doldurur.
-    on_dolu=any(request.args.get(k) for k in ('ekleyen','tarih1','tarih2','proje','durum','kategori','q','tarihsiz'))
+    on_dolu=any(request.args.get(k) for k in ('ekleyen','tarih1','tarih2','proje','durum','kategori','q','tarihsiz','tarih_alani'))
     return _cikti_sayfasi(request.args if on_dolu else None)
 
 def _yorum_ozetleri(ids):
@@ -2034,6 +2152,56 @@ def _cikti_degeri(r,name,yorumlar):
     return v if v is not None else ''
 
 
+CIKTI_ZAMAN_SUTUNLARI=('tarih','kt_zaman','silme_zamani')
+CIKTI_DURUM_ADLARI={'hepsi':'Hepsi','onayli':'Onaylı','bekleyen':'Onay bekleyen','silinen':'Silinen'}
+
+def _excel_zamani(v):
+    """'YYYY-AA-GG SS:DD:SS' → datetime, 'YYYY-AA-GG' → date (Excel'de gerçek tarih); boş ya da okunamayan değer olduğu gibi."""
+    if not isinstance(v,str) or not v.strip(): return v
+    t=v.strip()
+    try:
+        if len(t)==10: return datetime.strptime(t,'%Y-%m-%d').date()
+        z=datetime.fromisoformat(t)
+        return (z.astimezone().replace(tzinfo=None) if z.tzinfo else z).replace(microsecond=0)
+    except ValueError: return v
+
+def cikti_dosya_adi(f,onaysiz=0):
+    """kanit-kayitlari[-PROJE+PROJE]-<durum>[-<başlangıç>_<bitiş> | -onay-<…> | -tarihsiz][-ONAYSIZ-N].xlsx (yalnız ASCII)."""
+    parca=['kanit-kayitlari']
+    pr=list(f.get('proje') or [])
+    if pr: parca.append('+'.join(pr[:4])+('+%d-proje' % (len(pr)-4) if len(pr)>4 else ''))
+    parca.append(f.get('durum') or 'hepsi')
+    if f.get('tarihsiz'): parca.append('tarihsiz')
+    elif f.get('tarih1') or f.get('tarih2'):
+        parca.append(('onay-' if f.get('tarih_alani')=='onay' else '')+(f.get('tarih1') or 'baslangic')+'_'+(f.get('tarih2') or 'bugun'))
+    if onaysiz: parca.append('ONAYSIZ-%d' % onaysiz)
+    return re.sub(r'[^A-Za-z0-9_.+-]','',('-'.join(parca)))+'.xlsx'
+
+def _cikti_bilgi_satirlari(f,adet,olusturma):
+    """Excel "Bilgi" sayfası: hangi süzgeçlerle, kim tarafından, ne zaman, kaç kayıt."""
+    tarih_adi='Onay zamanı' if f.get('tarih_alani')=='onay' else 'Eklenme tarihi'
+    if f.get('tarihsiz'): aralik='Yalnız tarihsiz kayıtlar'
+    elif f.get('tarih1') or f.get('tarih2'):
+        def tr(x): return datetime.strptime(x,'%Y-%m-%d').strftime('%d.%m.%Y') if x else '…'
+        aralik='%s – %s' % (tr(f.get('tarih1')),tr(f.get('tarih2')))
+    else: aralik='Tüm tarihler'
+    satirlar=[('Rapor','Kanıt kayıtları (Excel çıktısı)'),
+              ('Proje',', '.join(f.get('proje') or []) or 'Tüm yetkili projeler (%s)' % ', '.join(x for x in (f.get('proje_etkin') or []) if x not in (f.get('bekleyen_disi') or []))),
+              ('Durum',CIKTI_DURUM_ADLARI.get(f.get('durum'),f.get('durum') or '')),
+              ('Tarih ölçütü',tarih_adi),('Tarih aralığı',aralik),
+              ('Kategori',('(boş)' if f.get('kategori')==personel_ozeti.BOS_DEGER else f.get('kategori')) or 'Tüm kategoriler')]
+    for ad,etiket in (('q','Arama'),('ekleyen','Ekleyen'),('personel','Personel'),('ekleyen_ad','Ekleyen (rapordan)'),('tip','Tip')):
+        if f.get(ad): satirlar.append((etiket,'(boş)' if f[ad]==personel_ozeti.BOS_DEGER else f[ad]))
+    if f.get('bekleme'): satirlar.append(('Bekleme','En az %d gündür bekleyen' % f['bekleme']))
+    if f.get('silinmemis'): satirlar.append(('Silinenler','Hariç'))
+    notlar=[]
+    if f.get('bekleyen_disi'): notlar.append('Onay bekleyenler yalnız onay yetkiniz olan projelerden alındı (%s hariç).' % ', '.join(f['bekleyen_disi']))
+    if f.get('tarih_alani')=='onay' and (f.get('tarih1') or f.get('tarih2')): notlar.append('Onay zamanına göre süzüldüğü için yalnız onaylı kayıtlar var.')
+    if f.get('gizli_onaysiz'): notlar.append('Onay yetkiniz olmayan projelerde onay bekleyen kayıtlar dosyaya girmez.')
+    satirlar += [('Kayıt sayısı',adet),('Oluşturan',g.k['kullanici_adi']),('Oluşturma zamanı',olusturma.strftime('%d.%m.%Y %H:%M')),
+                 ('Not',' '.join(notlar) or 'Tarih, Onay zamanı ve Silme zamanı sütunları Excel tarih biçimindedir.')]
+    return satirlar
+
 @app.route('/disa-aktar.xlsx')
 @giris_gerekli
 def disa_aktar_xlsx():
@@ -2045,7 +2213,11 @@ def disa_aktar_xlsx():
         # Ters tarih aralığı: tam sayfa 400 yerine form aynı değerlerle ve satır içi uyarıyla döner (XHR'a JSON).
         if sayim or _json_bekleniyor():return jsonify(ok=False,hata=hata,kod=400),400
         return _cikti_sayfasi(request.args,hata=hata,status=400)
-    a=request.args.to_dict(flat=False); a.setdefault('durum',['hepsi']); w,p,_=_filtre_sql(MultiDict(a),yetki.izinli_projeler(g.yk,projeler()))
+    a=request.args.to_dict(flat=False); a.setdefault('durum',['hepsi'])
+    # 2.4.0: "Onay bekleyen"in onay projeleriyle sınırlanması yalnız Kayıtlar'daki "Excel (bu görünüm)" bağlantısında (kapsam=kayitlar)
+    # uygulanır; Çıktı sayfası eskisi gibi görüntüleyebildiğiniz tüm projelerin bekleyenlerini verir.
+    kapsam_kayitlar=a.pop('kapsam',[''])[0]=='kayitlar'
+    w,p,f=_filtre_sql(MultiDict(a),yetki.izinli_projeler(g.yk,projeler()),bekleyen_kapsam=kapsam_kayitlar)
     if sayim:
         # Çıktı formu indirmeden önce sayımı sorar; 0 kayıtta boş dosya yerine sayfada uyarı gösterir.
         # Yalnız sayım istendiğinden satırlar çekilmez (eşzamanlı kullanıcılarda hız).
@@ -2058,10 +2230,14 @@ def disa_aktar_xlsx():
         if _json_bekleniyor():return jsonify(ok=False,hata=hata,kod=400,adet=adet),400
         return _cikti_sayfasi(request.args,hata=hata,status=400)
     rows=baglanti().execute(f'SELECT * FROM kayitlar WHERE {w} ORDER BY proje,tarih,id',p).fetchall()
+    olusturma=datetime.now()
     # write_only: hücreler belleğe değil doğrudan akışa yazılır (100 bin satıra kadar bellek dostu); sütun genişliği önce hesaplanır.
     from openpyxl.cell import WriteOnlyCell
     from openpyxl.utils import get_column_letter
-    wb=openpyxl.Workbook(write_only=True); ws=wb.create_sheet('Kayıtlar')
+    wb=openpyxl.Workbook(write_only=True)
+    # 2.4.0: ilk sayfa "Bilgi" (uygulanan süzgeçler, oluşturan, zaman, kayıt sayısı); dosya "Kayıtlar" sayfasında açılır.
+    bilgi=wb.create_sheet('Bilgi'); ws=wb.create_sheet('Kayıtlar'); wb.active=1
+    bilgi.column_dimensions['A'].width=22; bilgi.column_dimensions['B'].width=70  # write_only: genişlik ilk satırdan önce verilmeli
     # Girilen her alan çıktıda: eski Excel düzeni + panelde eklenen bilgiler (durum, onay, ekleyen, yorum, bağlantı).
     # 2.3.1: eski sayısal 'KT' (0/1) sütunu 'Takım lideri onayı' (Onaylı / YOK) oldu; sütun sayısı değişmedi.
     columns=[('Kayıt ID','id'),('Proje','proje'),('Kategori','kategori'),('Personel','personel'),('Üye ID','uye_id'),('Ana üye ID','ana_uye_id'),('Sessiz / Telesekreter','tip'),('Lead ID','lead_id'),('Tarih','tarih'),('Durum','durum_metni'),('Takım lideri onayı','tl_onay'),('Onaylayan','kt_kim'),('Onay zamanı','kt_zaman'),('Ekleyen','ekleyen_ad'),('Ekleyen Telegram ID','ekleyen_id'),('Giriş tipi','giris_tipi_metni'),('Kaynak','kaynak_metni'),('Görsel bağlantısı','link'),('2. görsel bağlantısı','gorsel2'),('Görsel dosyası','gorsel_dosya_adi'),('Açıklama','aciklama'),('Ek not','ek_not'),('Ek sorular','soru_ozet'),('Yorum sayısı','yorum_sayisi'),('Son yorum','son_yorum'),('Silen','silen'),('Silme zamanı','silme_zamani'),('Eski Excel satırı','excel_satir'),('Panel bağlantısı','panel_link')]
@@ -2070,16 +2246,24 @@ def disa_aktar_xlsx():
         vals=[]
         for _,name in columns:
             v=_cikti_degeri(r,name,yorumlar)
+            if name in CIKTI_ZAMAN_SUTUNLARI: v=_excel_zamani(v)  # 2.4.0: gerçek Excel tarih/saat hücresi (okunamazsa metin kalır)
             if isinstance(v,str): v=re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]','',v)
             if isinstance(v,str) and v.startswith(('=','+','-','@','\t','\r')): v="'"+v
             vals.append(v)
         return vals
+    def hucreler(r):
+        out=[]
+        for v in satir(r):
+            if isinstance(v,(datetime,date)):
+                cell=WriteOnlyCell(ws,value=v);cell.number_format='dd.mm.yyyy hh:mm' if isinstance(v,datetime) else 'dd.mm.yyyy';out.append(cell)
+            else: out.append(v)
+        return out
     # Sütun genişlikleri ilk satır yazılmadan önce verilmeli (write_only); içerik uzunluğu bir ön geçişle ölçülür.
     genislik=[len(a) for a,_ in columns]
     ozet={}
     for r in rows:
         for i,v in enumerate(satir(r)):
-            n=len(str(v if v is not None else ''))
+            n=16 if isinstance(v,(datetime,date)) else len(str(v if v is not None else ''))
             if n>genislik[i]:genislik[i]=n
         proje_ozet=ozet.setdefault(r['proje'],[0,0,0,0]);proje_ozet[0]+=1;proje_ozet[1 if r['kt'] else 2]+=1
         if not r['kt'] and r['silindi']:proje_ozet[3]+=1  # silinmiş onaysız: 'Takım lideri onayı YOK' toplamına ve dosya adına girmez
@@ -2089,18 +2273,21 @@ def disa_aktar_xlsx():
     for a,_ in columns:
         cell=WriteOnlyCell(ws,value=a);cell.font=Font(bold=True,color='FFFFFF');cell.fill=PatternFill('solid',fgColor='1F2937');baslik.append(cell)
     ws.append(baslik)
-    for r in rows:ws.append(satir(r))
+    for r in rows:ws.append(hucreler(r))
     ws.auto_filter.ref='A1:'+get_column_letter(len(columns))+str(len(rows)+1)
     summary=wb.create_sheet('Proje özeti');summary.append(['Proje','Kayıt','KT onaylı','KT bekleyen'])
     for project in sorted(ozet):
         summary.append([project,ozet[project][0],ozet[project][1],ozet[project][2]])
     onaysiz=sum(v[2]-v[3] for v in ozet.values())
     summary.append([]);summary.append(['Takım lideri onayı YOK (raporlamada kullanılmaz)',onaysiz])
+    for satir_ in _cikti_bilgi_satirlari(f,len(rows),olusturma):
+        bilgi.append([personel_ozeti.guvenli_hucre(v) for v in satir_])
     stream=io.BytesIO(); wb.save(stream); stream.seek(0)
     db.denetim_yaz(baglanti(),g.k['kullanici_adi'],'disa_aktar',yeni=str(len(rows)),ip=ip())
     # 2.3.1 'uyar': kt yetkisi olmayan kullanıcının dosyasında onaysız satır varsa dosya adı bunu söyler.
-    ad='kanit-kayitlari.xlsx';onaysiz_ktsiz=sum(ozet[p][2]-ozet[p][3] for p in _kt_yok(sorted(ozet)))
-    if onaysiz_ktsiz:ad='kanit-kayitlari-ONAYSIZ-%d.xlsx' % onaysiz_ktsiz
+    # 2.4.0: dosya adı süzgeçlerden kurulur (ör. kanit-kayitlari-OF-onayli-2026-11-17_2026-11-23.xlsx).
+    onaysiz_ktsiz=sum(ozet[p][2]-ozet[p][3] for p in _kt_yok(sorted(ozet)))
+    ad=cikti_dosya_adi(f,onaysiz_ktsiz)
     return send_file(stream,as_attachment=True,download_name=ad,mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 

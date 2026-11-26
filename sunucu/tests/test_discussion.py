@@ -28,7 +28,8 @@ def test_question_reply_visible_and_notifications_scoped(web):
 
 
 def test_approval_actor_long_comments_cross_record_reply(web):
-    c,a=web;account(a,'ofadmin','OF:oku,kt');login(c);kid=seed(a);other=seed(a,'PA','another')
+    c,a=web;a['BILDIRIM_ONAY']='1';account(a,'ofadmin','OF:oku,kt');  # 2.4.0: onay bildirimi isteğe bağlı
+    login(c);kid=seed(a);other=seed(a,'PA','another')
     assert c.post(f'/kayit/{kid}/kt',data={'csrf':csrf(c)}).json['ok']
     d=c.get(f'/kayit/{kid}').json;assert d['kt_kim']=='testadmin' and d['kt_zaman']
     q=c.post(f'/kayit/{kid}/yorum',data={'csrf':csrf(c),'yorum':'A'*4000,'alici':'ofadmin'}).json['yorum_id']
