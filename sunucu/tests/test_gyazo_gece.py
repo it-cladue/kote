@@ -110,3 +110,27 @@ def test_setup_gyazo_gece_dry_run_ve_kurulum(tmp_path):
     assert r.returncode == 1 and "SS:DD" in r.stderr
     r = subprocess.run(["bash", betik, "--kaldir"], capture_output=True, text=True, env=env)
     assert r.returncode == 0 and "GYAZO_GECE_KALDIRILDI" in r.stdout and not (units / "kanit-gyazo.timer").exists()
+
+
+def test_gyazo_arizasinda_hizli_gecis_ve_t_gyazo_izinli(ortam):
+    conn, c, ayar = ortam
+    # 12 ayrı kimlik: hepsi 503 → ilk 10'da yeniden deneme (1 sn) var, sonrasında yok; bekleme de yok
+    for n in range(10, 22):
+        conn.execute("INSERT INTO kayitlar(anahtar,proje,personel,link,link_turu) VALUES(?,?,?,?,?)",
+                     (f"z{n}", "GA", "1", "https://i.gyazo.com/%s.jpg" % kimlik(n), "gyazo"))
+    conn.commit()
+    plan = {kimlik(n): [SahteYanit(503), SahteYanit(503)] for n in range(10, 22)}
+    plan.update({kimlik(1): [SahteYanit(503), SahteYanit(503)], kimlik(2): [SahteYanit(503), SahteYanit(503)],
+                 kimlik(3): [SahteYanit(503), SahteYanit(503)], kimlik(4): [SahteYanit(503), SahteYanit(503)]})
+    c._http = SahteOturum(plan)
+    uykular = []; loglar = []
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=uykular.append, log=loglar.append, bekleme_sn=0.15)
+    # 16 ayrı kimlik + "b" (a ile aynı kimlik → "aynı bağlantı bu çalıştırmada açılamadı") = 17
+    assert r["acilamayan"] == 17 and r["bitis_nedeni"] == "tamam" and r.get("ariza") == ["Gyazo"]
+    assert uykular.count(1) == 10 and uykular.count(0.15) <= 10  # 10. hatadan sonra yeniden deneme ve bekleme yok
+    assert any("art arda 10" in m for m in loglar)
+    sebepler = [satir[4] for satir in r["acilamayan_ornek"]]
+    assert sebepler.count("aynı bağlantı bu çalıştırmada açılamadı") == 1
+    assert all("503" in sebep for sebep in sebepler if "aynı bağlantı" not in sebep)
+    # t.gyazo.com Gyazo ve Teamzone için izinli
+    assert "t.gyazo.com" in gorsel.GYAZO_HOSTLAR and "t.gyazo.com" in gorsel.DIS_GORSEL_HOSTLAR["teamzone"]

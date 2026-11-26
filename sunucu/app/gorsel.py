@@ -27,7 +27,7 @@ GORSEL_UZANTILARI = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 KIMLIK_RX = re.compile(r"[0-9a-f]{32}", re.I)
 MAX_IMAGE_PIXELS = 25_000_000
 # Gyazo vekili: yalnız bu hostlar, yalnız 32 hex kimlik, sınırlı boyut/süre.
-GYAZO_HOSTLAR = ("gyazo.com", "i.gyazo.com")
+GYAZO_HOSTLAR = ("gyazo.com", "i.gyazo.com", "t.gyazo.com")  # t.gyazo.com: Gyazo Teams görsel yönlendirme hedefi
 GYAZO_KAYNAK = "https://i.gyazo.com/{id}.jpg"
 GYAZO_MAX_BYTES = 20 * 1024 * 1024
 GYAZO_ZAMAN_ASIMI = 15              # okuma zaman aşımı (sn); bağlantı zaman aşımı BAGLANTI_ZAMAN_ASIMI
@@ -53,7 +53,7 @@ _ONBELLEK_GECICI_RX = re.compile(r"^(gyazo|thumb|dis)-.*\.(tmp|part)$")
 # 2.3.2 — Dış görsel servisleri: yalnız bu hostlar (alt alan adları dahil), yönlendirme de yalnız bunlara.
 DIS_GORSEL_HOSTLAR = {
     "snappark": ("img.snappark.net", "snappark.net"),
-    "teamzone": ("teamzone.gyazo.com", "i.gyazo.com"),  # i.gyazo.com: Gyazo Teams görselinin doğrudan dosya yedeği
+    "teamzone": ("teamzone.gyazo.com", "i.gyazo.com", "t.gyazo.com"),  # i./t.gyazo.com: Gyazo Teams görselinin dosya ve yönlendirme hedefleri
 }
 DIS_GORSEL_ADLARI = {"gyazo": "Gyazo", "snappark": "Snappark", "teamzone": "Teamzone"}
 DIS_MAX_BYTES = GYAZO_MAX_BYTES
@@ -1291,11 +1291,12 @@ def arsiv_tara(ayar, conn, cozucu):
 
 # ------------------------------------------------------------------ Toplu Gyazo ön-indirme (CLI: gyazo-onbellekle)
 _GYAZO_SEBEP = {404: "Gyazo'da görsel yok (404)", 410: "Gyazo görseli kaldırmış (410)", 403: "Gyazo erişimi reddetti (403)",
-                503: "Gyazo'da görsel yok ya da yanıt vermedi (HTTP 503; silinmiş olabilir)",
+                503: "Gyazo yanıt vermiyor (HTTP 503: Gyazo arızası ya da silinmiş görsel; sonraki çalıştırmada yeniden denenir)",
                 429: "Gyazo hız sınırı (429)", "hata": "ağ hatası / zaman aşımı",
                 "erisim": "bağlantı kurulamadı (DNS / bağlantı reddi / zaman aşımı)", "ic_adres": "iç ağ adresine çözülüyor (güvenlik nedeniyle indirilmedi)",
                 "izinsiz": "izin verilmeyen adrese yönlendirme (güvenlik nedeniyle izlenmedi)", "zaman_asimi": "indirme 30 sn'de bitmedi"}
 GYAZO_TOPLU_429_BEKLEME = (30, 60, 120, 300)
+GYAZO_ARIZA_ESIGI = 10  # art arda bu kadar 5xx: servis arızalı sayılır, kalan bağlantılar yeniden denenmeden/beklenmeden geçilir
 
 
 _SERVIS_EKI = {"Gyazo": "'da", "Snappark": "'ta", "Teamzone": "'da"}
@@ -1426,6 +1427,7 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
         return yol, cozucu._dis_son_durum
 
     toplam = len(adaylar)
+    ariza_sayac = {}  # servis -> art arda 5xx sayısı; GYAZO_ARIZA_ESIGI aşılınca o servis için hızlı geçiş (yeniden deneme/bekleme yok)
     log("%d bağlantı taranıyor (Gyazo %d, Snappark %d, Teamzone %d)%s" % (
         toplam, turler["gyazo"]["baglanti"], turler["snappark"]["baglanti"], turler["teamzone"]["baglanti"],
         "; bu çalıştırmada en çok %d yeni indirme" % yeni_en_cok if yeni_en_cok else ""))
@@ -1487,11 +1489,20 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
             sayac["denenen"] += 1
             _yok_sil(kimlik, tur)
             yol, durum = _dene(k, tur)
-            if not yol and (durum in ("hata", "erisim") or (isinstance(durum, int) and durum >= 500)):
+            ariza_modu = ariza_sayac.get(servis, 0) >= GYAZO_ARIZA_ESIGI
+            if not yol and not ariza_modu and (durum in ("hata", "erisim") or (isinstance(durum, int) and durum >= 500)):
                 log("%d/%d %s… geçici hata (%s); 1 sn sonra bir kez daha" % (i, toplam, etiket, _gyazo_sebep(durum, servis)))
                 uyku(1)
                 _yok_sil(kimlik, tur)
                 yol, durum = _dene(k, tur)
+            if yol:
+                ariza_sayac[servis] = 0
+            elif isinstance(durum, int) and durum >= 500:
+                ariza_sayac[servis] = ariza_sayac.get(servis, 0) + 1
+                if ariza_sayac[servis] == GYAZO_ARIZA_ESIGI:
+                    log("%s art arda %d bağlantıda sunucu hatası (HTTP %s) verdi; muhtemelen %s arızası. Kalan bağlantılar beklemeden geçilir, sonraki çalıştırmada yeniden denenir."
+                        % (servis, GYAZO_ARIZA_ESIGI, durum, servis))
+                    sayac.setdefault("ariza", []).append(servis)
             for bekle in GYAZO_TOPLU_429_BEKLEME:
                 if yol or durum != 429:
                     break
@@ -1535,7 +1546,7 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
                     sayac["bitis_nedeni"] = "hiz_siniri"
                     sayac["durduruldu"] = ("%s hız sınırı sürüyor; %d/%d bağlantı işlendi. 15 dakika sonra aynı komutu yeniden çalıştırın "
                                            "(kaldığı yerden devam eder)." % (servis, i, toplam))
-            if bekleme_sn and i < toplam and not sayac["durduruldu"]:
+            if bekleme_sn and i < toplam and not sayac["durduruldu"] and ariza_sayac.get(servis, 0) < GYAZO_ARIZA_ESIGI:
                 uyku(bekleme_sn)
         if ilerleme and (i % 100 == 0 or i == toplam):
             ilerleme(i, toplam, dict(sayac))
