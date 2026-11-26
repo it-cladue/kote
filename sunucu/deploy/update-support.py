@@ -34,7 +34,7 @@ _EXPECTED_ENV = {
     "HTTPS": "1",
     "TRUST_PROXY": "1",
 }
-_REQUIRED_APP_FILES = ("__init__.py", "db.py", "settings.py", "panel.py", "bot.py", "bildirim_gecmisi.py", "hatirlatma.py", "api.py", "api_anahtarlari.py", "personel_ozeti.py")
+_REQUIRED_APP_FILES = ("__init__.py", "db.py", "settings.py", "panel.py", "bot.py", "bildirim_gecmisi.py", "hatirlatma.py", "api.py", "api_anahtarlari.py", "personel_ozeti.py", "api_kilavuz.py", "kategori_temizlik.py")
 
 
 def _regular_file(path: Path, label: str) -> os.stat_result:

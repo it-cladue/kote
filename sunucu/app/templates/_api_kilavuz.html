@@ -1,0 +1,54 @@
+{# 2.3.5 — API anahtarları sayfasındaki kullanım kılavuzu kartı. İçerik: app/api_kilavuz.py #}
+<section class="kart api-kilavuz" id="kullanim-kilavuzu" aria-labelledby="api-kilavuz-baslik">
+  <div class="kart-baslik"><div><p class="ust-etiket">Karşı sistemi kuracak kişi için</p><h2 id="api-kilavuz-baslik">Kullanım kılavuzu</h2>
+  <p class="kucukyazi" style="margin:0">Panel adresi: <code data-api-taban>{{ kilavuz.taban }}</code> · Örneklerdeki <code>{{ kilavuz.anahtar }}</code> yerine oluşturduğunuz anahtarı yazın. Ayrıntılı başvuru: kurulum klasöründeki <code>sunucu/API_KULLANIM.md</code>.</p></div></div>
+
+  <details class="api-kilavuz-bolum" open>
+    <summary>1. Uçlar ve parametreler</summary>
+    <div class="tablo-sarici" tabindex="0" role="region" aria-label="API uçları"><table class="tablo api-uc-tablosu"><thead><tr><th>Yöntem</th><th>Adres</th><th>Ne verir</th><th>Ana parametreler</th></tr></thead><tbody>
+    {% for u in kilavuz.uclar %}<tr><td><span class="durum-etiket notr tek-satir">{{ u.yontem }}</span></td><td><code data-api-uc="{{ u.yontem }} {{ u.yol }}">{{ u.yol }}</code></td><td>{{ u.amac }}{% if u.izin %}<br><small>Anahtarda "{{ u.izin }}" izni gerekir</small>{% endif %}</td><td><small>{{ u.parametreler }}</small></td></tr>{% endfor %}
+    </tbody></table></div>
+    <p class="kucukyazi">Her istekte başlık: <code>Authorization: Bearer {{ kilavuz.anahtar }}</code>. Tarihler <code>YYYY-AA-GG</code>. Birden çok proje: <code>proje=OF&amp;proje=PA</code>. Silinmiş kayıtlar hiçbir uçta görünmez; "yalnız onaylı" anahtar yalnız onaylıları görür.</p>
+  </details>
+
+  <details class="api-kilavuz-bolum" open>
+    <summary>2. Hazır örnekler (kopyalayıp yapıştırın)</summary>
+    {% for o in kilavuz.ornekler %}
+    <div class="api-ornek" id="api-ornek-{{ o.kimlik }}" data-api-ornek="{{ o.kimlik }}">
+      <div class="api-ornek-ust"><h3 id="api-ornek-{{ o.kimlik }}-baslik">{{ o.baslik }}</h3><button type="button" class="btn kucuk" aria-describedby="api-ornek-{{ o.kimlik }}-baslik" data-kopyala="{{ o.metin }}">Kopyala</button></div>
+      <pre class="api-kod"><code>{{ o.metin }}</code></pre>
+      {% if o.notlar %}<ul class="kucukyazi api-ornek-not">{% for n in o.notlar %}<li>{{ n|safe }}</li>{% endfor %}</ul>{% endif %}
+    </div>
+    {% endfor %}
+  </details>
+
+  <details class="api-kilavuz-bolum">
+    <summary>3. Örnek yanıtlar</summary>
+    <p class="kucukyazi"><code>GET /api/v1/ozet</code></p>
+    <pre class="api-kod" data-api-yanit="ozet"><code>{{ kilavuz.ornek_ozet }}</code></pre>
+    <p class="kucukyazi"><code>GET {{ kilavuz.ornek_kayitlar_yolu }}</code> — <code>onayli</code> (true/false), <code>onaylayan</code>, <code>onay_zamani</code> onay bilgisidir; <code>sayfa_sayisi</code> kadar sayfa vardır.</p>
+    <pre class="api-kod" data-api-yanit="kayitlar"><code>{{ kilavuz.ornek_kayitlar }}</code></pre>
+    <p class="kucukyazi">Görsel izni olan anahtarda her kayıtta <code>gorsel_url</code> alanı da bulunur.</p>
+  </details>
+
+  <details class="api-kilavuz-bolum">
+    <summary>4. Hatalar ve istek sınırı</summary>
+    <p class="kucukyazi">Hata yanıtı her zaman JSON'dur:</p>
+    <pre class="api-kod"><code>{{ kilavuz.ornek_hata }}</code></pre>
+    <div class="tablo-sarici" tabindex="0" role="region" aria-label="API hata kodları"><table class="tablo"><thead><tr><th>Kod</th><th>Anlamı</th><th>Ne zaman</th></tr></thead><tbody>
+    {% for h in kilavuz.hatalar %}<tr data-api-hata="{{ h.kod }}"><td><b>{{ h.kod }}</b></td><td>{{ h.ad }}</td><td><small>{{ h.aciklama }}</small></td></tr>{% endfor %}
+    </tbody></table></div>
+    <p class="kucukyazi">İstek sınırı: anahtar başına dakikada en çok <b data-api-dakika>{{ kilavuz.dakika_siniri }}</b> istek (.env: <code>API_DAKIKA_SINIRI</code>). Aşılınca 429 ve <code>Retry-After</code> başlığı döner. Beklenmeyen hatada 500 ve <code>kayit_no</code> döner; bu numarayı panel yöneticisine iletin.</p>
+  </details>
+
+  <details class="api-kilavuz-bolum">
+    <summary>5. Güvenlik</summary>
+    <ul class="kucukyazi">
+      <li><b>Anahtar paroladır.</b> E-postayla, sohbet grubuna ya da ekran görüntüsüyle paylaşmayın; karşı sistemin gizli ayarına yazın.</li>
+      <li>Anahtarı adrese (<code>?anahtar=…</code>) koymayın; yalnız <code>Authorization</code> başlığında gönderin.</li>
+      <li>Panel HTTPS ile yayındaysa yalnız <code>https://</code> adresini kullanın; <code>http://</code> üzerinden anahtar açıkta gider.</li>
+      <li>Her sistem için ayrı anahtar oluşturun, yalnız gereken projeleri seçin, "Yalnız onaylı kayıtlar"ı açık bırakın.</li>
+      <li>Anahtar sızdıysa ya da artık kullanılmıyorsa yukarıdaki listeden <b>İptal et</b>: o anahtarla gelen istekler hemen 401 alır.</li>
+    </ul>
+  </details>
+</section>

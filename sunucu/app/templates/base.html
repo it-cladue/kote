@@ -14,7 +14,7 @@
 <body>
 {% if k %}
 {% set ep = request.endpoint or '' %}
-{% set yonetim_aktif = ep in ('katalog_yonetim','yonetim_kullanicilar','bot_sayfasi','bot_kullanici_detay','arsiv','yonetim_api_anahtarlari') %}
+{% set yonetim_aktif = ep in ('katalog_yonetim','kategori_temizligi','yonetim_kullanicilar','bot_sayfasi','bot_kullanici_detay','arsiv','yonetim_api_anahtarlari') %}
 <header class="ust" id="ust-menu" data-ana-menu>
   <a class="marka" href="{{ url_for('ana') }}" aria-label="Kanıt Paneli ana sayfa"><span class="marka-isaret" aria-hidden="true">K</span>Kanıt <span>Paneli</span></a>
   <nav class="menu" id="ana-menu" aria-label="Ana menü">
@@ -30,7 +30,7 @@
       <button type="button" class="menu-baglanti {{ 'aktif' if yonetim_aktif }}" data-acilir="yonetim-acilir" aria-expanded="false" aria-controls="yonetim-acilir" aria-haspopup="true">Yönetim <span aria-hidden="true">▾</span></button>
       <div id="yonetim-acilir" class="yonetim-acilir" hidden>
         <small>Süperadmin</small>
-        <a href="{{ url_for('katalog_yonetim') }}" class="{{ 'aktif' if ep == 'katalog_yonetim' }}">Proje / Kategoriler</a>
+        <a href="{{ url_for('katalog_yonetim') }}" class="{{ 'aktif' if ep in ('katalog_yonetim','kategori_temizligi') }}">Proje / Kategoriler</a>
         <a href="{{ url_for('yonetim_kullanicilar') }}" class="{{ 'aktif' if ep == 'yonetim_kullanicilar' }}">Kullanıcılar</a>
         <a href="{{ url_for('bot_sayfasi') }}" class="{{ 'aktif' if ep in ('bot_sayfasi','bot_kullanici_detay') }}">Bot</a>
         <a href="{{ url_for('arsiv') }}" class="{{ 'aktif' if ep == 'arsiv' }}">Arşiv</a>

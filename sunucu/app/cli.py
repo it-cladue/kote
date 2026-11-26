@@ -54,6 +54,11 @@ def main():
     hat=_alt(sub,'hatirlatma-uret','Onay bekleyen kayıtlar için hatırlatma bildirimlerini hemen üret (JSON rapor). Günlük kullanıcı sınırı ve günde bir kuralı nedeniyle aynı gün tekrar çalıştırmak yeni satır eklemez')
     hat.add_argument('--tarih',metavar='YYYY-AA-GG',help='3 gün kuralını bugün yerine bu (geçmiş) güne göre üret; ileri tarih kabul edilmez (gerçek günleri susturur). 2 saat ve gün sonu adımları her zaman şimdiki saate göre çalışır')
     hat.add_argument('--gun-sonu-zorla',action='store_true',help='Bugünün gün sonu özetini 18:00 beklenmeden hemen üret (sunucuda deneme için; yine günde bir kez)')
+    kat=_alt(sub,'kategori-temizle','Kayıtlardaki kategori yazımlarını listele ve katalog adlarında birleştir (2.3.5). Çıkış kodu: 0 başarı (değişiklik olmasa da), 1 hata (hiçbir şey yazılmaz)')
+    kat.add_argument('--listele',action='store_true',help='Kayıtlardaki bütün kategori değerlerini grupla ve say (yazmaz)')
+    kat.add_argument('--donustur',action='append',default=[],metavar='"ESKI=YENI"',help='ESKI değerini (harf duyarsız, baş/son boşluksuz) YENI katalog kategorisine (kod ya da görünen ad) çevir; (boş) yapmak için YENI yerine (boş). Birden çok kez verilebilir')
+    kat.add_argument('--onizle',action='store_true',help='Yalnız kaç kaydın değişeceğini göster, hiçbir şey yazma')
+    kat.add_argument('--kim',default='sunucu-cli',metavar='AD',help='İşlem Geçmişi\'ne yazılacak kullanıcı adı (varsayılan sunucu-cli)')
     _alt(sub,'durum','Kayıt sayısı, dosya yolları ve bot gelen kutusu özeti');_alt(sub,'veritabani-kur','Veritabanı dosyasını ve şemayı oluştur')
     args=parser.parse_args()
     if args.command in ('admin-ekle','sifre-sifirla'):
@@ -149,7 +154,36 @@ def main():
             print(json.dumps(rapor,ensure_ascii=False,indent=2))
             # Kısa Türkçe özet stderr'e: stdout saf JSON kalır (betikler okuyabilsin).
             print(hatirlatma.rapor_metni(rapor),file=sys.stderr)
+        elif args.command=='kategori-temizle': _kategori_temizle(c,args)
         elif args.command=='veritabani-kur': print('Veritabanı hazır:',AYAR['DB'])
     finally:c.close()
+
+def _kategori_temizle(c,args):
+    """stdout: JSON (betikler okuyabilsin); stderr: kısa Türkçe özet/tablo. Hata: 'Hata: …' ve çıkış kodu 1."""
+    from . import kategori_temizlik as kt
+    if not args.listele and not args.donustur: raise SystemExit("Hata: --listele ya da en az bir --donustur \"ESKI=YENI\" verin ('--help' ile kullanım bilgisi)")
+    if args.listele and args.donustur: raise SystemExit('Hata: --listele ile --donustur birlikte kullanılamaz.')
+    if args.listele:
+        gruplar=kt.gruplar(c)
+        print(json.dumps(dict(gruplar=gruplar,hedefler=kt.hedefler(c)),ensure_ascii=False,indent=2))
+        print(kt.tablo_metni(gruplar),file=sys.stderr)
+        print('%d farklı değer, %d kayıt. Etkin katalog kategorileri: %s' % (len(gruplar),sum(g['hepsi'] for g in gruplar),', '.join(h['label'] for h in kt.hedefler(c)) or '—'),file=sys.stderr)
+        return
+    ciftler=[]
+    for d in args.donustur:
+        if '=' not in d: raise SystemExit('Hata: --donustur "ESKI=YENI" biçiminde olmalı: '+d)
+        eski,yeni=d.rsplit('=',1)
+        if not eski.strip(): raise SystemExit('Hata: eski değer boş ('+d+'). Boş kategorideki kayıtları dönüştürmek için ESKI yerine (boş) yazın.')
+        if not yeni.strip(): raise SystemExit('Hata: hedef boş ('+d+'). Kategoriyi boşaltmak için YENI yerine (boş) yazın.')
+        ciftler.append((eski,yeni.strip()))
+    try:
+        donusum=kt.donusum_coz(ciftler)
+        sonuc=kt.plan(c,donusum) if args.onizle else kt.uygula(c,donusum,args.kim)
+    except ValueError as e: raise SystemExit('Hata: '+str(e))
+    print(json.dumps(dict(kt.disa(sonuc),onizleme=bool(args.onizle)),ensure_ascii=False,indent=2))
+    for k in sonuc['kalemler']:
+        print('  %s → %s: %d kayıt %s (%d silinmiş)' % (k['gorunen'] or kt.BOS_AD,k['hedef_gorunen'],k['degisecek'],'değişecek' if args.onizle else 'değişti',k['degisecek_silinen']),file=sys.stderr)
+    if args.onizle: print('ÖNİZLEME: toplam %d kayıt değişecek; hiçbir şey yazılmadı. Uygulamak için aynı komutu --onizle olmadan çalıştırın.' % sonuc['toplam_degisecek'],file=sys.stderr)
+    else: print('UYGULANDI: %d kayıt güncellendi; İşlem Geçmişi\'ne %d satır yazıldı.' % (sonuc['uygulanan'],sum(1 for k in sonuc['kalemler'] if k['degisecek'])),file=sys.stderr)
 
 if __name__=='__main__':main()

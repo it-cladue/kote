@@ -19,7 +19,7 @@ from PIL import Image, UnidentifiedImageError
 from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari, personel_ozeti
 from .settings import AYAR, ROOT
 
-SURUM = '2.3.4'
+SURUM = '2.3.5'
 secret_path = Path(AYAR['BOT_KLASOR']) / 'session.key'
 secret = os.getenv('SESSION_SECRET')
 if not secret:
@@ -1213,7 +1213,12 @@ def yonetim_api_anahtarlari():
         except ValueError as e:mesaj='Hata: '+str(e);durum=400
     return render_template('api_anahtarlari.html',anahtarlar=api_anahtarlari.listele(c),gunluk=api_anahtarlari.son_gunluk(c,50),
                            tum_projeler=projeler(),yeni=yeni,mesaj=mesaj,api_acik=api.acik_mi(),dakika_siniri=api.dakika_siniri(),
-                           bugun=datetime.now().strftime('%Y-%m-%d')),durum
+                           bugun=datetime.now().strftime('%Y-%m-%d'),kilavuz=_api_kilavuz()),durum
+
+def _api_kilavuz():
+    """2.3.5: Kullanım kılavuzu kartı (örnekler panelin dış adresiyle: request.url_root; TRUST_PROXY ile X-Forwarded-* dikkate alınır)."""
+    from . import api_kilavuz
+    return api_kilavuz.kilavuz(request.url_root,api.dakika_siniri())
 
 @app.route('/bot',methods=['GET','POST'])
 @admin_gerekli
@@ -1963,7 +1968,52 @@ def katalog_yonetim():
             flash('Kaydedildi. Yeni seçimlerde anında geçerli.');return redirect(url_for('katalog_yonetim'))
         except katalog.RevisionConflict as error:message=str(error);status=409
         except (ValueError,TypeError) as error:message=str(error);status=400
-    return render_template('katalog.html',proje_bilgileri=katalog.list_projects(c,False),kategoriler=katalog.list_categories(c,active_only=False),mesaj=message),status
+    from . import kategori_temizlik
+    return render_template('katalog.html',proje_bilgileri=katalog.list_projects(c,False),kategoriler=katalog.list_categories(c,active_only=False),mesaj=message,
+                           kayit_sayilari=kategori_temizlik.katalog_sayilari(c)),status
+
+# 2.3.5 — Kategori temizliği (yalnız süperadmin): kayıtlardaki kategori yazımlarını katalog adlarında birleştirir.
+# Önizleme yazmaz; Uygula önizleme damgasını transaction içinde yeniden doğrular. Ayrıntı: app/kategori_temizlik.py
+ISLEM_ADLARI['kategori_birlestir']='Kayıt kategorilerini birleştirdi'
+DENETIM_ADLARI['kategori_birlestir']='Kategori birleştirme'
+
+def _temizlik_secimleri():
+    anahtarlar=request.form.getlist('g');hedefler_=request.form.getlist('h')
+    if len(anahtarlar)!=len(hedefler_) or len(anahtarlar)>2000:raise ValueError('Form eksik gönderildi; sayfayı yenileyip yeniden deneyin.')
+    secim={}
+    for a,h in zip(anahtarlar,hedefler_):
+        h=str(h or '').strip()
+        if h:secim[str(a)]=h
+    return secim
+
+@app.route('/yonetim/katalog/kategori-temizligi',methods=['GET','POST'])
+@admin_gerekli
+def kategori_temizligi():
+    from . import kategori_temizlik as kt
+    c=baglanti();mesaj=None;durum=200;onizleme=None;sonuc=None;secim=None
+    if request.method=='POST':
+        try:
+            secim=_temizlik_secimleri();op=request.form.get('islem')
+            if op not in ('onizle','uygula'):raise ValueError('Bilinmeyen işlem.')
+            if not secim:raise ValueError('Hiçbir grup için "Şuna dönüştür" seçilmedi; değiştirilecek bir şey yok.')
+            if op=='onizle':onizleme=kt.plan(c,secim)
+            else:
+                damga=request.form.get('damga','')
+                if not damga:raise ValueError('Önce Önizle düğmesine basın.')
+                sonuc=kt.uygula(c,secim,g.k['kullanici_adi'],ip=ip(),damga=damga)
+                secim=None
+        except kt.Cakisma as error:
+            mesaj='Hata: '+str(error);durum=409
+            try:onizleme=kt.plan(c,secim or {})
+            except ValueError:onizleme=None
+        except ValueError as error:mesaj='Hata: '+str(error);durum=400
+    gruplar=kt.gruplar(c)
+    if secim is not None:
+        for grp in gruplar:grp['secili']=secim.get(grp['anahtar'],'')
+    else:
+        for grp in gruplar:grp['secili']=grp['varsayilan']
+    return render_template('kategori_temizligi.html',gruplar=gruplar,hedefler=kt.hedefler(c),onizleme=onizleme,sonuc=sonuc,mesaj=mesaj,
+                           BOS_HEDEF=kt.BOS_HEDEF,BOS_AD=kt.BOS_AD,toplam_kayit=sum(x['hepsi'] for x in gruplar)),durum
 
 if __name__=='__main__':
     calistir()

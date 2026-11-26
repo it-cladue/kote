@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block baslik %}Kategori temizliği — Kanıt Paneli{% endblock %}
+{% block icerik %}
+<div class="kt-sayfa">
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">Süperadmin yönetimi</p><h1>Kategori temizliği</h1>
+  <p>Kayıtlarda yazılmış bütün kategori değerleri aşağıda. Aynı kategorinin farklı yazımlarını (büyük/küçük harf, baştaki/sondaki boşluk) tek satırda görürsünüz. Her satır için <b>Şuna dönüştür</b> seçin, önce <b>Önizle</b>, sonra <b>Uygula</b>. Önizleme hiçbir şeyi değiştirmez.</p></div>
+  <div class="baslik-eylemler"><a class="btn" href="{{ url_for('katalog_yonetim') }}">Projeler ve kategoriler</a><a class="btn" href="{{ url_for('denetim', islem='kategori_birlestir') }}">İşlem geçmişi</a></div>
+</section>
+{% if mesaj %}<div class="{{ 'hata' if mesaj.startswith('Hata') else 'bilgi' }}" role="alert">{{ mesaj }}</div>{% endif %}
+
+{% if sonuc %}
+<section class="kart kt-sonuc" id="kt-sonuc" aria-labelledby="kt-sonuc-baslik">
+  <div class="kart-baslik"><div><p class="ust-etiket">Sonuç</p><h2 id="kt-sonuc-baslik">{% if sonuc.uygulanan %}{{ sonuc.uygulanan }} kayıt güncellendi{% else %}Hiçbir kayıt değişmedi{% endif %}</h2>
+  <p class="kucukyazi" style="margin:0">{% if sonuc.uygulanan %}Her değişen değer için İşlem Geçmişi'ne bir "Kategori birleştirme" satırı yazıldı. Silinmiş kayıtlardan {{ sonuc.toplam_silinen }} tanesi de aynı ada çekildi (geri alınırlarsa tutarlı kalsınlar).{% else %}Seçilen değerler zaten hedef yazımındaydı; tekrar uygulamak bir şey değiştirmez.{% endif %}</p></div></div>
+  {% if sonuc.uygulanan %}<div class="tablo-sarici" tabindex="0" role="region" aria-label="Uygulanan değişiklikler"><table class="tablo"><thead><tr><th>Eski değer</th><th>Yeni değer</th><th>Değişen</th><th>Silinmiş</th></tr></thead><tbody>
+  {% for k in sonuc.kalemler if k.degisecek %}<tr><td><b>{{ k.gorunen }}</b></td><td>{{ k.hedef_gorunen }}</td><td>{{ k.degisecek }}</td><td>{{ k.degisecek_silinen }}</td></tr>{% endfor %}
+  </tbody></table></div>{% endif %}
+</section>
+{% endif %}
+
+{% if onizleme %}
+<section class="kart kt-onizleme" id="kt-onizleme" aria-labelledby="kt-onizleme-baslik">
+  <div class="kart-baslik"><div><p class="ust-etiket">Önizleme — henüz hiçbir şey değişmedi</p><h2 id="kt-onizleme-baslik">{{ onizleme.toplam_degisecek }} kayıt değişecek</h2>
+  <p class="kucukyazi" style="margin:0">{% if onizleme.toplam_silinen %}Bunların {{ onizleme.toplam_silinen }} tanesi silinmiş kayıt (onlar da aynı ada çekilir). {% endif %}Değişmeyecek satırlar zaten hedef yazımındadır.</p></div></div>
+  <div class="tablo-sarici" tabindex="0" role="region" aria-label="Önizleme"><table class="tablo"><thead><tr><th>Eski değer</th><th>Yeni değer</th><th>Gruptaki kayıt</th><th>Değişecek</th><th>Onaylı / bekleyen / silinmiş</th></tr></thead><tbody>
+  {% for k in onizleme.kalemler %}<tr class="{{ 'soluk' if not k.degisecek }}" data-kt-kalem="{{ k.anahtar }}" data-degisecek="{{ k.degisecek }}"><td><b>{{ k.gorunen }}</b>{% if k.yazimlar|length > 1 %}<br><small>{% for ham, n in k.yazimlar|dictsort %}<code>"{{ ham }}"</code>×{{ n }} {% endfor %}</small>{% endif %}</td><td>{{ k.hedef_gorunen }}</td><td>{{ k.grup_adet }}</td><td><b>{{ k.degisecek }}</b></td><td><small>{{ k.degisecek_onayli }} / {{ k.degisecek_bekleyen }} / {{ k.degisecek_silinen }}</small></td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if onizleme.toplam_degisecek %}
+  <form method="post" class="kt-uygula" data-onay="{{ onizleme.toplam_degisecek }} kaydın kategorisi değiştirilecek. Geri almanın tek yolu yedekten geri yüklemektir. Devam edilsin mi?">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="uygula"><input type="hidden" name="damga" value="{{ onizleme.damga }}">
+    {% for k in onizleme.kalemler %}<input type="hidden" name="g" value="{{ k.anahtar }}"><input type="hidden" name="h" value="{{ k.hedef_kod or BOS_HEDEF }}">{% endfor %}
+    <p class="kucukyazi">Uygulamadan önce sunucuda <code>sudo /usr/local/sbin/kanit-yedek.sh</code> ile yedek alın ve çıktıdaki <code>YEDEK_DOGRULANDI: panel-…db.gz</code> dosya adını not edin (Bot sayfasındaki <i>SQLite yedeği al</i> dosyası <code>--geri-yukle</code> ile geri yüklenemez). Önizlemeden sonra kayıtlar değişirse Uygula reddedilir ve yeniden önizleme istenir.</p>
+    <button class="btn birincil">Uygula</button> <a class="btn" href="{{ url_for('kategori_temizligi') }}">Vazgeç</a>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="kart" aria-labelledby="kt-liste-baslik">
+  <div class="kart-baslik"><div><h2 id="kt-liste-baslik">Kayıtlardaki kategori değerleri <span class="kucukyazi">{{ gruplar|length }} değer · {{ toplam_kayit }} kayıt</span></h2>
+  <p class="kucukyazi" style="margin:0">Sayılar silinmemiş kayıtlardır; silinmişler ayrı sütunda. "Katalogda var" satırları kendi katalog adına önceden seçilidir: yazım farkı varsa (ör. küçük harf) o kayıtlar katalogdaki yazıma çekilir, yoksa hiçbir şey değişmez.</p></div></div>
+  <form method="post" class="kt-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="onizle">
+  <div class="tablo-sarici" tabindex="0" role="region" aria-label="Kategori değerleri"><table class="tablo kt-tablo"><thead><tr><th>Değer ve yazımları</th><th>Toplam</th><th>Onaylı</th><th>Bekleyen</th><th>Silinmiş</th><th>Projeler</th><th>Katalog</th><th>Şuna dönüştür</th></tr></thead><tbody>
+  {% for grp in gruplar %}
+  <tr data-kt-grup="{{ grp.anahtar }}" class="{{ 'soluk' if grp.duzgun and grp.secili == grp.varsayilan }}">
+    <td><b>{{ grp.gorunen }}</b>{% if not grp.bos %} <a class="kucukyazi" href="{{ url_for('kayitlar', durum='hepsi', kategori=grp.gorunen, silinmemis='1') }}" title="Silinmemiş kayıtlar (Toplam sütunuyla aynı)">Kayıtlarda gör</a>{% endif %}
+      {% if not grp.bos and (grp.yazimlar|length > 1 or grp.yazimlar[0].deger != grp.gorunen) %}<br><small>{% for y in grp.yazimlar %}<code>"{{ y.deger }}"</code>×{{ y.adet }}{% if y.silinen %} ({{ y.silinen }} silinmiş){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</small>{% endif %}
+      {% if grp.bos %}<br><small>Kategorisi boş kayıtlar</small>{% endif %}</td>
+    <td>{{ grp.toplam }}</td><td>{{ grp.onayli }}</td><td>{{ grp.bekleyen }}</td><td>{{ grp.silinen }}</td>
+    <td>{% for p in grp.projeler[:6] %}<span class="rozet" style="background:{{ renk(p.proje) }};color:{{ metin_rengi(renk(p.proje)) }}" title="{{ p.adet }} kayıt">{{ p.proje }} {{ p.adet }}</span> {% endfor %}{% if grp.projeler|length > 6 %}<small>+{{ grp.projeler|length - 6 }}</small>{% endif %}</td>
+    <td>{% if grp.katalog %}<span class="durum-etiket {{ 'aktif' if grp.katalog.aktif else 'pasif' }} tek-satir">Katalogda var{{ '' if grp.katalog.aktif else ' (pasif)' }}</span>{% if not grp.duzgun %}<br><small>Katalog yazımı: <b>{{ grp.katalog.label }}</b></small>{% endif %}
+        {% elif grp.kod_onerisi %}<span class="durum-etiket bekliyor tek-satir">Katalogda yok</span><br><small>Kodu eşleşiyor: <b>{{ grp.kod_onerisi.label }}</b></small>
+        {% else %}<span class="durum-etiket notr tek-satir">Katalogda yok</span>{% endif %}</td>
+    <td><input type="hidden" name="g" value="{{ grp.anahtar }}"><label class="ekran-okuyucu" for="kt-h-{{ loop.index }}">{{ grp.gorunen }} için hedef</label>
+      <select name="h" id="kt-h-{{ loop.index }}">
+        <option value="" {{ 'selected' if not grp.secili }}>— değiştirme —</option>
+        {% if not grp.bos %}<option value="{{ BOS_HEDEF }}" {{ 'selected' if grp.secili == BOS_HEDEF }}>(boş) yap</option>{% endif %}
+        {% for h in hedefler %}<option value="{{ h.code }}" {{ 'selected' if grp.secili == h.code }}>{{ h.label }}</option>{% endfor %}
+      </select></td>
+  </tr>
+  {% else %}<tr><td colspan="8"><div class="bos-tablo">Henüz kayıt yok.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+  <div class="kt-dugmeler"><button class="btn birincil">Önizle</button> <span class="kucukyazi">Önizleme yazmaz; kaç kaydın değişeceğini gösterir.</span></div>
+  </form>
+</section>
+
+<section class="kart" aria-labelledby="kt-nasil-baslik">
+  <h2 id="kt-nasil-baslik">Nasıl kullanılır?</h2>
+  <ol class="kt-adimlar">
+    <li><b>Kalacak kategorilere karar verin.</b> Ekibin gerçekten kullandığı kategoriler katalogda <i>Aktif</i> kalsın. Kullanılmayanları <a href="{{ url_for('katalog_yonetim') }}">Projeler ve kategoriler</a> sayfasında açıp <i>Aktif</i> işaretini kaldırın: bot yeni kanıt için onları sunmaz, eski kayıtlar etiketini korur.</li>
+    <li><b>Yazımı düzeltmek istediğiniz adı katalogda düzeltin</b> (ör. görünen adı <code>cd</code> yerine <code>CD</code>). Bu sayfa kayıtları katalogdaki yazıma çeker.</li>
+    <li><b>Yedek alın.</b> Sunucuda <code>sudo /usr/local/sbin/kanit-yedek.sh</code> çalıştırın ve çıktıdaki <code>YEDEK_DOGRULANDI: panel-YYYYMMDD.db.gz</code> satırındaki dosya adını not edin. (Bot sayfasındaki <i>SQLite yedeği al</i> başka biçimde ve başka klasöre yazar; aşağıdaki geri yükleme komutu onu kabul etmez.)</li>
+    <li><b>Her tuhaf değer için "Şuna dönüştür" seçin</b> (ör. <code>30 GÜN</code> → <code>30gün</code>, <code>BTAGSIZ</code> → <code>btagsz</code>). Bir değerin kategorisi olmamalıysa <i>(boş) yap</i>. Emin değilseniz <i>— değiştirme —</i> bırakın.</li>
+    <li><b>Önizle</b>: kaç kaydın değişeceğini görün. Sonra <b>Uygula</b>.</li>
+    <li><b>Geri almak</b> gerekirse: yalnız yedekten, sunucuda <code>sudo /usr/local/sbin/kanit-yedek.sh --geri-yukle /var/backups/kanit-paneli/gunluk/panel-YYYYMMDD.db.gz</code> (önce <code>--dry-run</code> ekleyip planı görün). Yedekten sonraki yeni kayıtlar da geri gider; bu yüzden temizliği yedekten hemen sonra yapın.</li>
+  </ol>
+  <p class="kucukyazi">Sunucu komutu (aynı işlem): <code>python -m app.cli kategori-temizle --listele</code>, <code>--donustur "BTAGSIZ=btagsz" --onizle</code>, sonra <code>--onizle</code> olmadan.</p>
+</section>
+</div>
+{% endblock %}

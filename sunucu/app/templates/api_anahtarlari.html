@@ -5,7 +5,7 @@
 {% set durum_sinifi = {'etkin':'aktif','iptal':'pasif','suresi_doldu':'bekliyor'} %}
 <section class="sayfa-baslik">
   <div><p class="ust-etiket">Süperadmin yönetimi</p><h1>API anahtarları</h1><p>Başka bir sistemin panel verisini salt okunur çekmesi için anahtar oluşturun. Anahtarlar yalnız okuma yapar; kayıt ekleyemez, değiştiremez, silemez.</p></div>
-  <div class="baslik-eylemler"><a class="btn birincil" href="#yeni-anahtar">Yeni anahtar</a><a class="btn" href="#api-gunlugu">Son istekler</a></div>
+  <div class="baslik-eylemler"><a class="btn birincil" href="#yeni-anahtar">Yeni anahtar</a><a class="btn" href="#kullanim-kilavuzu">Kullanım kılavuzu</a><a class="btn" href="#api-gunlugu">Son istekler</a></div>
 </section>
 {% if not api_acik %}<div class="hata" role="status">API şu an kapalı (.env: API_ACIK=0). Anahtar oluşturabilirsiniz ama /api/v1 adresleri 404 döner.</div>{% endif %}
 {% if mesaj %}<div class="{{ 'hata' if mesaj.startswith('Hata') else 'bilgi' }}" role="status">{{ mesaj }}</div>{% endif %}
@@ -14,7 +14,7 @@
   <div class="kart-baslik"><div><p class="ust-etiket">Yeni API anahtarı</p><h2 id="yeni-anahtar-baslik"><b>{{ yeni.ad }}</b> için anahtar</h2></div><button type="button" class="btn birincil" data-kopyala="{{ yeni.anahtar }}">Anahtarı kopyala</button></div>
   <p class="sifre-deger"><code>{{ yeni.anahtar }}</code></p>
   <p class="kucukyazi">Bu anahtar yalnız şimdi görünür; panel yalnız özetini saklar. Sayfayı yenilemeyin, anahtarı karşı sistemin gizli ayarına güvenli bir yoldan yazın. Kaybolursa bu anahtarı iptal edip yenisini oluşturun.</p>
-  <p class="kucukyazi">Kullanım: <code>curl -H "Authorization: Bearer kp_…" {{ request.url_root }}api/v1/ozet</code> — ayrıntılar kurulum klasöründeki (git klonu) <code>sunucu/API_KULLANIM.md</code> belgesinde; karşı sisteme bu dosyayı iletin.</p>
+  <p class="kucukyazi">Kullanım: <code>curl -H "Authorization: Bearer kp_…" {{ request.url_root }}api/v1/ozet</code> — hazır örnekler aşağıdaki <a href="#kullanim-kilavuzu">Kullanım kılavuzu</a> kartında; ayrıntılar kurulum klasöründeki (git klonu) <code>sunucu/API_KULLANIM.md</code> belgesinde.</p>
 </section>
 {% endif %}
 <section class="kart" aria-labelledby="anahtar-listesi-baslik">
@@ -52,6 +52,7 @@
     <button class="btn birincil genis">Anahtar oluştur</button>
   </form>
 </section>
+{% if kilavuz %}{% include "_api_kilavuz.html" %}{% endif %}
 <section class="kart" id="api-gunlugu" aria-labelledby="api-gunlugu-baslik">
   <div class="kart-baslik"><div><h2 id="api-gunlugu-baslik">Son 50 istek</h2><p class="kucukyazi" style="margin:0">Geçersiz anahtarla gelen istekler de listelenir (anahtar sütunu boş).</p></div></div>
   <div class="tablo-sarici" tabindex="0" role="region" aria-label="API istek günlüğü"><table class="tablo"><thead><tr><th>Zaman</th><th>Anahtar</th><th>Uç</th><th>IP</th><th>Durum</th><th>Süre</th><th>Satır</th></tr></thead><tbody>

@@ -905,3 +905,25 @@ fieldset.po-alan > legend + * { clear: left; }
   .po-tablo tr { break-inside: avoid; }
   .po-tablo a { color: inherit !important; text-decoration: none; }
 }
+
+/* ==== 2.3.5 — API kullanım kılavuzu ve kategori temizliği (başlangıç) ==== */
+.api-kilavuz-bolum { border-top: 1px solid var(--cizgi); padding: 10px 0; }
+.api-kilavuz-bolum > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.api-ornek { margin: 14px 0 18px; }
+.api-ornek-ust { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.api-ornek-ust h3 { margin: 0; font-size: 15px; }
+pre.api-kod { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius: var(--yuvarlak); font-size: 12.5px; max-height: 360px; overflow: auto; border: 1px solid #1e293b; font-family: var(--mono); margin: 8px 0; white-space: pre; }
+pre.api-kod code { background: none; color: inherit; padding: 0; font-size: inherit; }
+.api-ornek-not { margin: 6px 0 0; padding-left: 18px; }
+.api-ornek-not li { margin: 3px 0; }
+.api-uc-tablosu code { white-space: nowrap; }
+.katalog-kayit > summary small.katalog-kayit-sayi { color: var(--soluk); white-space: nowrap; }
+.katalog-kayit > summary small.katalog-kayit-sayi + small { margin-left: 0; }
+.kt-tablo select { min-width: 150px; max-width: 220px; }
+.kt-tablo td { vertical-align: top; }
+.kt-tablo .rozet { margin: 0 2px 2px 0; }
+.kt-dugmeler { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.kt-adimlar { padding-left: 20px; }
+.kt-adimlar li { margin: 6px 0; }
+.kt-uygula { margin-top: 12px; }
+/* ==== 2.3.5 — API kullanım kılavuzu ve kategori temizliği (son) ==== */
