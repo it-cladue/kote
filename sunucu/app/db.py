@@ -99,6 +99,15 @@ CREATE TABLE IF NOT EXISTS hatirlatma_isaret (
  kayit_id INTEGER NOT NULL,kullanici_adi TEXT NOT NULL,tur TEXT NOT NULL,zaman TEXT,
  PRIMARY KEY(kayit_id,kullanici_adi,tur)
 );
+CREATE TABLE IF NOT EXISTS iki_adim_kurtarma (
+ id INTEGER PRIMARY KEY,kullanici_adi TEXT NOT NULL,kod_hash TEXT NOT NULL,olusturma TEXT,kullanildi TEXT
+);
+CREATE TABLE IF NOT EXISTS iki_adim_cihazlar (
+ id INTEGER PRIMARY KEY,kullanici_adi TEXT NOT NULL,ozet TEXT UNIQUE NOT NULL,olusturma TEXT NOT NULL,bitis TEXT NOT NULL,
+ son_kullanim TEXT,son_ip TEXT,tarayici TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_iki_adim_kurtarma ON iki_adim_kurtarma(kullanici_adi);
+CREATE INDEX IF NOT EXISTS ix_iki_adim_cihaz ON iki_adim_cihazlar(kullanici_adi);
 CREATE INDEX IF NOT EXISTS ix_kayit_proje ON kayitlar(proje,silindi,kt);
 CREATE INDEX IF NOT EXISTS ix_kayit_tarih ON kayitlar(tarih);
 CREATE INDEX IF NOT EXISTS ix_kayit_personel ON kayitlar(personel);
@@ -171,8 +180,10 @@ def _ready(conn):
         # 2.3.2: api_anahtarlari / api_gunlugu tabloları (core_schema_24). İki bayrak birlikte aranır: biri eksikse geçiş yeniden koşar.
         # 2.3.3: hatirlatma_isaret tablosu (2 saat hatırlatmasının kime hangi kayıt için gittiği; core_schema_25).
         # 2.4.0 (B1): api_anahtarlari.izinli_ipler sütunu (anahtar başına IP listesi; core_schema_240_erisim).
+        # 2.4.1: iki adımlı doğrulama sütunları ve iki_adim_kurtarma / iki_adim_cihazlar tabloları (core_schema_241_iki_adim).
         return (ayar_al(conn, 'core_schema_23') == '1' and ayar_al(conn, 'core_schema_24') == '1'
-                and ayar_al(conn, 'core_schema_25') == '1' and ayar_al(conn, 'core_schema_240_erisim') == '1')
+                and ayar_al(conn, 'core_schema_25') == '1' and ayar_al(conn, 'core_schema_240_erisim') == '1'
+                and ayar_al(conn, 'core_schema_241_iki_adim') == '1')
     except sqlite3.OperationalError:
         return False
 
@@ -211,6 +222,9 @@ def baglan(yol):
             _add_columns(conn, 'panel_kullanicilari', [('hesap_surumu','INTEGER DEFAULT 1')])  # iyimser kilit sayacı; çıkış bunu artırmaz
             _add_columns(conn, 'denetim', [('sonuc',"TEXT DEFAULT 'ok'"),('hedef_turu','TEXT'),('hedef_id','TEXT'),('aciklama','TEXT')])
             _add_columns(conn, 'api_anahtarlari', [('izinli_ipler','TEXT')])  # 2.4.0: boş = anahtar için ek IP sınırı yok
+            # 2.4.1: iki adımlı doğrulama; mevcut hesaplarda kapalı (0) başlar, kullanıcı kurana kadar giriş değişmez.
+            _add_columns(conn, 'panel_kullanicilari', [('iki_adim_acik','INTEGER DEFAULT 0'),('iki_adim_sir','TEXT'),
+                                                        ('iki_adim_son_sayac','INTEGER DEFAULT 0'),('iki_adim_tarih','TEXT')])
             from . import katalog, donusum_isleri, yetki
             katalog.ensure_schema(conn)
             donusum_isleri.ensure_schema(conn)
@@ -218,6 +232,7 @@ def baglan(yol):
             ayar_yaz(conn, 'core_schema_21', '1'); ayar_yaz(conn, 'core_schema_23', '1'); ayar_yaz(conn, 'core_schema_24', '1')
             ayar_yaz(conn, 'core_schema_25', '1')
             ayar_yaz(conn, 'core_schema_240_erisim', '1')
+            ayar_yaz(conn, 'core_schema_241_iki_adim', '1')
         return conn
     except BaseException:
         conn.close()

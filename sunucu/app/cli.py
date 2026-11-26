@@ -72,6 +72,10 @@ def main():
     dur.add_argument('--json',action='store_true',help='Yalnız sistem durumu satırlarını JSON olarak yaz')
     dur.add_argument('--uyar',action='store_true',help='Kırmızı satırlar için süperadminlere günde bir "Sistem" bildirimi yaz (panelin 10 dakikalık işi de yapar)')
     _alt(sub,'veritabani-kur','Veritabanı dosyasını ve şemayı oluştur')
+    ia=_alt(sub,'2fa-sifirla','Acil durum (2.4.1): hesabın iki adımlı doğrulamasını sıfırla (anahtar, kurtarma kodları, güvenilen cihazlar silinir; açık oturumlar kapanır). Telefonunu kaybeden sahip için de kullanılır')
+    ia.add_argument('ad',help='Kullanıcı adı');ia.add_argument('--kim',default='sunucu-cli',metavar='AD',help="İşlem Geçmişi'ne yazılacak kullanıcı adı (varsayılan sunucu-cli)")
+    iad=_alt(sub,'2fa-durum','İki adımlı doğrulama durumu (2.4.1): politika, güven süresi ve her hesabın durumu (açık / yok / zorunlu-bekliyor)')
+    iad.add_argument('--json',action='store_true',help='JSON olarak yaz')
     ay=_alt(sub,'ayar','Çalışma ayarları (panelde Yönetim → Çalışma ayarları ile aynı): listele, değiştir, varsayılana döndür. Öncelik: veritabanı > .env > varsayılan')
     ay.add_argument('ad',nargs='?',metavar='AD',help='Ayar adı, ör. BEKLEYEN_OZET_SAAT')
     ay.add_argument('deger',nargs='?',metavar='DEGER',help='Yeni değer (boş değer için "")')
@@ -188,7 +192,36 @@ def main():
         elif args.command=='kategori-temizle': _kategori_temizle(c,args)
         elif args.command=='ayar': _ayar(c,args)
         elif args.command=='veritabani-kur': print('Veritabanı hazır:',AYAR['DB'])
+        elif args.command=='2fa-sifirla': _iki_adim_sifirla(c,args)
+        elif args.command=='2fa-durum': _iki_adim_durum(c,args)
     finally:c.close()
+
+def _iki_adim_sifirla(c,args):
+    from . import iki_adim
+    ad=str(args.ad or '').strip().lower()
+    try:
+        onceki,cihaz=iki_adim.sifirla(c,ad,args.kim)
+    except ValueError as e: raise SystemExit('Hata: '+str(e))
+    if onceki: print('İki adımlı doğrulama sıfırlandı:',ad,'(%d güvenilen cihaz kaldırıldı; açık oturumlar kapandı). Politika zorunlu kılıyorsa bir sonraki girişte yeniden kurar.' % cihaz)
+    else: print('Bu hesapta iki adımlı doğrulama zaten kapalıydı:',ad,'(kalan kayıtlar temizlendi; açık oturumlar kapandı).')
+
+def _iki_adim_durum(c,args):
+    from . import iki_adim
+    pol=iki_adim.politika(c);gun=iki_adim.guven_gun(c)
+    satirlar=[]
+    for r in c.execute('SELECT * FROM panel_kullanicilari ORDER BY kullanici_adi'):
+        u=dict(r)
+        satirlar.append(dict(kullanici=u['kullanici_adi'],aktif=bool(u['aktif']),durum=iki_adim.durum_etiketi(u,pol),
+                             kurulum=u.get('iki_adim_tarih'),kalan_kurtarma=iki_adim.kalan_kurtarma(c,u['kullanici_adi']) if iki_adim.acik_mi(u) else 0,
+                             guvenilen_cihaz=len(iki_adim.cihazlar(c,u['kullanici_adi']))))
+    if args.json:
+        print(json.dumps(dict(politika=pol,guven_gun=gun,hesaplar=satirlar),ensure_ascii=False,indent=2));return
+    print('Politika (IKI_ADIM_ZORUNLU):',{'kapali':'kapalı (isteğe bağlı)','yonetici':'yöneticilere zorunlu','hepsi':'herkese zorunlu'}[pol])
+    print('Güvenilen cihaz süresi (IKI_ADIM_GUVEN_GUN):',('%d gün' % gun) if gun else 'kapalı')
+    adlar={'acik':'açık','yok':'yok','zorunlu_bekliyor':'zorunlu-bekliyor'}
+    for s in satirlar:
+        ek=(' · kurtarma %d · cihaz %d · kurulum %s' % (s['kalan_kurtarma'],s['guvenilen_cihaz'],s['kurulum'] or '-')) if s['durum']=='acik' else ''
+        print('  %-24s %-17s%s%s' % (s['kullanici'],adlar[s['durum']],'' if s['aktif'] else ' (pasif)',ek))
 
 def _erisim_izin(c,args):
     """stdout: okunur durum. Kendini panelden dışarıda bırakan sahip için: sunucuda (SSH) liste gösterilir, adres eklenir ya da temizlenir."""

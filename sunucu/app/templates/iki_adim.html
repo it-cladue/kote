@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block baslik %}İki adımlı doğrulama — Kanıt Paneli{% endblock %}
+{% block icerik %}
+<div class="iki-adim-sayfa">
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">Hesabım · {{ k.kullanici_adi }}</p><h1>İki adımlı doğrulama</h1>
+  <p>Girişte şifreye ek olarak telefonunuzdaki doğrulama uygulamasının (Google Authenticator, Microsoft Authenticator, Authy) ürettiği 6 haneli kod istenir. Şifreniz başkasının eline geçse bile telefonunuz olmadan giriş yapılamaz.</p></div>
+  <div class="baslik-eylemler"><span class="durum-etiket {{ 'aktif' if acik else 'notr' }}" id="iki-adim-durum" data-durum="{{ 'acik' if acik else 'kapali' }}">{{ 'Açık' if acik else 'Kapalı' }}</span></div>
+</section>
+{% if hata %}<div class="hata" role="alert" id="iki-adim-hata">{{ hata }}</div>{% endif %}
+{% if iki_adim_kilit %}
+<div class="bilgi uyari" role="status" id="iki-adim-zorunlu"><b>Yönetici kararıyla iki adımlı doğrulama hesabınız için zorunlu.</b> Kurulumu bitirene kadar panelin diğer sayfaları açılmaz. Aşağıdaki 4 adım yaklaşık 2 dakika sürer; takılırsanız sahibe başvurun.</div>
+{% elif zorunlu and acik %}
+<p class="kucukyazi">Bu hesap için iki adımlı doğrulama yönetici kararıyla zorunlu; kapatılamaz, yalnız yeniden kurulabilir.</p>
+{% endif %}
+
+{% if kurtarma %}
+<section class="kart kurtarma-kart" id="kurtarma-kodlari" aria-labelledby="kurtarma-baslik">
+  <p class="ust-etiket">Adım 4 · Şimdi saklayın — bir daha gösterilmez</p>
+  <h2 id="kurtarma-baslik">Kurtarma kodlarınız</h2>
+  <p>Telefonunuz kaybolursa ya da uygulama silinirse bu kodlardan biriyle girersiniz. <b>Her kod bir kez</b> kullanılır. Kodları yazdırın ya da güvenli bir yere (parola yöneticisi, kilitli not) kopyalayın; ekran görüntüsünü herkesin eriştiği yere koymayın.</p>
+  <ol class="kurtarma-liste">{% for kod in kurtarma %}<li><code>{{ kod }}</code></li>{% endfor %}</ol>
+  <div class="form-eylemler"><button type="button" class="btn birincil" data-kopyala="{{ kurtarma|join('\n') }}">Kodları kopyala</button><button type="button" class="btn" data-yazdir>Yazdır</button><a class="btn" href="{{ url_for('iki_adim') }}">Sakladım, devam et</a></div>
+</section>
+{% endif %}
+
+{% if kurulum %}
+<section class="kart kurulum-kart" id="kurulum" aria-labelledby="kurulum-baslik">
+  <p class="ust-etiket">Kurulum</p>
+  <h2 id="kurulum-baslik">{{ 'Yeniden kurulum (yeni anahtar)' if acik else 'İki adımlı doğrulamayı açın' }}</h2>
+  <ol class="adimlar">
+    <li><h3>1. Uygulamayı kurun</h3>
+      <p>Telefonunuza <b>Google Authenticator</b> (Android: Play Store, iPhone: App Store) ya da Microsoft Authenticator / Authy kurun. Ücretsizdir; hesap açmanız gerekmez.</p></li>
+    <li><h3>2. QR kodu okutun ya da anahtarı girin</h3>
+      <p>Uygulamada <b>+</b> → <b>QR kodu tara</b>'ya basın ve aşağıdaki kodu okutun. Bu sayfayı telefondan açtıysanız “Uygulamada aç” bağlantısına dokunun.</p>
+      <div class="qr-alani"><div class="qr-kutu" id="qr-kodu">{{ kurulum.qr|safe }}</div>
+        <div class="qr-yan">
+          <a class="btn birincil" href="{{ kurulum.uri }}" id="otpauth-baglanti">Uygulamada aç (telefon)</a>
+          <p class="kucukyazi">QR okutamıyorsanız uygulamada <b>Kurulum anahtarı gir</b>'i seçin: hesap adı <b>Kanıt Paneli</b>, anahtar aşağıda, tür <b>Zamana dayalı</b>.</p>
+          <p class="anahtar-gruplu"><code id="kurulum-anahtari" data-anahtar="{{ kurulum.sir }}">{{ kurulum.gruplu }}</code></p>
+          <button type="button" class="btn kucuk" data-kopyala="{{ kurulum.sir }}">Anahtarı kopyala</button>
+        </div></div></li>
+    <li><h3>3. Kodu doğrulayın</h3>
+      <p>Uygulamada <b>Kanıt Paneli ({{ k.kullanici_adi }})</b> satırı belirir ve her 30 saniyede yeni bir 6 haneli kod gösterir. Şu anki kodu yazın.</p>
+      <form method="post" autocomplete="off" class="kod-formu" id="etkinlestir-formu">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="etkinlestir">
+        <label for="etkinlestir-kod">Uygulamadaki 6 haneli kod<input id="etkinlestir-kod" name="kod" required inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" autocomplete="one-time-code" placeholder="123456" class="kod-girdi"></label>
+        <div class="form-eylemler"><button class="btn birincil">Doğrula ve aç</button></div>
+      </form>
+      <form method="post" class="form-eylemler"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="iptal"><button class="btn kucuk hayalet">Kurulumu iptal et</button></form>
+      <p class="kucukyazi saat-notu" id="saat-notu" data-sunucu="{{ sunucu_epoch }}">Sunucu saati: <b id="sunucu-saati">{{ sunucu_saati }}</b>. Kod kabul edilmiyorsa telefonun saatinin <b>otomatik</b> (ağdan) ayarlı olduğunu kontrol edin; Google Authenticator'da ⋮ → Ayarlar → <b>Kodlar için saat düzeltme</b>.<span id="saat-uyari" class="flash-hata" hidden></span></p></li>
+    <li><h3>4. Kurtarma kodlarını saklayın</h3><p>Kod doğrulanınca 8 kurtarma kodu bir kez gösterilir. Telefon kaybolursa bunlarla girersiniz.</p></li>
+  </ol>
+</section>
+{% elif not acik and not kurtarma %}
+<section class="kart" id="iki-adim-baslat" aria-labelledby="baslat-baslik">
+  <h2 id="baslat-baslik">Henüz açık değil</h2>
+  <p>Açmak için telefonunuzda bir doğrulama uygulaması olmalı. Düğmeye bastığınızda size özel bir anahtar ve QR kodu üretilir; uygulamadan bir kod girip doğrulayana kadar hesabınızda hiçbir şey değişmez.</p>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="baslat"><button class="btn birincil" id="iki-adim-ac">İki adımlı doğrulamayı aç</button></form>
+</section>
+{% endif %}
+
+{% if acik and not kurulum %}
+<div class="iki-kolon iki-adim-izgara">
+<section class="kart" aria-labelledby="kurtarma-durum-baslik">
+  <h2 id="kurtarma-durum-baslik">Kurtarma kodları</h2>
+  <p id="kurtarma-kalan" data-kalan="{{ kalan }}">Kullanılmamış kurtarma kodu: <b>{{ kalan }}</b> / 8.{% if kurulum_tarihi %} Kurulum: {{ kurulum_tarihi }}.{% endif %}</p>
+  {% if kalan <= esik %}<div class="bilgi uyari" role="status" id="kurtarma-uyari">Kurtarma kodlarınız azaldı. Yeni kodlar üretin; eskileri geçersiz olur.</div>{% endif %}
+  <form method="post" autocomplete="off" class="form-iki"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="kurtarma_yenile">
+    <label>Mevcut şifre<input type="password" name="sifre" required autocomplete="current-password"></label>
+    <div class="form-eylemler"><button class="btn">Yeni kurtarma kodları üret</button></div></form>
+</section>
+<section class="kart" id="cihazlar" aria-labelledby="cihazlar-baslik">
+  <h2 id="cihazlar-baslik">Güvenilen cihazlar</h2>
+  {% if guven_gun > 0 %}<p class="kucukyazi">Girişte “Bu cihazda {{ guven_gun }} gün sorma” işaretlenen tarayıcılar. Şifre değişikliği, rol değişikliği ya da iki adımlı doğrulamanın kapatılması hepsini iptal eder.</p>
+  {% else %}<p class="kucukyazi">“Bu cihazda sorma” seçeneği sahip tarafından kapatıldı; her girişte kod istenir.</p>{% endif %}
+  {% if cihazlar %}
+  <ul class="cihaz-liste">{% for d in cihazlar %}<li data-cihaz="{{ d.id }}"><div><b>{{ d.tarayici or 'Tarayıcı' }}</b><small>Eklendi {{ d.olusturma }} · son kullanım {{ d.son_kullanim or '-' }}{% if d.son_ip %} · {{ d.son_ip }}{% endif %} · bitiş {{ d.bitis[:10] }}</small></div>
+    <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="cihaz_kaldir"><input type="hidden" name="id" value="{{ d.id }}"><button class="btn kucuk">Kaldır</button></form></li>{% endfor %}</ul>
+  <form method="post" data-onay="Bütün güvenilen cihazlar kaldırılsın mı? Hepsinde bir sonraki girişte kod sorulur."><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="cihazlar_kaldir"><button class="btn kucuk">Tümünü kaldır</button></form>
+  {% else %}<p class="bos-tablo" id="cihaz-yok">Güvenilen cihaz yok.</p>{% endif %}
+</section>
+<section class="kart" aria-labelledby="yeniden-baslik">
+  <h2 id="yeniden-baslik">Telefon değişti mi?</h2>
+  <p class="kucukyazi">Yeni telefona kurmak için yeniden kurun: yeni anahtar üretilir, eski telefondaki kod artık çalışmaz (yeni kodu doğrulayana kadar eskisi geçerli kalır).</p>
+  <form method="post" autocomplete="off" class="form-iki"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="baslat">
+    <label>Mevcut şifre<input type="password" name="sifre" required autocomplete="current-password"></label>
+    <div class="form-eylemler"><button class="btn">Yeniden kur</button></div></form>
+</section>
+{% if not zorunlu %}
+<section class="kart" aria-labelledby="kapat-baslik">
+  <h2 id="kapat-baslik">Kapat</h2>
+  <p class="kucukyazi">Kapatınca girişte yalnız şifre istenir; kurtarma kodları ve güvenilen cihazlar silinir.</p>
+  <form method="post" autocomplete="off" class="form-iki" data-onay="İki adımlı doğrulama kapatılsın mı?"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="kapat">
+    <label>Mevcut şifre<input type="password" name="sifre" required autocomplete="current-password"></label>
+    <label>Doğrulama kodu ya da kurtarma kodu<input name="kod" required inputmode="text" autocomplete="one-time-code" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="16"></label>
+    <div class="form-eylemler"><button class="btn tehlike">İki adımlı doğrulamayı kapat</button></div></form>
+</section>
+{% endif %}
+</div>
+{% endif %}
+<p class="kucukyazi">Tarayıcınız şifrenizi kaydedebilir (bu sizin tercihiniz); panel şifrenizi hiçbir zaman saklamaz ya da hatırlamaz. “Bu cihazda sorma” yalnız doğrulama kodunu atlar.</p>
+</div>
+{% endblock %}
+{% block script %}
+<script nonce="{{ csp_nonce }}">
+(function(){
+  var y=document.querySelector('[data-yazdir]');if(y)y.addEventListener('click',function(){window.print();});
+  var n=document.getElementById('saat-notu');if(!n)return;
+  var sunucu=parseInt(n.getAttribute('data-sunucu'),10)*1000;var fark=Date.now()-sunucu;var acilis=Date.now();
+  var s=document.getElementById('sunucu-saati');
+  function iki(x){return ('0'+x).slice(-2);}
+  function yaz(){var t=new Date(sunucu+(Date.now()-acilis));s.textContent=iki(t.getHours())+':'+iki(t.getMinutes())+':'+iki(t.getSeconds());}
+  setInterval(yaz,1000);
+  // Sayfa açılış gecikmesi birkaç saniyedir; 30 saniyeyi aşan fark bu cihazın saatinin kaydığını gösterir.
+  if(Math.abs(fark)>30000){var u=document.getElementById('saat-uyari');u.hidden=false;u.textContent=' Bu cihazın saati sunucudan yaklaşık '+Math.round(Math.abs(fark)/1000)+' saniye '+(fark>0?'ileride':'geride')+'. Telefonun saati de kaymışsa kodlar reddedilir.';}
+})();
+</script>
+{% endblock %}

@@ -33,7 +33,7 @@ class Ayar:
         self.okuyan, self.yeniden, self.sifir = okuyan, yeniden, sifir
 
 
-GRUPLAR = ('Hatırlatmalar', 'Bildirimler', 'Görünürlük', 'API', 'Görseller')
+GRUPLAR = ('Hatırlatmalar', 'Bildirimler', 'Görünürlük', 'API', 'Görseller', 'Güvenlik')
 _EVET = [('1', 'Açık'), ('0', 'Kapalı')]
 
 KAYIT = [
@@ -86,6 +86,19 @@ KAYIT = [
     Ayar('DIS_GORSEL_PROXY', 'Görseller', 'Snappark / Teamzone görsellerini sunucu üzerinden getir',
          'Kapalıysa bu servislerin bağlantıları panelde gösterilmez ve gece işi denemez.', 'evet', '1', secenekler=_EVET,
          okuyan='Görsel gösterimi, gece görsel işi', yeniden='Panel görünümü için: sudo systemctl restart kanit-web (gece işi bir sonraki çalışmada uygular)'),
+    # ---------------------------------------------------------------- Güvenlik (2.4.1: iki adımlı doğrulama)
+    Ayar('IKI_ADIM_ZORUNLU', 'Güvenlik', 'İki adımlı doğrulama (Google Authenticator) zorunlu mu',
+         '"Kapalı": isteyen kendi açar. "Yöneticiler": sahip, süperadmin ve onay (kt) yetkisi olan herkes. "Herkes": bütün panel '
+         'kullanıcıları. Zorunlu olup henüz kurmamış kişi giriş yapabilir ama kurulumu bitirene kadar yalnız kurulum sayfasını görür '
+         '(bekleme süresi yok; siz de kurmadıysanız kaydettiğiniz anda kurulum sayfasına yönlendirilirsiniz). Kimin kurmadığı '
+         'Kullanıcılar sayfasındaki "2FA" sütununda görünür. API anahtarları ve Telegram botu etkilenmez.',
+         'secim', 'kapali', secenekler=[('kapali', 'Kapalı (isteğe bağlı)'), ('yonetici', 'Yöneticiler (sahip, süperadmin, onay yetkilileri)'),
+                                         ('hepsi', 'Herkes')], okuyan='Panel (her istek)'),
+    Ayar('IKI_ADIM_GUVEN_GUN', 'Güvenlik', '"Bu cihazda sorma" süresi (gün)',
+         'Kod adımında "Bu cihazda N gün sorma" kutusu işaretlenirse o tarayıcı bu kadar gün kod istemez (parola her zaman istenir). '
+         'Parola, rol değişikliği, iki adımlı doğrulamanın kapatılması ya da sıfırlanması bütün güvenilen cihazları iptal eder. '
+         '0 = özellik kapalı (her girişte kod istenir; mevcut güvenilen cihazlar da kullanılamaz).',
+         'tam', '30', 0, 365, okuyan='Giriş (kod adımı)', sifir='0 = kapalı'),
 ]
 SOZLUK = {a.ad: a for a in KAYIT}
 _KULLANICI = re.compile(r'[a-z0-9_.]{1,40}')
@@ -336,7 +349,10 @@ def okuyucu_degeri(ad, ham):
             return ('1' if kucuk in _EVET_BEYAZ[ad] else '0'), 'aynen'
         return ('0' if metin.casefold() in ('0', 'false', 'hayir', 'hayır', 'no', 'kapali', 'kapalı') else '1'), 'aynen'
     if a.tur == 'secim':
-        return ('gizle' if metin.lower() == 'gizle' else 'uyar'), 'aynen'
+        if ad == 'ONAYSIZ_GORUNUM':
+            return ('gizle' if metin.lower() == 'gizle' else 'uyar'), 'aynen'
+        izinli = [k for k, _ in a.secenekler]
+        return (metin.lower(), 'aynen') if metin.lower() in izinli else (a.varsayilan, 'varsayilan')
     if a.tur == 'saat':
         if metin in ('', '0'):
             return '0', 'aynen'

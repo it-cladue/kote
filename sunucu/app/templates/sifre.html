@@ -15,4 +15,10 @@
     <div class="form-eylemler"><button class="btn birincil" type="submit">Şifreyi kaydet</button><a class="btn" href="{{ url_for('ana') }}">Vazgeç</a></div>
   </form>
 </div>
+<div class="kart dar" id="sifre-iki-adim">
+  <p class="ust-etiket">Hesabım</p>
+  <h2>İki adımlı doğrulama: {{ 'açık' if iki_adim_acik else 'kapalı' }}</h2>
+  <p class="kucukyazi">Girişte şifreye ek olarak telefonunuzdaki Google Authenticator (ya da Microsoft Authenticator, Authy) kodu istenir. Şifre değiştiğinde “bu cihazda sorma” ile işaretlediğiniz cihazlar da iptal olur.</p>
+  <a class="btn {{ '' if iki_adim_acik else 'birincil' }}" href="{{ url_for('iki_adim') }}">{{ 'Yönet' if iki_adim_acik else 'İki adımlı doğrulamayı aç' }}</a>
+</div>
 {% endblock %}

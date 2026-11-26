@@ -635,6 +635,13 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
   .kullanici-listesi .tablo .islem-hucre { display: none; }
   .kullanici-listesi .tablo td[colspan] { display: table-cell; }
   .kullanici-listesi .kapsam-listesi { max-width: 150px; }
+  /* 2.4.1: telefonda 2FA sütunu gizlenir, aynı bilgi Durum hücresinin altında görünür (tablo ekrana sığar). */
+  .kullanici-listesi .tablo .iki-adim-hucre, .kullanici-listesi .tablo thead th.iki-adim-baslik { display: none; }
+  .kullanici-listesi .iki-adim-telefon { display: block; margin-top: 6px; font-size: 12.5px; color: var(--soluk); }
+  /* Sözcükler ortadan bölünmesin (anywhere yerine break-word); dar hücre boşluğu sütunlara yer açar. */
+  .kullanici-listesi .tablo th, .kullanici-listesi .tablo td { padding: 8px 7px; }
+  .kullanici-listesi .tablo td { overflow-wrap: break-word; }
+  .kullanici-listesi .tablo .durum-etiket { white-space: normal; padding: 3px 8px; }
   .yalniz-telefon { display: inline-flex; margin-top: 6px; min-height: 40px; }
   .modal-kontrol { position: sticky; top: 0; justify-content: flex-end; padding: 8px; background: var(--kart); margin-left: auto; width: max-content; }
   .modal-bilgi, .yorum-genis { padding: 16px; }
@@ -997,3 +1004,53 @@ pre.api-kod code { background: none; color: inherit; padding: 0; font-size: inhe
 .kt-adimlar li { margin: 6px 0; }
 .kt-uygula { margin-top: 12px; }
 /* ==== 2.3.5 — API kullanım kılavuzu ve kategori temizliği (son) ==== */
+
+/* ---------- 2.4.1: iki adımlı doğrulama ---------- */
+.ust-kilit { justify-content: space-between; }
+.ust-kilit .kilit-eylemler { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ust-kilit .kilit-eylemler form { margin: 0; }
+.iki-adim-baglanti { white-space: nowrap; font-size: 11px; color: #fbbf24; letter-spacing: .04em; line-height: 1.2; }
+.iki-adim-baglanti.acik { color: #4ade80; }
+.iki-adim-baglanti:hover { text-decoration: underline; }
+.kod-girdi { font-family: var(--mono); font-size: 1.35rem; letter-spacing: .18em; text-align: center; }
+.guven-kutu { align-items: flex-start !important; margin: 6px 0 10px !important; }
+.guven-kutu span { display: flex; flex-direction: column; }
+.guven-kutu small { margin: 2px 0 0 !important; color: var(--soluk); }
+.adimlar { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--b2); }
+.adimlar > li { border: 1px solid var(--cizgi); border-radius: var(--yuvarlak); padding: 14px 16px; background: var(--yuzey-2); min-width: 0; }
+.adimlar h3 { margin: 0 0 6px; font-size: 1.02rem; }
+.adimlar p { margin: 0 0 8px; }
+.qr-alani { display: flex; gap: var(--b2); align-items: flex-start; flex-wrap: wrap; }
+.qr-kutu { background: #fff; padding: 6px; border-radius: 10px; line-height: 0; border: 1px solid var(--cizgi); }
+.qr-kutu svg { width: 232px; height: 232px; max-width: 100%; }
+.qr-yan { flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.anahtar-gruplu { margin: 0; max-width: 100%; }
+.anahtar-gruplu code { font-size: 1.05rem; letter-spacing: .06em; word-spacing: .25em; overflow-wrap: anywhere; display: inline-block; padding: 6px 10px; max-width: 100%; }
+.kod-formu { max-width: 320px; }
+.kurtarma-kart { border-left: 4px solid var(--sari); }
+.kurtarma-liste { columns: 2; column-gap: 24px; margin: 8px 0 12px; padding-left: 22px; }
+.kurtarma-liste li { margin: 4px 0; break-inside: avoid; }
+.kurtarma-liste code { font-size: 1.05rem; letter-spacing: .05em; }
+.cihaz-liste { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 8px; }
+.cihaz-liste li { display: flex; justify-content: space-between; gap: 10px; align-items: center; border: 1px solid var(--cizgi); border-radius: var(--yuvarlak-kucuk); padding: 8px 10px; }
+.cihaz-liste li div { display: flex; flex-direction: column; min-width: 0; }
+.cihaz-liste small { color: var(--soluk); overflow-wrap: anywhere; }
+.cihaz-liste form { margin: 0; }
+.iki-adim-izgara > * { min-width: 0; }
+.iki-adim-izgara .form-iki { grid-template-columns: 1fr; }
+.iki-adim-hucre small { display: block; color: var(--soluk); }
+.iki-adim-telefon { display: none; }
+.durum-etiket.uyari-etiket { background: var(--sari-yumusak); color: var(--sari); }
+.iki-adim-yonetim { border-top: 1px dashed var(--cizgi); margin-top: 12px; padding-top: 10px; }
+.iki-adim-yonetim form { margin: 6px 0; }
+@media (max-width: 900px) { .iki-adim-izgara { grid-template-columns: 1fr; } }
+@media (max-width: 620px) {
+  .qr-kutu svg { width: 200px; height: 200px; }
+  .kurtarma-liste { columns: 1; }
+  .kod-formu { max-width: none; }
+  .ust-kilit .kilit-eylemler .kullanici-adi { display: none; }
+}
+@media print {
+  .ust, .bilgi-serit, .uyari-serit, .sayfa-baslik .baslik-eylemler, .form-eylemler, .kurulum-kart, .iki-adim-izgara { display: none !important; }
+  .kurtarma-kart { border: 0; }
+}

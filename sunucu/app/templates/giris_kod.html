@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<script src="{{ url_for('static', filename='tema.js',v=SURUM) }}"></script>
+<title>Doğrulama kodu — Kanıt Paneli</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="{{ url_for('static', filename='stil.css',v=SURUM) }}">
+</head>
+<body class="giris-sayfa">
+<button type="button" class="btn kucuk giris-tema" data-tema-toggle>Koyu tema</button>
+{# 2.4.1: parola doğru; ikinci adım. Bu sayfa tam oturum açmaz: yalnız 5 dakikalık, tek kullanımlık ön işaret vardır. #}
+<form class="giris-kutu" method="post" autocomplete="off" aria-labelledby="kod-baslik" id="kod-formu">
+  <div class="giris-logo"><span class="marka-isaret" aria-hidden="true">K</span><h1 id="kod-baslik">Doğrulama kodu</h1>
+    <p><b>{{ kullanici_adi }}</b> hesabında iki adımlı doğrulama açık. Telefonunuzdaki doğrulama uygulamasını (Google Authenticator vb.) açın ve <b>Kanıt Paneli</b> satırındaki 6 haneli kodu yazın.</p></div>
+  {% if hata %}<div class="hata" role="alert">{{ hata }}</div>{% endif %}
+  <label for="dogrulama-kodu">6 haneli kod ya da kurtarma kodu
+    <input id="dogrulama-kodu" name="kod" required autofocus inputmode="text" autocomplete="one-time-code" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="16" placeholder="123456" class="kod-girdi"></label>
+  <p class="kucukyazi" style="margin:4px 0 10px">Telefonunuz yanınızda değilse kurulumda sakladığınız kurtarma kodlarından birini (ör. <code>abcde-fghij</code>) yazın; her kurtarma kodu bir kez kullanılır.</p>
+  {% if guven_gun > 0 %}
+  <label class="satir-label guven-kutu"><input type="checkbox" name="guven" value="1"> <span>Bu cihazda {{ guven_gun }} gün sorma<small>Yalnız kendi cihazınızda işaretleyin; ortak bilgisayarda işaretlemeyin. Şifre yine her girişte istenir.</small></span></label>
+  {% endif %}
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button type="submit" class="btn birincil genis">Doğrula ve gir</button>
+  <p class="giris-alt">Bu adım <span id="kod-sure" data-kalan="{{ kalan_sn }}">{{ (kalan_sn // 60) }} dk {{ '%02d' % (kalan_sn % 60) }} sn</span> içinde tamamlanmalı; süre dolarsa şifreyle yeniden başlarsınız. Telefonunuzu kaybettiyseniz ve kurtarma kodunuz yoksa sahibe başvurun: iki adımlı doğrulamanızı sıfırlayabilir.<br><a href="{{ url_for('giris') }}">Başka hesapla giriş yap</a></p>
+</form>
+<script nonce="{{ csp_nonce }}">
+(function(){var e=document.getElementById('kod-sure');if(!e)return;var kalan=parseInt(e.getAttribute('data-kalan'),10)||0;var bitis=Date.now()+kalan*1000;
+  function yaz(){var s=Math.max(0,Math.round((bitis-Date.now())/1000));e.textContent=Math.floor(s/60)+' dk '+('0'+(s%60)).slice(-2)+' sn';if(s<=0){e.textContent='0 dk 00 sn (süre doldu)';return;}setTimeout(yaz,1000);}yaz();})();
+</script>
+</body>
+</html>

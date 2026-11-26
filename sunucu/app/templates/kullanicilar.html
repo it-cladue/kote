@@ -46,17 +46,18 @@
 {% endif %}
 <div class="kullanici-izgara">
 <section class="kart kullanici-listesi" aria-labelledby="kullanici-listesi-baslik">
-  <div class="kart-baslik"><div><h2 id="kullanici-listesi-baslik">Mevcut kullanıcılar</h2><p class="kucukyazi" style="margin:0">{{ kullanicilar|length }} hesap · Düzenlemek için satırdaki düğmeyi kullanın.</p></div></div>
-  <div class="tablo-sarici" tabindex="0" role="region" aria-label="Panel kullanıcıları"><table class="tablo"><thead><tr><th>Kullanıcı</th><th>Rol ve kapsam</th><th>Durum</th><th class="islem-hucre"><span class="ekran-okuyucu">İşlem</span></th></tr></thead><tbody>
+  <div class="kart-baslik"><div><h2 id="kullanici-listesi-baslik">Mevcut kullanıcılar</h2><p class="kucukyazi" style="margin:0">{{ kullanicilar|length }} hesap · Düzenlemek için satırdaki düğmeyi kullanın. İki adımlı doğrulama politikası: <b id="iki-adim-politika" data-politika="{{ iki_adim_politika }}">{{ {'kapali':'isteğe bağlı','yonetici':'yöneticilere zorunlu','hepsi':'herkese zorunlu'}[iki_adim_politika] }}</b>{% if iki_adim_bekleyen %} · <span class="flash-hata" id="iki-adim-bekleyen">Henüz kurmayan: {{ iki_adim_bekleyen|join(', ') }}</span>{% endif %}</p></div></div>
+  <div class="tablo-sarici" tabindex="0" role="region" aria-label="Panel kullanıcıları"><table class="tablo"><thead><tr><th>Kullanıcı</th><th>Rol ve kapsam</th><th>Durum</th><th class="iki-adim-baslik">2FA</th><th class="islem-hucre"><span class="ekran-okuyucu">İşlem</span></th></tr></thead><tbody>
   {% for u in kullanicilar %}
   {% set p = u.parsed_yetkiler %}
   <tr class="{{ 'soluk' if not u.aktif }}" id="kullanici-{{ u.kullanici_adi }}">
     <td><div class="kullanici-satir-ad"><b>{{ u.ad or u.kullanici_adi }}</b><small>{{ u.kullanici_adi }}</small><button type="button" class="btn kucuk yalniz-telefon" data-ac="duzenle-{{ u.kullanici_adi }}" aria-expanded="false" aria-controls="duzenle-{{ u.kullanici_adi }}">Düzenle</button></div></td>
     <td>{% if p.rol == 'sahip' %}<span class="durum-etiket aktif tek-satir">Sahip</span><small class="kapsam-notu">her şey · API anahtarları · erişim sınırı</small>{% elif p.rol == 'superadmin' %}<span class="durum-etiket notr tek-satir">Süperadmin</span><small class="kapsam-notu">tüm projeler</small>{% else %}<div class="kapsam-listesi">{% for proje in p.projeler %}<span class="rozet" style="background:{{ renk(proje) }};color:{{ metin_rengi(renk(proje)) }}" title="{{ proje }}: {{ kapsam_ozeti(p.eylemler.get(proje,[])) }}">{{ proje }}</span>{% else %}<small>Proje yetkisi yok</small>{% endfor %}{% if p.projeler %}<small>{% for proje in p.projeler %}{{ proje }}: {{ kapsam_ozeti(p.eylemler.get(proje,[])) }}{{ ' · ' if not loop.last }}{% endfor %}</small>{% endif %}</div>{% endif %}</td>
-    <td>{% if u.aktif %}<span class="durum-etiket aktif">Aktif</span>{% else %}<span class="durum-etiket pasif">Pasif</span>{% endif %}{% if u.sifre_degistir %}<br><small>İlk girişte şifre değiştirecek</small>{% endif %}{% if u.kilit_bitis and u.kilit_bitis > simdi() %}<br><small class="flash-hata">Kilitli: {{ u.kilit_bitis[11:16] }} kadar · Düzenle → "Değişiklikleri kaydet" kilidi hemen açar</small>{% endif %}{% if u.son_giris %}<br><small>Son giriş: {{ u.son_giris }}</small>{% endif %}</td>
+    <td>{% if u.aktif %}<span class="durum-etiket aktif">Aktif</span>{% else %}<span class="durum-etiket pasif">Pasif</span>{% endif %}{% if u.sifre_degistir %}<br><small>İlk girişte şifre değiştirecek</small>{% endif %}{% if u.kilit_bitis and u.kilit_bitis > simdi() %}<br><small class="flash-hata">Kilitli: {{ u.kilit_bitis[11:16] }} kadar · Düzenle → "Değişiklikleri kaydet" kilidi hemen açar</small>{% endif %}{% if u.son_giris %}<br><small>Son giriş: {{ u.son_giris }}</small>{% endif %}<span class="iki-adim-telefon" data-iki-adim-telefon="{{ u.iki_adim }}">2FA: {% if u.iki_adim == 'acik' %}<span class="durum-etiket aktif">açık</span>{% elif u.iki_adim == 'zorunlu_bekliyor' %}<span class="durum-etiket uyari-etiket">zorunlu, bekliyor</span>{% else %}<span class="durum-etiket notr">yok</span>{% endif %}</span></td>
+    <td class="iki-adim-hucre" data-iki-adim="{{ u.iki_adim }}">{% if u.iki_adim == 'acik' %}<span class="durum-etiket aktif">açık</span>{% if u.iki_adim_cihaz %}<small>{{ u.iki_adim_cihaz }} güvenilen cihaz</small>{% endif %}{% elif u.iki_adim == 'zorunlu_bekliyor' %}<span class="durum-etiket uyari-etiket">zorunlu, bekliyor</span><small>kurulumu yapmadı</small>{% else %}<span class="durum-etiket notr">yok</span>{% endif %}</td>
     <td class="islem-hucre"><button type="button" class="btn kucuk" data-ac="duzenle-{{ u.kullanici_adi }}" aria-expanded="false" aria-controls="duzenle-{{ u.kullanici_adi }}">Düzenle</button></td>
   </tr>
-  <tr id="duzenle-{{ u.kullanici_adi }}" hidden><td colspan="4">
+  <tr id="duzenle-{{ u.kullanici_adi }}" hidden><td colspan="5">
     {% if not u.duzenlenebilir %}
     <p class="salt-okunur-not bilgi">{{ u.rol_adi }} hesabını yalnız <b>sahip</b> düzenleyebilir (rol, şifre, pasife alma). Kendi şifrenizi üst menüdeki "Şifre" bağlantısından değiştirirsiniz.</p>
     <div class="form-eylemler"><button type="button" class="btn" data-ac="duzenle-{{ u.kullanici_adi }}">Kapat</button></div>
@@ -76,10 +77,23 @@
       </div>
       <div class="form-eylemler"><button class="btn birincil">Değişiklikleri kaydet</button><button type="button" class="btn" data-ac="duzenle-{{ u.kullanici_adi }}">Kapat</button></div>
     </form>
+    {% if ben_sahip %}
+    <div class="iki-adim-yonetim" data-iki-adim-yonetim="{{ u.kullanici_adi }}">
+      <h3>İki adımlı doğrulama: {{ {'acik':'açık','zorunlu_bekliyor':'zorunlu, henüz kurmadı','yok':'kapalı'}[u.iki_adim] }}</h3>
+      {% if u.iki_adim == 'acik' %}
+      <form method="post" autocomplete="off" class="form-eylemler" data-iki-adim-sifirla><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="iki_adim_sifirla"><input type="hidden" name="ad" value="{{ u.kullanici_adi }}">
+        <label>Onay: kullanıcı adını yazın (<b>{{ u.kullanici_adi }}</b>)<input name="onay" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="{{ u.kullanici_adi }}" data-onay-girdi data-beklenen="{{ u.kullanici_adi }}"></label>
+        <button class="btn kucuk tehlike">İki adımlı doğrulamayı sıfırla</button><small>Telefon kaybolduysa: anahtar, kurtarma kodları ve güvenilen cihazlar silinir, açık oturumları kapanır; kullanıcı yeniden kurar.</small></form>
+      {% if u.iki_adim_cihaz %}
+      <form method="post" class="form-eylemler" data-onay="{{ u.kullanici_adi }} hesabının {{ u.iki_adim_cihaz }} güvenilen cihazı iptal edilsin mi? Bir sonraki girişte kod sorulur."><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="iki_adim_cihazlar"><input type="hidden" name="ad" value="{{ u.kullanici_adi }}"><button class="btn kucuk">Güvenilen cihazları iptal et ({{ u.iki_adim_cihaz }})</button></form>
+      {% endif %}
+      {% else %}<p class="kucukyazi">Kullanıcı kendisi kurar: üst menü → “2FA” ya da Şifre sayfası → İki adımlı doğrulama.{% if u.iki_adim == 'zorunlu_bekliyor' %} Politika zorunlu kıldığı için bir sonraki girişinde kurulum sayfasına yönlendirilir.{% endif %}</p>{% endif %}
+    </div>
+    {% endif %}
     <form method="post" class="form-eylemler" data-onay="{{ u.kullanici_adi }} için geçici şifre üretilsin mi? Eski şifre geçersiz olur."><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="sifre"><input type="hidden" name="ad" value="{{ u.kullanici_adi }}"><input type="hidden" name="expected_version" value="{{ u.hesap_surumu }}"><button class="btn kucuk">Geçici şifre üret</button><small>Üretilen şifre bir kez ekranda gösterilir; kullanıcı ilk girişte değiştirir.</small></form>
     {% endif %}
   </td></tr>
-  {% else %}<tr><td colspan="4"><div class="bos-tablo">Henüz kullanıcı yok.</div></td></tr>{% endfor %}
+  {% else %}<tr><td colspan="5"><div class="bos-tablo">Henüz kullanıcı yok.</div></td></tr>{% endfor %}
   </tbody></table></div>
 </section>
 <section class="kart kullanici-formu" id="yeni-kullanici" aria-labelledby="yeni-kullanici-baslik">
@@ -126,6 +140,10 @@
       if(!girdi||girdi.value.trim().toLowerCase()!==hedefAd(f)){e.preventDefault();e.stopImmediatePropagation();guncelle(f);if(girdi){girdi.setCustomValidity('Onay için "'+hedefAd(f)+'" yazın.');girdi.reportValidity();girdi.focus();}}});
     var gg=f.querySelector('[data-onay-girdi]');if(gg)gg.addEventListener('input',function(){gg.setCustomValidity('');});
   });
+  /* 2.4.1: 2FA sıfırlama yazılı onayı (sunucu da doğrular). */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-iki-adim-sifirla]'),function(f){var gi=f.querySelector('[data-onay-girdi]');
+    f.addEventListener('submit',function(e){if(gi.value.trim().toLowerCase()!==gi.getAttribute('data-beklenen')){e.preventDefault();gi.setCustomValidity('Onay için "'+gi.getAttribute('data-beklenen')+'" yazın.');gi.reportValidity();}});
+    gi.addEventListener('input',function(){gi.setCustomValidity('');});});
   var sa=document.querySelector('[data-sahip-ata]');
   if(sa){sa.addEventListener('submit',function(e){var sec=sa.querySelector('[data-onay-kaynak]');var g=sa.querySelector('[data-onay-girdi]');if(sec&&g&&g.value.trim().toLowerCase()!==sec.value){e.preventDefault();g.setCustomValidity('Onay için "'+sec.value+'" yazın.');g.reportValidity();}});
     var g2=sa.querySelector('[data-onay-girdi]');if(g2)g2.addEventListener('input',function(){g2.setCustomValidity('');});

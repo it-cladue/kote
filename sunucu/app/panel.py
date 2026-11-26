@@ -18,6 +18,7 @@ from werkzeug.exceptions import SecurityError
 from functools import wraps
 from PIL import Image, UnidentifiedImageError
 from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari, personel_ozeti, erisim, hatirlatma
+from . import iki_adim, qr_svg
 from .settings import AYAR, ROOT
 
 SURUM = '2.4.0'
@@ -64,6 +65,10 @@ app.config.update(SESSION_COOKIE_NAME='__Host-kanit_session' if secure else 'kan
                   SESSION_COOKIE_SECURE=secure, SESSION_COOKIE_SAMESITE='Lax',
                   PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
                   MAX_CONTENT_LENGTH=EN_BUYUK_ISTEK)
+# 2.4.1: iki adımlı doğrulamanın "bu cihazda sorma" çerezi (oturum çerezinden ayrı; HttpOnly, HTTPS'te Secure + __Host-).
+CIHAZ_CEREZI='__Host-kanit_cihaz' if secure else 'kanit_cihaz'
+# Kurulumu zorunlu olup bitirmemiş hesabın açabileceği uçlar (kurulum sayfası, çıkış, geçici şifre değişimi, giriş adımları).
+IKI_ADIM_SERBEST={'iki_adim','cikis','sifre_degistir','giris','giris_dogrulama','static','saglik'}
 # 2.4.0: GYAZO_PROXY / DIS_GORSEL_PROXY panelden değiştirildiyse (veritabanı) açılışta o değer kullanılır (app/ayarlar.py).
 from . import ayarlar as _calisma_ayarlari
 COZUCU = gorsel.GorselCozucu(_calisma_ayarlari.birlesik(AYAR), AYAR['ONBELLEK'])
@@ -244,11 +249,19 @@ def before():
         g.oturum_dustu=True
     g.yk=yetki.coz(g.k['yetki'] if g.k else '')
     session.setdefault('csrf',secrets.token_hex(24))
+    # 2.4.1: politika iki adımlı doğrulamayı zorunlu kılıyor ve hesap henüz kurmadıysa yalnız kurulum sayfası açılır
+    # (geçici şifre önce değiştirilir). Sahip kendi kurulum sayfasına her zaman ulaşır; acil durumda sunucuda 2fa-sifirla.
+    g.iki_adim_kilit=bool(g.k and not g.k['sifre_degistir'] and not iki_adim.acik_mi(g.k) and iki_adim.zorunlu_mu(g.k,conn=baglanti()))
+    # /sifre yalnız geçici şifre değişimi için serbest; o durumda bu kilit zaten devrede değil, kurulum bekleyen hesap /sifre'yi açamaz.
+    if g.iki_adim_kilit and (request.endpoint not in IKI_ADIM_SERBEST or request.endpoint=='sifre_degistir'):
+        if _json_bekleniyor():
+            return jsonify(ok=False,hata='Önce iki adımlı doğrulamayı kurun.',kod=403,iki_adim=url_for('iki_adim')),403
+        return redirect(url_for('iki_adim'))
     if g.k and request.endpoint in yetki.SAHIP_GEREKLI_EYLEMLER and not g.yk.get('sahip') and not g.k['sifre_degistir']:
         # 2.4.0: yalnız sahibe açık uçlar (sahip_gerekli süsleyicisi ve başka modüllerin eklediği uç adları).
         abort(403)
     if request.method in ('POST','PUT','PATCH','DELETE'):
-        if not g.k and request.endpoint!='giris':
+        if not g.k and request.endpoint not in ('giris','giris_dogrulama'):
             # Oturumu olmayan her gönderim CSRF kontrolünden ÖNCE açıklamalı yanıt alır:
             # XHR'a JSON 401, sayfa gönderimine /giris?neden=oturum (çıkış isteği doğrudan giriş sayfasına).
             if request.endpoint=='cikis':return redirect(url_for('giris'))
@@ -307,13 +320,14 @@ def headers(response):
 def context():
     allowed=_allowed() if g.get('k') else []
     info=[p for p in _all_project_info() if p['code'] in allowed] if allowed else []
-    safe_user={a:b for a,b in (g.get('k') or {}).items() if a!='sifre_hash'}
+    safe_user={a:b for a,b in (g.get('k') or {}).items() if a not in ('sifre_hash','iki_adim_sir')}
     return dict(k=safe_user if g.get('k') else None,yk=g.get('yk'),renk=renk,metin_rengi=metin_rengi,
                 url_degistir=url_degistir,url_filtre=url_filtre,csrf=session.get('csrf',''),projeler=lambda:allowed,
                 proje_renkleri={p['code']:p['color'] for p in info},proje_bilgileri=info,
                 izin=lambda p,e:yetki.izin(g.yk,p,e),simdi=simdi,SURUM=SURUM,csp_nonce=g.get('csp_nonce',''),
                 rol_adi=yetki.rol_etiketi(g.get('yk')) if g.get('k') else '',
-                kanit_ekle_olur=bool(_ekleme_projeleri()) if g.get('k') else False)
+                kanit_ekle_olur=bool(_ekleme_projeleri()) if g.get('k') else False,
+                iki_adim_kilit=bool(g.get('iki_adim_kilit')),iki_adim_acik=iki_adim.acik_mi(g.get('k')))
 
 
 def giris_gerekli(f):
@@ -356,16 +370,22 @@ def giris():
         ad=request.form.get('kullanici','').strip().lower()
         c=baglanti()
         # IP bazlı kalıcı sınır; bilinmeyen kullanıcı adlarıyla da aşılmaz.
-        count=c.execute("SELECT COUNT(*) FROM denetim WHERE islem='giris_hata' AND ip=? AND zaman>?",(ip(),(datetime.now()-timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S'))).fetchone()[0]
+        count=_ip_hata_sayisi(c)
         if count>=20:
             guvenlik_gunlugu('GIRIS_SINIR')
             return render_template('giris.html',hata='Çok fazla giriş denemesi. 15 dakika bekleyin.'),429
         u,hata=kullanicilar.dogrula(AYAR,ad,request.form.get('sifre',''),ip=ip())
         if u:
-            session.clear(); session.permanent=True
-            session.update(kad=u['kullanici_adi'],sv=u['session_version'],csrf=secrets.token_hex(24),gz=int(time.time()))
-            db.denetim_yaz(c,ad,'giris',ip=ip())
-            return redirect(_guvenli_yol(request.args.get('sonraki','/')))
+            hedef=_guvenli_yol(request.args.get('sonraki','/'))
+            if iki_adim.acik_mi(u):
+                # 2.4.1: güvenilen cihaz (ayrı çerez) kodu atlar; değilse kısa ömürlü, tek kullanımlık ön işaretle kod adımına.
+                if iki_adim.cihaz_gecerli(c,u['kullanici_adi'],request.cookies.get(CIHAZ_CEREZI),ip()):
+                    _oturum_ac(c,u,'güvenilen cihaz: doğrulama kodu sorulmadı');return redirect(hedef)
+                numara=iki_adim.on_giris_olustur(c,u['kullanici_adi'],u['session_version'],hedef)
+                session.clear();session['ia']=numara;session['csrf']=secrets.token_hex(24)
+                return redirect(url_for('giris_dogrulama'))
+            _oturum_ac(c,u)
+            return redirect(hedef)
         # Denetime yazılan ad süzgeci geçmeli: yanlış kutuya yazılan parola ya da rastgele metin İşlem Geçmişi'ne düşmez.
         gunluk_ad=ad if kullanici_adi_gecerli(ad) else '[geçersiz ad]'
         db.denetim_yaz(c,gunluk_ad,'giris_hata',ip=ip())
@@ -382,6 +402,68 @@ def giris():
         if dustu:bilgi=SURE_MESAJI if session.get('dustu_neden')=='sure' else OTURUM_MESAJI
         elif request.args.get('neden')=='oturum':bilgi='Oturumunuz sona erdi. Lütfen yeniden giriş yapın.'
     return render_template('giris.html',hata=hata,bilgi=bilgi)
+
+def _ip_hata_sayisi(c):
+    """IP başına 15 dakikalık hatalı deneme sayısı (parola + 2.4.1 doğrulama kodu); bilinmeyen adlarla da aşılmaz."""
+    return c.execute("SELECT COUNT(*) FROM denetim WHERE islem IN ('giris_hata','2fa_hata') AND ip=? AND zaman>?",
+                     (ip(),(datetime.now()-timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S'))).fetchone()[0]
+
+def _oturum_ac(c,u,aciklama=None):
+    """Tam oturum: eski oturum (ve varsa iki adımlı ön işaret) silinir, yeni CSRF ve giriş zamanı yazılır."""
+    session.clear(); session.permanent=True
+    session.update(kad=u['kullanici_adi'],sv=u['session_version'],csrf=secrets.token_hex(24),gz=int(time.time()))
+    db.denetim_yaz(c,u['kullanici_adi'],'giris',ip=ip(),aciklama=aciklama)
+
+IKI_ADIM_SURE_MESAJI='Doğrulama adımının süresi doldu (5 dakika). Güvenlik için kullanıcı adı ve şifreyle yeniden başlayın.'
+
+@app.route('/giris/dogrulama',methods=['GET','POST'])
+def giris_dogrulama():
+    """2.4.1: parola doğru → 6 haneli kod ya da kurtarma kodu. Ön işaret tam oturum değildir (bkz. app/iki_adim.py)."""
+    c=baglanti();numara=session.get('ia');veri=iki_adim.on_giris_al(c,numara)
+    if g.k and not veri:return redirect(url_for('ana'))
+    if not veri:
+        session.pop('ia',None)
+        flash(IKI_ADIM_SURE_MESAJI if numara else 'Önce kullanıcı adı ve şifrenizle giriş yapın.')
+        return redirect(url_for('giris'))
+    ad=veri['ad'];u=kullanicilar.bul(AYAR,ad)
+    if not u or not u['aktif'] or u['session_version']!=veri.get('sv') or not iki_adim.acik_mi(u):
+        iki_adim.on_giris_sil(c,numara);session.clear();flash(OTURUM_MESAJI);return redirect(url_for('giris'))
+    guven=iki_adim.guven_gun(c);hata=None;durum=200
+    kalan_sn=max(0,int(iki_adim.ON_GIRIS_SN-(time.time()-float(veri.get('zaman',0)))))
+    if request.method=='POST':
+        if _ip_hata_sayisi(c)>=20:
+            guvenlik_gunlugu('GIRIS_SINIR');iki_adim.on_giris_sil(c,numara);session.clear()
+            return render_template('giris.html',hata='Çok fazla giriş denemesi. 15 dakika bekleyin.'),429
+        if kullanicilar.kilitli_mi(u):
+            iki_adim.on_giris_sil(c,numara);session.clear()
+            return render_template('giris.html',hata='Çok fazla hatalı doğrulama kodu; hesap geçici olarak kilitlendi. %d dakika sonra yeniden deneyin ya da yöneticinize başvurun.' % kullanicilar.KILIT_DAKIKA),429
+        # Kilit + sayım + kod denetimi tek işlemde (paralel isteklerle sınır aşılamaz); yukarıdaki iki denetim yalnız hızlı yol.
+        tur=iki_adim.kod_dene(c,ad,request.form.get('kod',''),ip(),kullanicilar.KILIT_DAKIKA,ip_sinir=20)
+        if tur=='ip_sinir':
+            guvenlik_gunlugu('GIRIS_SINIR');iki_adim.on_giris_sil(c,numara);session.clear()
+            return render_template('giris.html',hata='Çok fazla giriş denemesi. 15 dakika bekleyin.'),429
+        if tur=='kilitli':
+            iki_adim.on_giris_sil(c,numara);session.clear()
+            return render_template('giris.html',hata='Çok fazla hatalı doğrulama kodu; hesap geçici olarak kilitlendi. %d dakika sonra yeniden deneyin ya da yöneticinize başvurun.' % kullanicilar.KILIT_DAKIKA),429
+        if tur in ('totp','kurtarma'):
+            iki_adim.on_giris_sil(c,numara)
+            _oturum_ac(c,u,'iki adımlı doğrulama: '+('kurtarma kodu' if tur=='kurtarma' else 'uygulama kodu'))
+            yanit=redirect(_guvenli_yol(veri.get('sonraki') or '/'))
+            if request.form.get('guven')=='1' and guven>0:
+                belirtec=iki_adim.cihaz_ekle(c,ad,guven,ip(),request.headers.get('User-Agent'))
+                yanit.set_cookie(CIHAZ_CEREZI,belirtec,max_age=guven*86400,path='/',secure=secure,httponly=True,samesite='Lax')
+            if tur=='kurtarma':
+                kalan=iki_adim.kalan_kurtarma(c,ad)
+                flash('Kurtarma koduyla girdiniz; %d kod kaldı.%s' % (kalan,' Kodlarınız azaldı: "İki adımlı doğrulama" sayfasından yeni kurtarma kodları üretin.' if kalan<=iki_adim.KURTARMA_UYARI_ESIGI else ''))
+            return yanit
+        kilit=tur=='kilit'
+        guvenlik_gunlugu('GIRIS_KILIT' if kilit else 'IKI_ADIM_HATA',ad)
+        time.sleep(.3)
+        if kilit:
+            iki_adim.on_giris_sil(c,numara);session.clear()
+            return render_template('giris.html',hata='Çok fazla hatalı doğrulama kodu; hesap %d dakika kilitlendi.' % kullanicilar.KILIT_DAKIKA),429
+        hata='Kod doğrulanamadı. Uygulamadaki güncel 6 haneli kodu ya da bir kurtarma kodunu girin. Kalan deneme: %d.' % max(0,iki_adim.KOD_DENEME-iki_adim.son_hatalar(c,ad))
+    return render_template('giris_kod.html',hata=hata,guven_gun=guven,kalan_sn=kalan_sn,kullanici_adi=ad),durum
 
 @app.route('/cikis',methods=['POST'])
 def cikis():
@@ -419,6 +501,79 @@ def sifre_degistir():
             db.denetim_yaz(baglanti(),g.k['kullanici_adi'],'sifre_degisti',ip=ip())
             flash('Parola değiştirildi.'); return redirect(url_for('ana'))
     return render_template('sifre.html',hata=hata)
+
+def _iki_adim_parola(ad,sifre):
+    """İki adımlı doğrulama sayfasında mevcut parola denetimi (/sifre ile aynı küçük sayaç; giriş kilidine dokunmaz)."""
+    c=baglanti();esik=(datetime.now()-timedelta(minutes=SIFRE_BEKLEME_DK)).strftime('%Y-%m-%d %H:%M:%S')
+    if c.execute("SELECT COUNT(*) FROM denetim WHERE islem='sifre_hata' AND kullanici=? AND zaman>?",(ad,esik)).fetchone()[0]>=SIFRE_HATA_SINIRI:
+        raise ValueError('Çok fazla hatalı parola denemesi; %d dakika sonra tekrar deneyin.' % SIFRE_BEKLEME_DK)
+    if not kullanicilar.parola_dogru(AYAR,ad,sifre):
+        db.denetim_yaz(c,ad,'sifre_hata',ip=ip(),hedef_turu='hesap',hedef_id=ad);time.sleep(.3)
+        raise ValueError('Mevcut parolanız yanlış.')
+
+IKI_ADIM_KAPAT_KILIT='Çok fazla hatalı doğrulama kodu; hesap geçici olarak kilitlendi. %d dakika sonra yeniden deneyin. İki adımlı doğrulama açık kaldı.' % kullanicilar.KILIT_DAKIKA
+
+@app.route('/profil/iki-adim',methods=['GET','POST'],endpoint='iki_adim')
+@giris_gerekli
+def iki_adim_sayfasi():
+    """2.4.1: iki adımlı doğrulama (Google Authenticator vb.) kurulumu, kurtarma kodları, güvenilen cihazlar, kapatma."""
+    c=baglanti();ad=g.k['kullanici_adi'];hata=None;kurtarma=None;durum=200
+    u=kullanicilar.bul(AYAR,ad);acik=iki_adim.acik_mi(u);zorunlu=iki_adim.zorunlu_mu(u,conn=c)
+    if request.method=='POST':
+        op=request.form.get('islem','')
+        try:
+            if op=='baslat':
+                if acik:_iki_adim_parola(ad,request.form.get('sifre',''))  # yeniden kurulum: oturum çalınmışsa anahtar değiştirilemesin
+                iki_adim.bekleyen_sil(c,ad);iki_adim.bekleyen_al(c,ad,olustur=True)
+                return redirect(url_for('iki_adim')+'#kurulum')
+            elif op=='iptal':
+                iki_adim.bekleyen_sil(c,ad);flash('Kurulum iptal edildi; hesabınızda değişiklik olmadı.');return redirect(url_for('iki_adim'))
+            elif op=='etkinlestir':
+                sir=iki_adim.bekleyen_al(c,ad)
+                if not sir and acik:
+                    # Kurtarma kodları sayfası yenilendi (form yeniden gönderildi): kurulum zaten tamam, yanıltıcı hata verme.
+                    flash('İki adımlı doğrulama zaten açık; kurtarma kodları yalnız bir kez gösterilir (gerekirse yenilerini üretin).')
+                    return redirect(url_for('iki_adim'))
+                if not sir:raise ValueError('Kurulum süresi doldu (15 dakika). "İki adımlı doğrulamayı aç" düğmesine yeniden basın; uygulamaya yeni anahtarı ekleyin.')
+                kurtarma=[iki_adim.kurtarma_goster(k) for k in iki_adim.etkinlestir(c,ad,sir,request.form.get('kod',''),ad,ip())]
+            elif op=='kapat':
+                if not acik:raise ValueError('İki adımlı doğrulama zaten kapalı.')
+                if zorunlu:raise ValueError('Yönetici kararıyla iki adımlı doğrulama hesabınız için zorunlu; kapatılamaz. Telefon değiştirdiyseniz "Yeniden kur"u kullanın.')
+                if kullanicilar.kilitli_mi(u) or iki_adim.son_hatalar(c,ad)>=iki_adim.KOD_DENEME:
+                    raise ValueError(IKI_ADIM_KAPAT_KILIT)
+                _iki_adim_parola(ad,request.form.get('sifre',''))
+                # Giriş adımıyla aynı sınır: 5 dakikada 5 hatalı kod → hesap kilidi; kilitliyken kod hiç denenmez.
+                tur=iki_adim.kod_dene(c,ad,request.form.get('kod',''),ip(),kullanicilar.KILIT_DAKIKA)
+                if tur=='kilitli':raise ValueError(IKI_ADIM_KAPAT_KILIT)
+                if tur not in ('totp','kurtarma'):
+                    guvenlik_gunlugu('GIRIS_KILIT' if tur=='kilit' else 'IKI_ADIM_HATA',ad);time.sleep(.3)
+                    raise ValueError(IKI_ADIM_KAPAT_KILIT if tur=='kilit' else 'Doğrulama kodu ya da kurtarma kodu hatalı. Kalan deneme: %d.' % max(0,iki_adim.KOD_DENEME-iki_adim.son_hatalar(c,ad)))
+                iki_adim.kapat(c,ad,ad,ip());flash('İki adımlı doğrulama kapatıldı; güvenilen cihazlar ve kurtarma kodları silindi.')
+                return redirect(url_for('iki_adim'))
+            elif op=='kurtarma_yenile':
+                _iki_adim_parola(ad,request.form.get('sifre',''))
+                kurtarma=[iki_adim.kurtarma_goster(k) for k in iki_adim.kurtarma_yenile(c,ad,ad,ip())]
+            elif op=='cihaz_kaldir':
+                try:cid=int(request.form.get('id',''))
+                except ValueError:raise ValueError('Cihaz bulunamadı.')
+                flash('Cihaz kaldırıldı; o tarayıcıda bir sonraki girişte kod sorulur.' if iki_adim.cihaz_kaldir(c,ad,cid,ad,ip()) else 'Cihaz zaten kaldırılmıştı.')
+                return redirect(url_for('iki_adim')+'#cihazlar')
+            elif op=='cihazlar_kaldir':
+                n=iki_adim.cihazlari_kaldir(c,ad,ad,ip());flash('%d güvenilen cihaz kaldırıldı.' % n);return redirect(url_for('iki_adim')+'#cihazlar')
+            else:abort(400)
+        except ValueError as e:
+            hata=str(e);durum=400
+        u=kullanicilar.bul(AYAR,ad);acik=iki_adim.acik_mi(u)
+    sir=iki_adim.bekleyen_al(c,ad)
+    kurulum=None
+    if sir and not kurtarma:
+        uri=iki_adim.otpauth_uri(ad,sir)
+        kurulum=dict(sir=sir,gruplu=iki_adim.sir_grupla(sir),uri=uri,qr=qr_svg.svg(uri,baslik='İki adımlı doğrulama QR kodu'))
+    return render_template('iki_adim.html',acik=acik,zorunlu=zorunlu,kurulum=kurulum,kurtarma=kurtarma,hata=hata,
+                           kalan=iki_adim.kalan_kurtarma(c,ad) if acik else 0,esik=iki_adim.KURTARMA_UYARI_ESIGI,
+                           cihazlar=iki_adim.cihazlar(c,ad) if acik else [],guven_gun=iki_adim.guven_gun(c),
+                           kurulum_tarihi=(u or {}).get('iki_adim_tarih'),sunucu_epoch=int(time.time()),
+                           sunucu_saati=datetime.now().strftime('%H:%M:%S'),politika=iki_adim.politika(c)),durum
 
 def durum_bilgisi():
     c=baglanti(); raw=db.ayar_al(c,'son_ice_aktarim')
@@ -469,6 +624,7 @@ DENETIM_ADLARI={'giris':'Giriş','giris_hata':'Hatalı giriş','onayla':'Onay','
  'api_anahtar_olustur':'API anahtarı oluşturma','api_anahtar_iptal':'API anahtarı iptali','rapor_aktar':'Personel raporu çıktısı'}
 
 ISLEM_ADLARI['tg_duzeltme']='Telegram kaydını düzeltti';DENETIM_ADLARI['tg_duzeltme']='Telegram: kayıt düzeltme'  # 2.4.0 (Takım C)
+ISLEM_ADLARI.update(iki_adim.ISLEM_ADLARI);DENETIM_ADLARI.update(iki_adim.DENETIM_ADLARI)  # 2.4.1: iki adımlı doğrulama
 def islem_adi(code,adlar=None):
     """Sözlükte olmayan kod ham yazılmaz; alt çizgiler boşluğa çevrilir (kod ikinci kez basılmaz)."""
     code=str(code or '')
@@ -1579,8 +1735,8 @@ def yonetim_kullanicilar():
             expected=request.form.get('expected_version',request.form.get('sv','-1'))
             actor=g.k['kullanici_adi']
             gorunen=db.metin_temizle(request.form.get('gorunen_ad') or '',120).strip()
-            hedef=kullanicilar.bul(AYAR,ad) if op in ('guncelle','yetki','sifre','pasif','sahip_ata') else None
-            if op in ('guncelle','yetki','sifre','pasif') and not hedef:raise ValueError('Hesap bulunamadı.')
+            hedef=kullanicilar.bul(AYAR,ad) if op in ('guncelle','yetki','sifre','pasif','sahip_ata','iki_adim_sifirla','iki_adim_cihazlar') else None
+            if op in ('guncelle','yetki','sifre','pasif','iki_adim_sifirla','iki_adim_cihazlar') and not hedef:raise ValueError('Hesap bulunamadı.')
             if op=='ekle':
                 rol=_role_from_form()
                 # 2.4.0: süperadmin/sahip hesabı yalnız sahip açar ve yazılı onay ister (yeni kullanıcı adını yazma).
@@ -1629,15 +1785,30 @@ def yonetim_kullanicilar():
                 u=kullanicilar.sahip_ata(AYAR,ad,actor,ip())
                 if ad==actor:session['sv']=u['session_version']  # kendini atayan oturumda kalır
                 mesaj=ad+' artık sahip. API anahtarları ve Erişim sınırı sayfaları yalnız sahibe açıktır.'
+            elif op in ('iki_adim_sifirla','iki_adim_cihazlar'):
+                # 2.4.1: iki adımlı doğrulamayı sıfırlama / güvenilen cihazları iptal yalnız sahipte (telefon kaybı vb.).
+                if not g.yk.get('sahip'):raise kullanicilar.Yasak('İki adımlı doğrulamayı sıfırlamayı ve güvenilen cihazları iptal etmeyi yalnız sahip yapabilir.')
+                if op=='iki_adim_sifirla':
+                    _onay_kontrol('İki adımlı doğrulamayı sıfırlama',ad)
+                    onceki,cihaz=iki_adim.sifirla(baglanti(),ad,actor,ip())
+                    if ad==actor:session['sv']=kullanicilar.bul(AYAR,ad)['session_version']  # kendini sıfırlayan oturumda kalır
+                    mesaj=(ad+' için iki adımlı doğrulama sıfırlandı'+(' (%d güvenilen cihaz kaldırıldı)' % cihaz if cihaz else '')+
+                           '; açık oturumları kapandı. Zorunluysa bir sonraki girişte yeniden kurar.') if onceki else ad+' hesabında iki adımlı doğrulama zaten kapalıydı; kalan kayıtlar temizlendi.'
+                else:
+                    n=iki_adim.cihazlari_kaldir(baglanti(),ad,actor,ip(),'sahip iptal etti')
+                    mesaj='%s: %d güvenilen cihaz iptal edildi; bir sonraki girişte kod sorulur.' % (ad,n)
             else:raise ValueError('Bilinmeyen işlem.')
             flash(mesaj);return redirect(url_for('yonetim_kullanicilar'))
         except kullanicilar.Yasak as e:mesaj='Hata: '+str(e);durum=403
         except ValueError as e:mesaj='Hata: '+str(e);durum=200  # eski davranış: hata mesajıyla aynı sayfa (200)
     users=[]
     ben_sahip=bool(g.yk.get('sahip'))
+    c_ia=baglanti();pol=iki_adim.politika(c_ia)
+    cihaz_sayilari={r[0]:r[1] for r in c_ia.execute('SELECT kullanici_adi,COUNT(*) FROM iki_adim_cihazlar WHERE bitis>? GROUP BY kullanici_adi',(simdi(),))}
     for user in kullanicilar.hepsi(AYAR):
         parsed=yetki.coz(user['yetki']);rol=yetki.rol_kodu(user['yetki'])
-        safe={k:v for k,v in user.items() if k!='sifre_hash'}
+        safe={k:v for k,v in user.items() if k not in ('sifre_hash','iki_adim_sir')}
+        safe.update(iki_adim=iki_adim.durum_etiketi(user,pol),iki_adim_cihaz=cihaz_sayilari.get(user['kullanici_adi'],0))
         safe.update(ozet=yetki.ozet(user['yetki']),rol=rol,rol_adi=yetki.ROL_ADLARI[rol],
                     duzenlenebilir=ben_sahip or rol=='proje',
                     parsed_yetkiler=dict(rol={'sahip':'sahip','superadmin':'superadmin'}.get(rol,'admin'),
@@ -1646,7 +1817,8 @@ def yonetim_kullanicilar():
     gecici=_gecici_sifre_al() if request.method=='GET' else None
     sahip_var=kullanicilar.aktif_sahip_var(AYAR)
     return render_template('kullanicilar.html',kullanicilar=users,mesaj=mesaj,tum_projeler=projeler(),gecici_sifre=gecici,
-                           ben_sahip=ben_sahip,sahip_var=sahip_var,sahip_adaylari=[u for u in users if u['aktif']]),durum
+                           ben_sahip=ben_sahip,sahip_var=sahip_var,sahip_adaylari=[u for u in users if u['aktif']],
+                           iki_adim_politika=pol,iki_adim_bekleyen=[u['kullanici_adi'] for u in users if u['aktif'] and u['iki_adim']=='zorunlu_bekliyor']),durum
 
 
 @app.route('/yonetim/api-anahtarlari',methods=['GET','POST'])

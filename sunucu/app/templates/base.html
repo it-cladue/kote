@@ -15,7 +15,14 @@
 {% block head %}{% endblock %}
 </head>
 <body>
-{% if k %}
+{% if k and iki_adim_kilit %}
+{# 2.4.1: iki adımlı doğrulama zorunlu ve henüz kurulmadı — menü yok, yalnız kurulum sayfası ve çıkış #}
+<header class="ust ust-kilit" id="ust-menu">
+  <span class="marka"><span class="marka-isaret" aria-hidden="true">K</span>Kanıt <span>Paneli</span></span>
+  <div class="kilit-eylemler"><span class="kullanici-adi">{{ k.ad or k.kullanici_adi }}</span><button type="button" class="btn kucuk" data-tema-toggle>Koyu tema</button>
+    <form method="post" action="{{ url_for('cikis') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn kucuk">Çıkış</button></form></div>
+</header>
+{% elif k %}
 {% set ep = request.endpoint or '' %}
 {% set yonetim_aktif = ep in ('katalog_yonetim','kategori_temizligi','yonetim_kullanicilar','bot_sayfasi','bot_kullanici_detay','arsiv','yonetim_api_anahtarlari','yonetim_erisim','isletim.yedekler','isletim.ayarlar') %}
 <header class="ust" id="ust-menu" data-ana-menu>
@@ -51,6 +58,7 @@
     <div class="menu-mobil-alt">
       <div class="kullanici-kimlik"><span class="kullanici-adi">{{ k.ad or k.kullanici_adi }}</span><span class="kullanici-rol" data-rol="{{ rol_adi }}">{{ rol_adi }}</span></div>
       <a class="btn kucuk" href="{{ url_for('sifre_degistir') }}">Şifre</a>
+      <a class="btn kucuk" href="{{ url_for('iki_adim') }}" data-iki-adim-menu="{{ 'acik' if iki_adim_acik else 'kapali' }}">İki adımlı doğrulama: {{ 'açık' if iki_adim_acik else 'kapalı' }}</a>
       <form method="post" action="{{ url_for('cikis') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn kucuk">Çıkış</button></form>
       <button type="button" class="btn kucuk tema-dugmesi" data-tema-toggle>Koyu tema</button>
     </div>
@@ -58,7 +66,7 @@
   <div class="kullanici">
     <button type="button" class="btn kucuk tema-dugmesi" data-tema-toggle>Koyu tema</button>
     <button type="button" id="zil" class="zil" aria-label="Bildirimleri aç" aria-expanded="false" aria-controls="bildirim-kutu" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span class="zil-metin" aria-hidden="true">Bildirimler</span><span id="zil-sayi" class="zil-sayi gizli">0</span></button>
-    <div class="kullanici-kimlik" title="{{ k.kullanici_adi }}"><span class="kullanici-adi">{{ k.ad or k.kullanici_adi }}</span><span class="kullanici-rol" data-rol="{{ rol_adi }}">{{ rol_adi }}</span></div>
+    <div class="kullanici-kimlik" title="{{ k.kullanici_adi }}"><span class="kullanici-adi">{{ k.ad or k.kullanici_adi }}</span><span class="kullanici-rol" data-rol="{{ rol_adi }}">{{ rol_adi }}</span><a class="iki-adim-baglanti {{ 'acik' if iki_adim_acik }}" href="{{ url_for('iki_adim') }}" title="İki adımlı doğrulama: {{ 'açık' if iki_adim_acik else 'kapalı' }}" aria-label="İki adımlı doğrulama: {{ 'açık' if iki_adim_acik else 'kapalı' }}" data-iki-adim-menu="{{ 'acik' if iki_adim_acik else 'kapali' }}">2FA: {{ 'açık' if iki_adim_acik else 'kapalı' }}</a></div>
     <a class="btn kucuk sifre-baglanti" href="{{ url_for('sifre_degistir') }}">Şifre</a>
     <form method="post" action="{{ url_for('cikis') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn kucuk">Çıkış</button></form>
   </div>
@@ -75,6 +83,7 @@
 <div class="uyari-serit" role="status">Geçici şifre ile girdiniz. <a href="{{ url_for('sifre_degistir') }}">Şifrenizi değiştirin</a>.</div>
 {% endif %}
 {% endif %}
+{% if k and iki_adim_kilit %}<div class="uyari-serit" role="status">İki adımlı doğrulama zorunlu: kurulumu bitirince panel açılır.</div>{% endif %}
 {% with mesajlar = get_flashed_messages(with_categories=true) %}
   {% if mesajlar %}<div class="bilgi-serit" role="status">{% for kategori, m in mesajlar %}<div class="{{ 'flash-hata' if kategori == 'hata' }}">{{ m }}</div>{% endfor %}</div>{% endif %}
 {% endwith %}
@@ -82,7 +91,7 @@
 {% block icerik %}{% endblock %}
 </main>
 <div id="toast" class="toast gizli" role="status" aria-live="polite"></div>
-{% if k %}
+{% if k and not iki_adim_kilit %}
 {# 2.3.3: bekleyen kontroller hatırlatma penceresi #}
 <div id="hatirlatma-popup" class="hp-perde gizli" aria-hidden="true">
   <div class="hp-pencere" role="dialog" aria-modal="true" aria-labelledby="hp-baslik" aria-describedby="hp-aciklama" tabindex="-1">
@@ -99,7 +108,7 @@ window.PANEL_KULLANICI = {{ (k.kullanici_adi if k else "")|tojson }};
 window.PROJE_RENKLERI = {{ proje_renkleri|default({})|tojson }};
 </script>
 <script src="{{ url_for('static', filename='panel.js',v=SURUM) }}"></script>
-{% if k %}<script nonce="{{ csp_nonce }}">Panel.menu();Panel.bildirimler();</script>{% endif %}
+{% if k and not iki_adim_kilit %}<script nonce="{{ csp_nonce }}">Panel.menu();Panel.bildirimler();</script>{% endif %}
 {% block script %}{% endblock %}
 </body>
 </html>

@@ -109,6 +109,10 @@ def guncelle(ayar, ad, expected_version=None, islem_yapan=None, ip=None, **alanl
                 after['parola_degisti'] = True
             db.denetim_yaz(conn, islem_yapan or ad, 'kullanici_guncelle', anahtar=ad, ip=ip,
                            eski=before, yeni=after, hedef_turu='hesap', hedef_id=ad)
+            # 2.4.1: parola, rol ya da etkinlik değişince iki adımlı doğrulamanın güvenilen cihazları da geçersiz olur.
+            if {'sifre_hash', 'yetki', 'aktif'} & set(changed):
+                _guvenilen_cihazlari_kaldir(conn, ad, islem_yapan or ad, ip,
+                                            'parola değişti' if 'sifre_hash' in changed else 'rol değişti' if 'yetki' in changed else 'hesap durumu değişti')
             db.degisti(conn)
         elif kilit_acilir:
             conn.execute('UPDATE panel_kullanicilari SET hatali_giris=0,kilit_bitis=NULL WHERE kullanici_adi=?', (ad,))
@@ -261,7 +265,17 @@ def sahip_ata(ayar, ad, islem_yapan, ip=None):
             raise ValueError('Sahip yapılacak hesap bulunamadı ya da pasif.')
         conn.execute("UPDATE panel_kullanicilari SET yetki='sahip',session_version=session_version+1,hesap_surumu=hesap_surumu+1 "
                      "WHERE kullanici_adi=?", (ad,))
+        _guvenilen_cihazlari_kaldir(conn, ad, islem_yapan or 'sunucu-cli', ip, 'rol değişti')
         db.denetim_yaz(conn, islem_yapan or 'sunucu-cli', 'sahip_atama', anahtar=ad, ip=ip, eski={'yetki': user['yetki']},
                        yeni={'yetki': 'sahip'}, hedef_turu='hesap', hedef_id=ad, aciklama='İlk sahip ataması (etkin sahip yokken)')
         db.degisti(conn)
     return bul(ayar, ad)
+
+
+def _guvenilen_cihazlari_kaldir(conn, ad, kim, ip, neden):
+    """2.4.1: hesabın iki adımlı doğrulama güvenilen cihazlarını siler (açık işlem içinde); en az bir cihaz silindiyse denetime yazar."""
+    n = conn.execute('DELETE FROM iki_adim_cihazlar WHERE kullanici_adi=?', (ad,)).rowcount
+    if n:
+        db.denetim_yaz(conn, kim, '2fa_cihaz_kaldir', ip=ip, hedef_turu='hesap', hedef_id=ad,
+                       aciklama='%d güvenilen cihaz kaldırıldı: %s' % (n, neden))
+    return n
