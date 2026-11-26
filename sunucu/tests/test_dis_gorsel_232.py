@@ -387,7 +387,7 @@ def test_toplu_dis_servis_erisim_yoksa_kalanlari_denemez(toplu):
     c._http.plan["https://img.snappark.net/s/Iki2/raw/"] = [OSError("Name or service not known"), OSError("Name or service not known")]
     uykular, loglar = [], []
     r = gorsel.gyazo_toplu_indir(conn, c, a, uyku=uykular.append, log=loglar.append)
-    assert uykular.count(5) == 2  # her geçici hata bir kez yeniden denendi
+    assert uykular.count(1) == 2  # her geçici hata bir kez yeniden denendi
     assert "dis_erisim_yok" not in r
     assert r["turler"]["snappark"]["acilamayan"] == 3 and r["turler"]["teamzone"]["indirilen"] == 1
     assert c._http.istekler.count("https://img.snappark.net/s/Iki2/raw/") == 2 and c._http.istekler.count(SP_RAW) == 2
