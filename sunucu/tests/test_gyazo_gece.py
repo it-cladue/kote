@@ -296,20 +296,82 @@ def test_baglanti_kurulamayan_gyazo_da_sayilir_ve_birakilir(ortam):
     # ön kontrolde bağlantı hiç kurulamıyorsa (sunucunun dış erişimi) eskisi gibi hemen durur
     c._http = _SabitOturum({}, requests.exceptions.ConnectTimeout("bağlantı zaman aşımı (sahte)"))
     r2 = gorsel.gyazo_toplu_indir(conn, c, ayar, on_kontrol=True, uyku=lambda s: None)
-    assert r2["bitis_nedeni"] == "erisim" and len(c._http.istekler) == 1 and "ulaşılamıyor" in r2["durduruldu"]
+    assert r2["bitis_nedeni"] == "erisim" and len(c._http.istekler) == 2 and "ulaşılamıyor" in r2["durduruldu"]
 
 
-def test_on_kontrol_asili_kalirsa_durmaz_hizli_gecer(ortam):
+def test_on_kontrol_asili_kalirsa_durur_ve_iki_ihtimali_soyler(ortam):
+    # Ön kontrolde okuma zaman aşımı hem asılı Gyazo hem de TLS'yi kesen bir güvenlik duvarı (dış erişim sorunu) olabilir:
+    # komut "tamam" ile bitip sorunu gizlemez; bir kez daha dener, sonra GYAZO_ONBELLEK_YARIM (çıkış 1) ile durur.
     conn, c, ayar = ortam
     _gyazo_kayitlari_ekle(conn, range(10, 40))
     c._http = _SabitOturum({}, requests.exceptions.ReadTimeout("okuma zaman aşımı (sahte)"))
-    uykular = []; loglar = []
-    r = gorsel.gyazo_toplu_indir(conn, c, ayar, on_kontrol=True, uyku=uykular.append, log=loglar.append, bekleme_sn=0.15)
-    # ön kontrol (1 istek) + baştan hızlı geçiş: yeniden deneme ve bekleme yok, 25 bağlantıdan sonra bırakılır
-    assert r["bitis_nedeni"] == "tamam" and r["durduruldu"] is None
-    assert len(c._http.istekler) == 1 + 25 and uykular == []
-    assert r["ariza"] == ["Gyazo"] and r["ariza_denenmedi"] == {"Gyazo": 9}
-    assert any("bağlantı kuruldu ama yanıt gelmedi" in m and "Gyazo arızası" in m for m in loglar)
+    loglar = []
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, on_kontrol=True, uyku=lambda s: None, log=loglar.append, bekleme_sn=0.15)
+    assert r["bitis_nedeni"] == "erisim" and r["denenen"] == 0 and len(c._http.istekler) == 2
+    assert not r.get("ariza") and "ulaşılamıyor" in r["durduruldu"] and "curl" in r["durduruldu"]
+    assert "Gyazo arızalı" in r["durduruldu"] and "dış HTTPS erişimi" in r["durduruldu"]
+    # tek seferlik bir zaman aşımı çalıştırmayı durdurmaz ve Gyazo'yu "arızalı" işaretlemez
+
+    class _Oturum(SahteOturum):
+        def get(self, url, **kw):
+            kim = url.rsplit("/", 1)[-1].split(".")[0]
+            if kim == "0" * 32 and self.plan.get(kim) and isinstance(self.plan[kim][0], BaseException):
+                self.istekler.append(url)
+                raise self.plan[kim].pop(0)
+            return super().get(url, **kw)
+
+    plan = {kimlik(n): [SahteYanit(200, jpeg())] for n in list(range(1, 5)) + list(range(10, 40))}
+    plan["0" * 32] = [requests.exceptions.ReadTimeout("geçici"), SahteYanit(404)]
+    c._http = _Oturum(plan)
+    r2 = gorsel.gyazo_toplu_indir(conn, c, ayar, on_kontrol=True, uyku=lambda s: None, bekleme_sn=0)
+    assert r2["bitis_nedeni"] == "tamam" and r2["indirilen"] == 34 and not r2.get("ariza")
+
+
+@pytest.mark.parametrize("hizli_yanit", [503, 404])
+def test_karisik_arizada_asililar_gyazoyu_birakir(ortam, hizli_yanit):
+    # Kaynak arızasında bağlantıların bir kısmı asılı kalır, bir kısmı hızlı 503/404 alır. Hızlı yanıtlar yanıtsız sayacını
+    # sıfırlamaz (yalnız başarılı indirme sıfırlar): 25. asılı bağlantıdan sonra kalan Gyazo bağlantıları denenmez.
+    conn, c, ayar = ortam
+    _gyazo_kayitlari_ekle(conn, range(10, 110))
+    c._http = _AsiliOturum({kimlik(n): [SahteYanit(hizli_yanit), SahteYanit(hizli_yanit)] for n in range(11, 110, 2)})
+    loglar = []
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=lambda s: None, log=loglar.append, bekleme_sn=0)
+    # asılılar: k1-k4 ve çift kimlikler; 25. asılı = k50 → k51-k109 (59 bağlantı) hiç istenmez
+    assert r["ariza_denenmedi"] == {"Gyazo": 59} and r["bitis_nedeni"] == "tamam" and r["kalan"] == 0
+    assert not any(kimlik(n) in u for n in range(51, 110) for u in c._http.istekler)
+    assert any("art arda 25" in m and "denenmeyecek" in m for m in loglar)
+
+
+def test_ariza_satiri_servis_basina_bir_kez(ortam):
+    conn, c, ayar = ortam
+    _gyazo_kayitlari_ekle(conn, range(10, 40))
+    # 14 asılı → hızlı geçiş; k20 iner (sayaç sıfırlanır); 19 asılı → yeniden 10'a varır ama ikinci kez eklenmez
+    c._http = _AsiliOturum({kimlik(20): [SahteYanit(200, jpeg())]})
+    loglar = []
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=lambda s: None, log=loglar.append, bekleme_sn=0)
+    assert r["ariza"] == ["Gyazo"] and not r.get("ariza_denenmedi") and r["indirilen"] == 1
+    assert sum("art arda 10" in m for m in loglar) == 1
+
+
+def test_cli_gece_gunlugunde_baglanti_basina_503_satiri_yok(tmp_path):
+    # Gece planı (--ayrintili yok) yalnız özet/arıza satırlarını yazar; bağlantı başına 503 satırları günlüğü doldurmaz.
+    env = {"PATH": "/usr/bin:/bin", "PANEL_VERI": str(tmp_path), "HOME": str(tmp_path)}
+    kod = ("import sys\n"
+           "from app import gorsel, cli\n"
+           "def sahte(*a, **k):\n"
+           "    log = k['log']\n"
+           "    log('1/60 00000000… geçici hata (%s); 1 sn sonra bir kez daha' % gorsel._GYAZO_SEBEP[503])\n"
+           "    log('2/60 00000000… açılamadı: %s' % gorsel._GYAZO_SEBEP[503])\n"
+           "    log('Gyazo art arda 10 bağlantıda yanıt veremedi (son durum: HTTP 503); muhtemelen Gyazo arızası. Kalan bağlantılar beklemeden geçilir.')\n"
+           "    log('Gyazo art arda 25 bağlantıda yanıt vermedi (muhtemelen Gyazo arızası); kalan Gyazo bağlantıları bu çalıştırmada denenmeyecek.')\n"
+           "    return {'bitis_nedeni': 'tamam', 'kalan': 0, 'ariza': ['Gyazo'], 'turler': {'gyazo': {'acilamayan': 60}}}\n"
+           "gorsel.gyazo_toplu_indir = sahte\n"
+           "sys.argv = ['app.cli', 'gyazo-onbellekle', '--yeni-en-cok', '900', '--on-kontrol-atla']\n"
+           "cli.main()\n")
+    r = subprocess.run([sys.executable, "-c", kod], cwd=ROOT, capture_output=True, text=True, env=env, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "açılamadı: Gyazo yanıt" not in r.stdout and "geçici hata" not in r.stdout
+    assert "Gyazo art arda 10 bağlantıda yanıt veremedi" in r.stdout and "Gyazo art arda 25 bağlantıda yanıt vermedi" in r.stdout
 
 
 def test_silinmis_503ler_saglam_gyazoyu_birakmaz_gece_gece(ortam):
