@@ -102,6 +102,13 @@ def main():
             turler=r.get('turler') or {}
             if turler:
                 print('Türler: '+' · '.join(f"{ad} {t.get('baglanti',0)} bağlantı (indirilen {t.get('indirilen',0)}, zaten var {t.get('zaten_var',0)}, açılamayan {t.get('acilamayan',0)}"+(f", tanınmayan {t['taninmayan']}" if t.get('taninmayan') else '')+')' for ad,t in (('Gyazo',turler.get('gyazo',{})),('Snappark',turler.get('snappark',{})),('Teamzone',turler.get('teamzone',{})))),flush=True)
+            if r.get('ariza'):
+                denenmedi=r.get('ariza_denenmedi') or {}
+                parcalar=[]
+                for servis in r['ariza']:
+                    d=int(denenmedi.get(servis,0) or 0);acil=max(0,int((turler.get(str(servis).lower()) or {}).get('acilamayan',0) or 0)-d)
+                    parcalar.append(f"{servis} yanıt vermiyor (muhtemelen {servis} arızası); {acil} bağlantı açılamadı"+(f", {d} bağlantı denenmedi" if d else ''))
+                print('ARIZA: '+' · '.join(parcalar)+'. Gece planı sonraki çalıştırmada yeniden dener.',flush=True)
             neden=r.get('bitis_nedeni','tamam')
             if neden=='tamam': print('GYAZO_ONBELLEK_TAMAM')
             elif neden in ('sinir','sure'): print(f"GYAZO_ONBELLEK_DEVAM: kalan {r.get('kalan',0)} bağlantı sonraki çalıştırmada sürer.")
