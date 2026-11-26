@@ -1,11 +1,12 @@
 {% extends "base.html" %}
+{% from "_yedek_dugmesi.html" import yedek_dugmesi with context %}
 {% block baslik %}Kategori temizliği — Kanıt Paneli{% endblock %}
 {% block icerik %}
 <div class="kt-sayfa">
 <section class="sayfa-baslik">
   <div><p class="ust-etiket">Süperadmin yönetimi</p><h1>Kategori temizliği</h1>
   <p>Kayıtlarda yazılmış bütün kategori değerleri aşağıda. Aynı kategorinin farklı yazımlarını (büyük/küçük harf, baştaki/sondaki boşluk) tek satırda görürsünüz. Her satır için <b>Şuna dönüştür</b> seçin, önce <b>Önizle</b>, sonra <b>Uygula</b>. Önizleme hiçbir şeyi değiştirmez.</p></div>
-  <div class="baslik-eylemler"><a class="btn" href="{{ url_for('katalog_yonetim') }}">Projeler ve kategoriler</a><a class="btn" href="{{ url_for('denetim', islem='kategori_birlestir') }}">İşlem geçmişi</a></div>
+  <div class="baslik-eylemler">{{ yedek_dugmesi(url_for('kategori_temizligi'), 'Önce yedek al') }}<a class="btn" href="{{ url_for('katalog_yonetim') }}">Projeler ve kategoriler</a><a class="btn" href="{{ url_for('denetim', islem='kategori_birlestir') }}">İşlem geçmişi</a></div>
 </section>
 {% if mesaj %}<div class="{{ 'hata' if mesaj.startswith('Hata') else 'bilgi' }}" role="alert">{{ mesaj }}</div>{% endif %}
 
@@ -30,7 +31,7 @@
   <form method="post" class="kt-uygula" data-onay="{{ onizleme.toplam_degisecek }} kaydın kategorisi değiştirilecek. Geri almanın tek yolu yedekten geri yüklemektir. Devam edilsin mi?">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="uygula"><input type="hidden" name="damga" value="{{ onizleme.damga }}">
     {% for k in onizleme.kalemler %}<input type="hidden" name="g" value="{{ k.anahtar }}"><input type="hidden" name="h" value="{{ k.hedef_kod or BOS_HEDEF }}">{% endfor %}
-    <p class="kucukyazi">Uygulamadan önce sunucuda <code>sudo /usr/local/sbin/kanit-yedek.sh</code> ile yedek alın ve çıktıdaki <code>YEDEK_DOGRULANDI: panel-…db.gz</code> dosya adını not edin (Bot sayfasındaki <i>SQLite yedeği al</i> dosyası <code>--geri-yukle</code> ile geri yüklenemez). Önizlemeden sonra kayıtlar değişirse Uygula reddedilir ve yeniden önizleme istenir.</p>
+    <p class="kucukyazi">Uygulamadan önce sunucuda <code>sudo /usr/local/sbin/kanit-yedek.sh</code> ile yedek alın ve çıktıdaki <code>YEDEK_DOGRULANDI: panel-…db.gz</code> dosya adını not edin (ya da önizlemeden önce sayfanın üstündeki <i>Önce yedek al</i> düğmesini kullanın; panel yedeği de <code>--geri-yukle</code> ile açılır). Önizlemeden sonra kayıtlar değişirse Uygula reddedilir ve yeniden önizleme istenir.</p>
     <button class="btn birincil">Uygula</button> <a class="btn" href="{{ url_for('kategori_temizligi') }}">Vazgeç</a>
   </form>
   {% endif %}
@@ -71,7 +72,7 @@
   <ol class="kt-adimlar">
     <li><b>Kalacak kategorilere karar verin.</b> Ekibin gerçekten kullandığı kategoriler katalogda <i>Aktif</i> kalsın. Kullanılmayanları <a href="{{ url_for('katalog_yonetim') }}">Projeler ve kategoriler</a> sayfasında açıp <i>Aktif</i> işaretini kaldırın: bot yeni kanıt için onları sunmaz, eski kayıtlar etiketini korur.</li>
     <li><b>Yazımı düzeltmek istediğiniz adı katalogda düzeltin</b> (ör. görünen adı <code>cd</code> yerine <code>CD</code>). Bu sayfa kayıtları katalogdaki yazıma çeker.</li>
-    <li><b>Yedek alın.</b> Sunucuda <code>sudo /usr/local/sbin/kanit-yedek.sh</code> çalıştırın ve çıktıdaki <code>YEDEK_DOGRULANDI: panel-YYYYMMDD.db.gz</code> satırındaki dosya adını not edin. (Bot sayfasındaki <i>SQLite yedeği al</i> başka biçimde ve başka klasöre yazar; aşağıdaki geri yükleme komutu onu kabul etmez.)</li>
+    <li><b>Yedek alın.</b> Sunucuda <code>sudo /usr/local/sbin/kanit-yedek.sh</code> çalıştırın ve çıktıdaki <code>YEDEK_DOGRULANDI: panel-YYYYMMDD.db.gz</code> satırındaki dosya adını not edin. Daha kolayı: sayfanın üstündeki <i>Önce yedek al</i> düğmesi; dosya adı ve geri yükleme komutu üstte yazar (tüm yedekler: <a href="{{ url_for('isletim.yedekler') }}">Yedekler</a>).</li>
     <li><b>Her tuhaf değer için "Şuna dönüştür" seçin</b> (ör. <code>30 GÜN</code> → <code>30gün</code>, <code>BTAGSIZ</code> → <code>btagsz</code>). Bir değerin kategorisi olmamalıysa <i>(boş) yap</i>. Emin değilseniz <i>— değiştirme —</i> bırakın.</li>
     <li><b>Önizle</b>: kaç kaydın değişeceğini görün. Sonra <b>Uygula</b>.</li>
     <li><b>Geri almak</b> gerekirse: yalnız yedekten, sunucuda <code>sudo /usr/local/sbin/kanit-yedek.sh --geri-yukle /var/backups/kanit-paneli/gunluk/panel-YYYYMMDD.db.gz</code> (önce <code>--dry-run</code> ekleyip planı görün). Yedekten sonraki yeni kayıtlar da geri gider; bu yüzden temizliği yedekten hemen sonra yapın.</li>

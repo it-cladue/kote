@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block baslik %}Çalışma ayarları — Kanıt Paneli{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='isletim.css', v=SURUM) }}">{% endblock %}
+{% block icerik %}
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">{{ 'Sahip' if duzenleyebilir else 'Süperadmin — salt okunur' }}</p><h1>Çalışma ayarları</h1>
+  <p>Hatırlatma, bildirim, görünürlük, API ve görsel ayarları. Burada kaydedilen değer <b>.env</b> dosyasındakinin önüne geçer ve yeniden başlatma gerekmeden bir sonraki istekte / iş turunda geçerli olur. Gizli anahtarlar ve parolalar burada yoktur; onlar yalnız sunucudaki .env dosyasındadır.</p></div>
+  <div class="baslik-eylemler"><a class="btn" href="{{ url_for('ana', _anchor='sistem-durumu') }}">Sistem durumu</a><a class="btn" href="{{ url_for('isletim.yedekler') }}">Yedekler</a></div>
+</section>
+<div class="bilgi notr"><b>Hangi değer geçerli?</b> Önce panelde kaydedilen (<span class="ay-kaynak db">DB</span>), yoksa .env dosyası (<span class="ay-kaynak env">.env</span>), o da yoksa varsayılan (<span class="ay-kaynak">varsayılan</span>). "Varsayılana dön" panel değerini siler; .env'de değer varsa o geçerli olur. Her değişiklik İşlem Geçmişi'ne eski ve yeni değerle yazılır.</div>
+{% if not duzenleyebilir %}<div class="bilgi uyari" role="status">Bu ayarları yalnız <b>sahip</b> hesabı değiştirebilir; siz görüntülüyorsunuz.</div>{% endif %}
+{% if hatalar %}<div class="hata" role="alert">Kaydedilmedi: {% for ad, h in hatalar.items() %}{{ h }}{% endfor %}</div>{% endif %}
+{% for grup, satirlar in gruplar %}
+<section class="kart ay-grup" aria-labelledby="ay-grup-{{ loop.index }}">
+  <div class="kart-baslik"><h2 id="ay-grup-{{ loop.index }}">{{ grup }}</h2></div>
+  {% for s in satirlar %}
+  <div class="ay-satir {{ 'hatali' if hatalar.get(s.ad) }}" id="ayar-{{ s.ad }}" data-ayar="{{ s.ad }}" data-kaynak="{{ s.kaynak }}">
+    <div class="ay-etiket"><b>{{ s.etiket }}</b><code>{{ s.ad }}</code><p class="kucukyazi" style="margin:4px 0 0">{{ s.yardim }}{% if s.tur == 'tam' %} Aralık: {{ s.en_az }}–{{ s.en_cok }}{% if s.sifir %} ({{ s.sifir }}){% endif %}.{% endif %} Varsayılan: <b>{{ s.varsayilan_gosterim }}</b>.</p>
+      <p class="kucukyazi" style="margin:2px 0 0">Kullanan: {{ s.okuyan }}{% if s.yeniden %} · <b>Not:</b> {{ s.yeniden }}{% endif %}</p></div>
+    <div class="ay-gecerli"><span class="kucukyazi">Şu an geçerli değer</span><br><b data-gecerli>{{ s.gosterim }}</b> <span class="ay-kaynak {{ 'db' if s.kaynak == 'DB' else 'env' if s.kaynak == '.env' else '' }}">{{ s.kaynak }}</span>
+      {% if s.kaynak == 'DB' and s.ortam is not none %}<br><small>.env'de: {{ s.ortam if s.ortam != '' else '(boş)' }}</small>{% endif %}
+      {% if s.ortam_uyari %}<p class="ay-hata">{{ s.ortam_uyari }}</p>{% endif %}</div>
+    <div>
+    {% if duzenleyebilir %}
+      <form method="post" class="ay-form" action="{{ url_for('isletim.ayarlar') }}#ayar-{{ s.ad }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="ad" value="{{ s.ad }}"><input type="hidden" name="islem" value="kaydet">
+        {% set giris = girilen.get(s.ad, s.gecerli) %}
+        <label class="ekran-okuyucu" for="deger-{{ s.ad }}">{{ s.etiket }}</label>
+        {% if s.tur in ('evet','secim') %}
+        <select id="deger-{{ s.ad }}" name="deger">{% for k, t in s.secenekler %}<option value="{{ k }}" {{ 'selected' if giris == k }}>{{ t }}</option>{% endfor %}</select>
+        {% elif s.tur == 'tam' %}
+        <input id="deger-{{ s.ad }}" name="deger" type="number" inputmode="numeric" min="{{ s.en_az }}" max="{{ s.en_cok }}" step="1" value="{{ giris }}" required {% if hatalar.get(s.ad) %}aria-invalid="true" aria-describedby="hata-{{ s.ad }}"{% endif %}>
+        {% else %}
+        <input id="deger-{{ s.ad }}" name="deger" value="{{ giris }}" maxlength="{{ s.en_cok or 300 }}" {% if s.tur == 'metin' %}required{% endif %} placeholder="{{ {'saat':'18:00 ya da 0','pencere':'08:00-20:00 (boş = bütün gün)','kullanicilar':'ali,veli (boş = tüm süperadminler)'}.get(s.tur,'') }}" {% if hatalar.get(s.ad) %}aria-invalid="true" aria-describedby="hata-{{ s.ad }}"{% endif %}>
+        {% endif %}
+        <button class="btn birincil kucuk">Kaydet</button>
+      </form>
+      {% if hatalar.get(s.ad) %}<p class="ay-hata" id="hata-{{ s.ad }}" role="alert">{{ hatalar[s.ad] }}</p>{% endif %}
+      {% if s.kaynak == 'DB' %}
+      <form method="post" class="satir-form" action="{{ url_for('isletim.ayarlar') }}" data-onay="Panelde kaydedilen değer silinsin ve .env / varsayılan değere dönülsün mü?" style="margin-top:6px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="ad" value="{{ s.ad }}"><input type="hidden" name="islem" value="sil"><button class="btn kucuk hayalet">Varsayılana dön</button></form>
+      {% endif %}
+    {% else %}
+      <span class="kucukyazi">Değiştirmek için sahip hesabıyla girin ya da sunucuda: <code>cd /opt/kanit-paneli && sudo runuser -u kanit -- .venv/bin/python -m app.cli ayar {{ s.ad }} DEGER</code></span>
+    {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</section>
+{% endfor %}
+<p class="kucukyazi">Sunucudan da yönetilebilir: <code>cd /opt/kanit-paneli && sudo runuser -u kanit -- .venv/bin/python -m app.cli ayar --listele</code>, <code>… ayar AD DEGER</code>, <code>… ayar AD --sil</code> (kanit hesabıyla çalıştırın; root olarak çalıştırmayın).</p>
+{% endblock %}

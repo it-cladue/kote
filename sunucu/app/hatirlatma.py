@@ -132,9 +132,13 @@ def _evet(ham, varsayilan=True):
 YAS_SQL = "CAST(julianday(?) - julianday(date(COALESCE(NULLIF(ilk_gorulme,''), tarih))) AS INTEGER)"
 
 
-def ayarlar(ayar=None):
-    """Eşik/tekrar/sınır: 1'den küçük ya da geçersiz değer varsayılana döner; kontrol sıklığı 0 = kapalı, üst sınır 7 gün."""
-    ayar = ayar or AYAR
+def ayarlar(ayar=None, conn=None):
+    """Eşik/tekrar/sınır: 1'den küçük ya da geçersiz değer varsayılana döner; kontrol sıklığı 0 = kapalı, üst sınır 7 gün.
+
+    2.4.0: panelden (/yonetim/ayarlar) veritabanına yazılmış değerler 'ayar' sözlüğünün (açılıştaki .env değerleri) üstüne
+    yazılır; her çağrıda yeniden okunur, yeniden başlatma gerekmez. Öncelik: veritabanı > .env > varsayılan (app/ayarlar.py)."""
+    from . import ayarlar as calisma_ayarlari
+    ayar = calisma_ayarlari.birlesik(ayar or AYAR, conn)
     def oku(ad, varsayilan, en_az=1, en_cok=None):
         try:
             deger = int(ayar.get(ad, varsayilan))
@@ -188,13 +192,27 @@ def uret(conn, ayar=None, bugun=None, simdi=None, yerel_tz=None, tz=None, gun_so
     yerel_tz: sunucu saatinin dilimi (None = işletim sisteminin yerel dilimi); tz: İstanbul dilimi (None = Europe/Istanbul);
     gun_sonu_zorla: GUN_SONU_SAAT beklenmeden bugünün gün sonu özetini üret (yine günde bir).
     bekleyen_ozet_zorla (2.3.8): içinde bulunulan dilimin bekleyen özetini pencere dışında da hemen üret (yine dilim başına bir)."""
-    a = ayarlar(ayar)
+    a = ayarlar(ayar, conn)
     rapor = _uc_gun_adimi(conn, a, bugun)
     an = (simdi or datetime.now)()
     rapor['saat'] = _saat_adimi(conn, a, an)
     rapor['gun_sonu'] = _gun_sonu_adimi(conn, a, an, yerel_tz, tz, gun_sonu_zorla)
     rapor['bekleyen_ozet'] = _bekleyen_ozet_adimi(conn, a, an, yerel_tz, tz, bekleyen_ozet_zorla)
+    _calisma_isareti(conn, rapor)
     return rapor
+
+
+IS_ISARETI = 'is:hatirlatma'
+
+
+def _calisma_isareti(conn, rapor):
+    """2.4.0: 'Sistem durumu' kartı için son çalışma zamanı (ayarlar tablosu, 'is:hatirlatma'). Hata işi durdurmaz."""
+    import json
+    try:
+        ozet = {'zaman': db.simdi(), 'hatirlatma': int(rapor.get('hatirlatma', 0) or 0) if isinstance(rapor, dict) else 0}
+        db.ayar_yaz(conn, IS_ISARETI, json.dumps(ozet, ensure_ascii=False))
+    except Exception:
+        pass
 
 
 def _uc_gun_adimi(conn, a, bugun=None):

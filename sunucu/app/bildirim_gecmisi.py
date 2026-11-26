@@ -5,7 +5,8 @@ from . import db
 
 # Tek kayda değil bir listeye bağlanan hatırlatmalar (arayüz "Kayıt #" yerine "Bekleyenleri aç" gösterir).
 # 2.3.3: 2 saat toplu bildirimi ve gün sonu özeti eklendi. 2.3.8: bekleyen özeti (2 saatte bir).
-OZET_ONEKLERI = ('hatirlatma-ozet:', 'hatirlatma-saat-ozet:', 'gun-sonu:', 'bekleyen-ozet:')
+# 2.4.0: 'sistem:' — Sistem durumu uyarısı (kayda değil ana sayfadaki karta bağlanır; tür 'sistem').
+OZET_ONEKLERI = ('hatirlatma-ozet:', 'hatirlatma-saat-ozet:', 'gun-sonu:', 'bekleyen-ozet:', 'sistem:')
 
 
 def _base(username, allowed, gizli=None):
@@ -20,12 +21,13 @@ def _base(username, allowed, gizli=None):
               FROM bildirimler b JOIN kayitlar k ON k.id=b.kayit_id
               WHERE b.kullanici_adi=? AND k.proje IN ({places}){ek_sql}
               UNION ALL
-              SELECT b.id,'mesaj:'||b.id key,b.tur,k.proje,k.id kayit_id,b.zaman,b.okundu,
+              SELECT b.id,'mesaj:'||b.id key,b.tur,CASE WHEN b.tur='sistem' THEN '' ELSE k.proje END proje,k.id kayit_id,b.zaman,b.okundu,
               b.kim,COALESCE(b.metin,'') metin,k.personel,k.kategori,k.tarih,k.ekleyen_ad,k.kt,
               b.olay,CASE WHEN b.olay LIKE 'yorum:%' THEN CAST(substr(b.olay,7) AS INTEGER) END yorum_id
               FROM mesaj_bildirimleri b JOIN kayitlar k ON k.id=b.kayit_id
               WHERE b.kullanici_adi=? AND k.proje IN ({places}){ek_sql}
               AND NOT (b.tur='hatirlatma' AND (b.olay LIKE 'hatirlatma:%' OR b.olay LIKE 'hatirlatma-saat:%') AND (k.kt=1 OR k.silindi=1))'''
+    # 2.4.0: 'sistem' bildirimleri bir projeye ait değildir (kayıt yalnız tablo kısıtı için çapa); proje rozeti/süzgeci boş.
     return sql, [username, *allowed, *ek_params, username, *allowed, *ek_params]
 
 

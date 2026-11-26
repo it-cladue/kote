@@ -64,7 +64,9 @@ API_ACIK_DEGERLER = ('1', 'true', 'evet', 'acik', 'açık', 'on', 'yes')
 
 def acik_mi():
     """Beyaz liste: boş/tanımsız ya da açık anlamlı değer → açık; tanınmayan her değer (ör. 'kapat') → kapalı (güvenli taraf)."""
-    return str(os.getenv('API_ACIK', '1') or '1').strip().lower() in API_ACIK_DEGERLER
+    # 2.4.0: panelden (/yonetim/ayarlar) yazılan değer önce, sonra .env (app/ayarlar.py öncelik kuralı).
+    from . import ayarlar as calisma_ayarlari
+    return str(calisma_ayarlari.deger('API_ACIK', '1') or '1').strip().lower() in API_ACIK_DEGERLER
 
 
 def sorgu_eszamanli_siniri():
@@ -80,7 +82,8 @@ def sorgu_eszamanli_siniri():
 
 def dakika_siniri():
     try:
-        deger = int(str(os.getenv('API_DAKIKA_SINIRI', '') or '').strip() or 120)
+        from . import ayarlar as calisma_ayarlari  # 2.4.0: veritabanı > .env > 120
+        deger = int(str(calisma_ayarlari.deger('API_DAKIKA_SINIRI', '') or '').strip() or 120)
     except (TypeError, ValueError):
         return 120
     return deger if deger >= 1 else 120

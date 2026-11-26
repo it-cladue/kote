@@ -217,6 +217,21 @@ def yedek_al(ayar, conn, kim="panel"):
     return iid
 
 
+def geri_yuklenebilir_yedek_al(ayar, conn, kim="panel", ip=None):
+    """2.4.0 — Panelin "Yedek al (geri yüklenebilir)" düğmesi: kanit-yedek.sh ile aynı biçimde .db.gz (app/yedek.py).
+    Dönüş: kullanıcıya gösterilecek Türkçe mesaj (dosya yolu ve geri yükleme komutuyla). Klasör yazılamıyorsa
+    yedek.YedekHatasi (OSError) — panel bunu 'Hata: …' olarak, sunucu komutuyla gösterir."""
+    from . import yedek
+    bilgi = yedek.yedek_al(ayar, kim)
+    with db.transaction(conn):
+        _islem(conn, "yedek", kim, "Geri yüklenebilir SQLite yedeği", bilgi["ad"])
+        db.denetim_yaz(conn, kim or "panel", "bot_yedek", yeni={"dosya": bilgi["yol"], "boyut": bilgi["boyut"], "kayit": bilgi["kayit"]},
+                       ip=ip, hedef_turu="sistem", hedef_id=bilgi["ad"])
+        db.degisti(conn)
+    return ("Yedek alındı: %s (%s, %d kayıt, bütünlük: ok). Geri yüklemek için sunucuda: %s"
+            % (bilgi["yol"], yedek.boyut_metni(bilgi["boyut"]), bilgi["kayit"], yedek.geri_yukleme_komutlari(bilgi["yol"])["uygula"]))
+
+
 def son_islemler(conn, n=30):
     return [dict(r) for r in conn.execute("SELECT * FROM islem_sonuclari ORDER BY zaman DESC, rowid DESC LIMIT ?", (max(1, min(int(n), 200)),)).fetchall()]
 

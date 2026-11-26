@@ -14,7 +14,7 @@
 <body>
 {% if k %}
 {% set ep = request.endpoint or '' %}
-{% set yonetim_aktif = ep in ('katalog_yonetim','kategori_temizligi','yonetim_kullanicilar','bot_sayfasi','bot_kullanici_detay','arsiv','yonetim_api_anahtarlari','yonetim_erisim') %}
+{% set yonetim_aktif = ep in ('katalog_yonetim','kategori_temizligi','yonetim_kullanicilar','bot_sayfasi','bot_kullanici_detay','arsiv','yonetim_api_anahtarlari','yonetim_erisim','isletim.yedekler','isletim.ayarlar') %}
 <header class="ust" id="ust-menu" data-ana-menu>
   <a class="marka" href="{{ url_for('ana') }}" aria-label="Kanıt Paneli ana sayfa"><span class="marka-isaret" aria-hidden="true">K</span>Kanıt <span>Paneli</span></a>
   <nav class="menu" id="ana-menu" aria-label="Ana menü">
@@ -34,6 +34,9 @@
         <a href="{{ url_for('yonetim_kullanicilar') }}" class="{{ 'aktif' if ep == 'yonetim_kullanicilar' }}">Kullanıcılar</a>
         <a href="{{ url_for('bot_sayfasi') }}" class="{{ 'aktif' if ep in ('bot_sayfasi','bot_kullanici_detay') }}">Bot</a>
         <a href="{{ url_for('arsiv') }}" class="{{ 'aktif' if ep == 'arsiv' }}">Arşiv</a>
+        {# 2.4.0 (işletim): yedek listesi ve çalışma ayarları; ayarları yalnız sahip değiştirir, süperadmin okur #}
+        <a href="{{ url_for('isletim.yedekler') }}" class="{{ 'aktif' if ep == 'isletim.yedekler' }}">Yedekler</a>
+        <a href="{{ url_for('isletim.ayarlar') }}" class="{{ 'aktif' if ep == 'isletim.ayarlar' }}">Çalışma ayarları</a>
         {% if yk.sahip %}{# 2.4.0: API anahtarları ve erişim sınırı yalnız sahibe görünür #}
         <small>Yalnız sahip</small>
         <a href="{{ url_for('yonetim_api_anahtarlari') }}" class="{{ 'aktif' if ep == 'yonetim_api_anahtarlari' }}">API anahtarları</a>

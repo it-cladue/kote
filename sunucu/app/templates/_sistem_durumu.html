@@ -1,0 +1,28 @@
+{# 2.4.0 (B2) — Ana sayfa "Sistem durumu" kartı. Yalnız süperadmin/sahip görür. ana.html: {% include "_sistem_durumu.html" %} #}
+{% if yk and yk.admin and sistem_durumu is defined %}
+{% set sd = sistem_durumu() %}
+<link rel="stylesheet" href="{{ url_for('static', filename='isletim.css', v=SURUM) }}">
+<section class="kart sd-kart" id="sistem-durumu" aria-labelledby="sistem-durumu-baslik">
+  <div class="kart-baslik">
+    <div><p class="ust-etiket">Süperadmin</p><h2 id="sistem-durumu-baslik">Sistem durumu</h2></div>
+    <span class="durum-etiket {{ {'yesil':'onayli','sari':'bekliyor','kirmizi':'silinen'}.get(sd.ozet.genel,'notr') }} sd-genel" data-sd-genel="{{ sd.ozet.genel }}">{{ sd.ozet.metin }}</span>
+  </div>
+  <ul class="sd-liste">
+  {% for r in sd.satirlar %}
+    <li class="sd-satir {{ r.renk }}" data-sd-kod="{{ r.kod }}" data-sd-renk="{{ r.renk }}">
+      <span class="sd-nokta" aria-hidden="true"></span>
+      <span class="sd-ad">{{ r.ad }}<small>{{ r.renk_adi }}</small></span>
+      <span class="sd-deger">{{ r.deger }}</span>
+      {% if r.renk != 'yesil' %}<span class="sd-aciklama">{{ r.aciklama }}</span>{% endif %}
+      {% if r.komut and r.renk in ('kirmizi','sari') %}<span class="sd-komut"><code>{{ r.komut }}</code><button type="button" class="btn kucuk" data-kopyala="{{ r.komut }}">Komutu kopyala</button></span>{% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+  <p class="kucukyazi" style="margin:12px 0 0">Yeşil: normal · Sarı: dikkat · Kırmızı: sorun (yanında sunucuda çalıştırılacak komut yazar; SSH ile, sudo/root). Kırmızı satır için süperadminlere günde bir "Sistem" bildirimi gider. Sayfayı yenileyince durum yeniden okunur.</p>
+  <div class="sd-alt">
+    <a class="btn kucuk" href="{{ url_for('isletim.yedekler') }}">Yedekler</a>
+    <a class="btn kucuk" href="{{ url_for('isletim.ayarlar') }}">Çalışma ayarları</a>
+    <a class="btn kucuk hayalet" href="{{ url_for('bot_sayfasi') }}">Bot sayfası</a>
+  </div>
+</section>
+{% endif %}

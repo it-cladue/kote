@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
 # Kanıt Paneli — günlük yedek (root; kanit-yedek.timer çalıştırır). Kurulum: bash deploy/setup-backup.sh
 #
-#   kanit-yedek.sh               # SQLite (backup API, kanit hesabıyla) + .env kopyası; Pazar günleri ya da ilk kez: görsel aynası
+#   kanit-yedek.sh               # ELLE yedek: SQLite (backup API, kanit hesabıyla) + .env -> panel-YYYYMMDD-SSDDSS.db.gz
+#                                # (saatli ad: gece dosyasının üzerine ASLA yazmaz); Pazar günleri ya da ilk kez: görsel aynası
+#   kanit-yedek.sh --zamanlayici # GECE yedeği (kanit-yedek.timer böyle çağırır) -> panel-YYYYMMDD.db.gz (günde bir dosya)
 #   kanit-yedek.sh --haftalik    # görsel aynasını bugün de al
-#   kanit-yedek.sh --dogrula     # son SQLite yedeğini aç, PRAGMA integrity_check + kayıt sayısı
+#   kanit-yedek.sh --liste [--json]  # bütün yedekleri listele: ad, boyut, tarih, kayıt sayısı, tür (gece / el / panel)
+#   kanit-yedek.sh --dogrula     # en yeni SQLite yedeğini aç, PRAGMA integrity_check + kayıt sayısı
 #   kanit-yedek.sh --dry-run     # yalnız planı yaz
-#   kanit-yedek.sh --geri-yukle /var/backups/kanit-paneli/gunluk/panel-YYYYMMDD.db.gz [--dry-run]
-#                                # SQLite'ı yedekten geri yükle: önce yedek açılıp doğrulanır (bozuksa hiçbir şeye dokunulmaz),
-#                                # servisler durur, mevcut panel.db(+-wal/-shm) /root/kanit-onceki/<zaman>/ altına kopyalanır,
-#                                # -wal/-shm SİLİNİR (silinmezse eski WAL geri yüklenen dosyanın üzerine uygulanır), yeni dosya
-#                                # yerine konur (kanit:kanit 600), servisler yeniden başlar. Sonda: GERI_YUKLEME_TAMAM
+#   kanit-yedek.sh --geri-yukle <panel-....db.gz | tam yol> [--dry-run]
+#                                # SQLite'ı yedekten geri yükle (yalnız ad verilirse gunluk/ ve data/yedekler/ içinde aranır). Önce yedek
+#                                # açılıp doğrulanır (bozuksa hiçbir şeye dokunulmaz), servisler durur, mevcut panel.db(+-wal/-shm)
+#                                # /root/kanit-onceki/<zaman>/ altına kopyalanır, -wal/-shm SİLİNİR (silinmezse eski WAL geri
+#                                # yüklenen dosyanın üzerine uygulanır), yeni dosya yerine konur (kanit:kanit 600), servisler
+#                                # yeniden başlar. Sonda: GERI_YUKLEME_TAMAM
 #
-# Konumlar (root, 0700):  /var/backups/kanit-paneli/gunluk/panel-YYYYMMDD.db.gz ve env-YYYYMMDD
-#                          /var/backups/kanit-paneli/haftalik/YYYY-Www/{gorseller,telegram_gorseller}/ (rsync --link-dest ile artımlı)
-# Saklama: 14 günlük, 8 haftalık; apply-update yedek dizinlerinden en yeni 5 tutulur (60 günden eskiler silinir);
-# panel "Yedek al" dosyalarından (data/backups) son 5 kalır. Disk yetmiyorsa görsel aynası UYARI ile atlanır.
+# Konumlar: /var/backups/kanit-paneli/gunluk/ (root 700): panel-YYYYMMDD[-SSDDSS].db.gz, env-YYYYMMDD[-SSDDSS], MANIFEST.tsv
+#           /var/backups/kanit-paneli/haftalik/YYYY-Www/{gorseller,telegram_gorseller}/ (rsync --link-dest ile artımlı)
+#           data/yedekler/ (kanit 700): panelin "Yedek al (geri yüklenebilir)" dosyaları (aynı biçim; panel son 10'u tutar)
+#           data/son_yedek.json + data/yedekler.json (kanit 600): panelin okuduğu son yedek ve liste özeti (ad/boyut/tarih/kayıt)
+#           data/son_gece_yedegi.json (kanit 600): yalnız gece (--zamanlayici) yedeği; panel durum kartı bunu izler
+# Saklama: 14 gece, 10 elle (KANIT_EL_SAKLA), 8 haftalık; apply-update yedek dizinlerinden en yeni 5 tutulur (60 günden
+# eskiler silinir); eski panel "SQLite yedeği" dosyalarından (data/backups) son 5 kalır. Disk yetmiyorsa ayna UYARI ile atlanır.
 # Ayna sırasında silinen/değişen dosya (rsync 23/24) hata değil uyarıdır; ayna yine geçerlidir.
 # Dış kopya (başka sunucu/bulut) bu betiğin işi değildir; README'deki rclone/scp örneğine bakın.
 set -Eeuo pipefail
@@ -27,6 +34,7 @@ KOK="${KANIT_YEDEK_KOK:-/var/backups/kanit-paneli}"
 SERVIS_KULLANICI="${KANIT_USER:-kanit}"
 GUNLUK_SAKLA="${KANIT_GUNLUK_SAKLA:-14}"
 HAFTALIK_SAKLA="${KANIT_HAFTALIK_SAKLA:-8}"
+EL_SAKLA="${KANIT_EL_SAKLA:-10}"
 # settings.py varsayılanları: GORSEL_KLASOR=data/gorseller, ARSIV_KLASOR=data/telegram_gorseller
 GORSEL_DIZINLER="${KANIT_GORSEL_DIZINLER:-gorseller telegram_gorseller}"
 IFS=' ' read -r -a GORSEL_DIZI <<<"$GORSEL_DIZINLER"
@@ -36,21 +44,28 @@ ONCEKI_KOK="${KANIT_ONCEKI_KOK:-/root/kanit-onceki}"
 if [[ -z "${KANIT_TEST:-}" ]]; then PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH; fi
 GUNLUK="$KOK/gunluk"
 HAFTALIK="$KOK/haftalik"
+PANEL_DIZIN="$DATA/yedekler"
 BUGUN="$(date +%Y%m%d)"
 HAFTA="$(date +%G-W%V)"
 
-DRY_RUN=0; HAFTALIK_ZORLA=0; DOGRULA=0; GERI_YUKLE=''
+DRY_RUN=0; HAFTALIK_ZORLA=0; DOGRULA=0; GERI_YUKLE=''; ZAMANLAYICI=0; LISTE=0; JSON=0
+[[ "${KANIT_ZAMANLAYICI:-}" == 1 ]] && ZAMANLAYICI=1
 while (( $# )); do
     case "$1" in
         --dry-run) DRY_RUN=1 ;;
+        --zamanlayici) ZAMANLAYICI=1 ;;
+        --liste) LISTE=1 ;;
+        --json) JSON=1 ;;
         --haftalik) HAFTALIK_ZORLA=1 ;;
         --dogrula) DOGRULA=1 ;;
-        --geri-yukle) shift; GERI_YUKLE="${1:-}"; [[ -n "$GERI_YUKLE" ]] || { echo 'HATA: --geri-yukle için yedek dosyası (panel-YYYYMMDD.db.gz) verin.' >&2; exit 2; } ;;
-        -h|--help|--yardim) sed -n '2,19p' "$0"; exit 0 ;;
+        --geri-yukle) shift; GERI_YUKLE="${1:-}"; [[ -n "$GERI_YUKLE" ]] || { echo 'HATA: --geri-yukle için yedek dosyası (panel-YYYYMMDD.db.gz ya da panel-YYYYMMDD-SSDDSS.db.gz) verin. Liste: kanit-yedek.sh --liste' >&2; exit 2; } ;;
+        -h|--help|--yardim) sed -n '2,25p' "$0"; exit 0 ;;
         *) echo "HATA: Bilinmeyen seçenek: $1 (--yardim)" >&2; exit 2 ;;
     esac
     shift
 done
+# Gece (zamanlayıcı) yedeği günde bir dosya: panel-YYYYMMDD; elle çalıştırma saatli ad alır ve gece dosyasını ezmez.
+if (( ZAMANLAYICI )); then DAMGA="$BUGUN"; TUR=gece; else DAMGA="$(date +%Y%m%d-%H%M%S)"; TUR=el; fi
 
 gunluk() { if command -v logger >/dev/null 2>&1; then logger -t kanit-yedek -- "$*" || true; fi; }
 bilgi() { printf '%s\n' "$*"; gunluk "$*"; }
@@ -71,11 +86,12 @@ kanit_olarak() {
     fi
 }
 
+SON_SONUC=''
 sqlite_yedek_al() {
-    local kaynak="$DATA/panel.db" gecici="$DATA/.kanit-yedek-$$.db" hedef="$GUNLUK/panel-$BUGUN.db"
+    local kaynak="$DATA/panel.db" gecici="$DATA/.kanit-yedek-$$.db" hedef="$GUNLUK/panel-$DAMGA.db" boyut
     [[ -f "$kaynak" ]] || fail "SQLite dosyası yok: $kaynak"
     rm -f -- "${gecici:?}"
-    kanit_olarak "$PY" -I - "$kaynak" "$gecici" <<'PY'
+    SON_SONUC="$(kanit_olarak "$PY" -I - "$kaynak" "$gecici" <<'PY'
 import sqlite3, sys, os
 from urllib.parse import quote
 src, dst = sys.argv[1], sys.argv[2]
@@ -86,22 +102,162 @@ try:
     s.backup(d)
     d.execute("PRAGMA journal_mode=DELETE")   # yedek tek dosya olsun (-wal/-shm yok)
     ok = d.execute("PRAGMA integrity_check").fetchone()[0]
+    tablolar = {r[0] for r in d.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    kayit = d.execute("SELECT COUNT(*) FROM kayitlar").fetchone()[0] if "kayitlar" in tablolar else -1
 finally:
     d.close(); s.close()
 if str(ok).lower() != "ok":
     os.unlink(dst); sys.exit("SQLite yedeği bütünlük denetiminden geçmedi: " + str(ok))
+print(f"integrity=ok kayit={kayit}")
 PY
+)" || fail "SQLite yedeği alınamadı: ${SON_SONUC:-}"
     mv -f -- "$gecici" "$hedef"
     chown root:root "$hedef"; chmod 600 "$hedef"
     gzip -f -- "$hedef"
-    bilgi "SQLite yedeği: $hedef.gz ($(du -h "$hedef.gz" | cut -f1))"
+    boyut="$(stat -c %s -- "$hedef.gz")"
+    py_yardim manifest "$GUNLUK" "panel-$DAMGA.db.gz" "$(date '+%F %T')" "$boyut" "$SON_SONUC" "$TUR" || uyar "MANIFEST.tsv yazılamadı (liste kayıt sayısını göstermeyebilir)."
+    py_yardim isaret "$DATA/son_yedek.json" "$hedef.gz" "$(date '+%F %T')" "$boyut" "$SON_SONUC" "$TUR" || uyar "son_yedek.json yazılamadı (panel son yedeği göremez)."
+    # Gece yedeğinin ayrı işareti: panel durum kartı "Son yedek" rengini YALNIZ buna göre verir (panel/elle yedek gece işinin
+    # bozulduğunu gizlemesin).
+    if (( ZAMANLAYICI )); then
+        py_yardim isaret "$DATA/son_gece_yedegi.json" "$hedef.gz" "$(date '+%F %T')" "$boyut" "$SON_SONUC" "$TUR" || uyar "son_gece_yedegi.json yazılamadı (panel gece yedeğini göremez)."
+    fi
+    bilgi "SQLite yedeği: $hedef.gz ($(du -h "$hedef.gz" | cut -f1); $TUR)"
+    bilgi "YEDEK_DOGRULANDI: panel-$DAMGA.db.gz ($SON_SONUC)"
 }
+
+# Liste / manifest / işaret yardımcıları (tek Python parçası; root olarak, -I ile).
+#   manifest DIZIN AD ZAMAN BOYUT "integrity=ok kayit=N" TUR   -> DIZIN/MANIFEST.tsv'ye satır (aynı ad varsa yenilenir)
+#   isaret DOSYA YOL ZAMAN BOYUT "integrity=ok kayit=N" TUR    -> son_yedek.json (644, atomik)
+#   liste GUNLUK PANEL tablo|json [CIKTI]                      -> gece/elle + panel yedekleri (CIKTI: veri klasörü sahibine 600)
+#   budama DIZIN                                               -> MANIFEST.tsv'den artık olmayan dosyaların satırları atılır
+py_yardim() {
+    "$PY" -I - "$@" <<'PYYARDIM'
+import json, os, re, sys
+AD = re.compile(r"^panel-(\d{8})(?:-(\d{6}))?\.db\.gz$")
+def sonuc(m):
+    d = dict(x.split("=", 1) for x in m.split() if "=" in x)
+    return d.get("integrity", ""), d.get("kayit", "")
+def manifest_oku(dizin):
+    out = {}
+    try:
+        for satir in open(os.path.join(dizin, "MANIFEST.tsv"), encoding="utf-8"):
+            p = satir.rstrip("\n").split("\t")
+            if len(p) >= 6 and AD.match(p[0]):
+                out[p[0]] = p
+    except OSError:
+        pass
+    return out
+def guvenli_ac(gec):
+    # Root olarak kanit'in yazabildiği klasöre de yazılır: geçici ad önceden varsa (ör. sembolik bağ) izlenmez; silinip
+    # O_EXCL|O_NOFOLLOW ile yeniden denenir (unlink bağı izlemez), ikinci kez de varsa hata.
+    bayrak = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    try:
+        fd = os.open(gec, bayrak, 0o600)
+    except FileExistsError:
+        os.unlink(gec)
+        fd = os.open(gec, bayrak, 0o600)
+    return os.fdopen(fd, "w", encoding="utf-8")
+def manifest_yaz(dizin, satirlar):
+    yol = os.path.join(dizin, "MANIFEST.tsv"); gec = yol + ".%d" % os.getpid()
+    with guvenli_ac(gec) as f:
+        for ad in sorted(satirlar):
+            f.write("\t".join(satirlar[ad]) + "\n")
+    st = os.stat(dizin)
+    try:
+        os.chown(gec, st.st_uid, st.st_gid)
+    except OSError:
+        pass
+    os.chmod(gec, 0o600); os.replace(gec, yol)
+def json_yaz(yol, veri):
+    # Veri klasörüne yazılır: sahibi klasörün sahibi (kanit) olur, panel okuyabilsin; başkası okuyamaz (600).
+    gec = yol + ".%d" % os.getpid()
+    with guvenli_ac(gec) as f:
+        json.dump(veri, f, ensure_ascii=False)
+    st = os.stat(os.path.dirname(yol) or ".")
+    try:
+        os.chown(gec, st.st_uid, st.st_gid)
+    except OSError:
+        pass
+    os.chmod(gec, 0o600); os.replace(gec, yol)
+def zaman(ad):
+    m = AD.match(ad)
+    d = m.group(1)
+    z = "%s-%s-%s" % (d[:4], d[4:6], d[6:])
+    if m.group(2):
+        t = m.group(2); z += " %s:%s:%s" % (t[:2], t[2:4], t[4:])
+    return z
+def tara(gunluk, panel):
+    out = []
+    for dizin, tur in ((gunluk, None), (panel, "panel")):
+        try:
+            adlar = [a for a in os.listdir(dizin) if AD.match(a)]
+        except OSError:
+            continue
+        man = manifest_oku(dizin)
+        for a in adlar:
+            yol = os.path.join(dizin, a)
+            try:
+                st = os.stat(yol)
+            except OSError:
+                continue
+            p = man.get(a)
+            kayit = None
+            if p and p[4].lstrip("-").isdigit():
+                kayit = int(p[4])
+            t = (p[5] if p else None) or tur or ("el" if AD.match(a).group(2) else "gece")
+            out.append({"ad": a, "yol": yol, "boyut": st.st_size, "zaman": (p[1] if p else "") or zaman(a),
+                        "kayit": kayit, "integrity": p[3] if p else "", "tur": t})
+    return sorted(out, key=lambda o: o["zaman"], reverse=True)
+def mb(b):
+    for birim in ("B", "KB", "MB", "GB"):
+        if b < 1024 or birim == "GB":
+            return ("%d %s" % (b, birim)) if birim == "B" else "%.1f %s" % (b, birim)
+        b /= 1024.0
+islem = sys.argv[1]
+if islem == "manifest":
+    dizin, ad, z, boyut, m, tur = sys.argv[2:8]
+    ic, kayit = sonuc(m)
+    man = manifest_oku(dizin); man[ad] = [ad, z, boyut, ic, kayit, tur]
+    manifest_yaz(dizin, man)
+elif islem == "isaret":
+    yol, dosya, z, boyut, m, tur = sys.argv[2:8]
+    ic, kayit = sonuc(m)
+    json_yaz(yol, {"zaman": z, "dosya": dosya, "ad": os.path.basename(dosya), "boyut": int(boyut), "integrity": ic,
+                   "kayit": int(kayit) if kayit.lstrip("-").isdigit() else None, "tur": tur, "kaynak": "kanit-yedek.sh"})
+elif islem == "budama":
+    dizin = sys.argv[2]
+    man = manifest_oku(dizin)
+    kalan = {a: p for a, p in man.items() if os.path.exists(os.path.join(dizin, a))}
+    if kalan != man:
+        manifest_yaz(dizin, kalan)
+elif islem == "liste":
+    gunluk, panel, bicim = sys.argv[2], sys.argv[3], sys.argv[4]
+    ogeler = tara(gunluk, panel)
+    if bicim == "json":
+        veri = {"olusturma": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "yedekler": ogeler}
+        if len(sys.argv) > 5:
+            json_yaz(sys.argv[5], veri)
+        else:
+            print(json.dumps(veri, ensure_ascii=False, indent=2))
+    else:
+        if not ogeler:
+            print("Yedek yok (%s, %s)." % (gunluk, panel)); sys.exit(0)
+        print("%-30s %-19s %-6s %10s %7s" % ("AD", "TARİH", "TÜR", "BOYUT", "KAYIT"))
+        for o in ogeler:
+            print("%-30s %-19s %-6s %10s %7s" % (o["ad"], o["zaman"], o["tur"], mb(o["boyut"]), "?" if o["kayit"] is None else o["kayit"]))
+        print("Toplam %d yedek. Geri yükleme: kanit-yedek.sh --geri-yukle <AD> --dry-run" % len(ogeler))
+PYYARDIM
+}
+
+# Panelin okuyabileceği özet (gece yedek klasörü root 700 kalır): data/yedekler.json, yalnız ad/boyut/tarih/kayıt sayısı.
+liste_ozeti_yaz() { py_yardim liste "$GUNLUK" "$PANEL_DIZIN" json "$DATA/yedekler.json" || uyar 'yedekler.json yazılamadı (panel yedek listesi eski kalabilir).'; }
 
 env_yedek_al() {
     if [[ -f "$APP/.env" ]]; then
-        cp -p -- "$APP/.env" "$GUNLUK/env-$BUGUN"
-        chown root:root "$GUNLUK/env-$BUGUN"; chmod 600 "$GUNLUK/env-$BUGUN"
-        bilgi "Ayar kopyası: $GUNLUK/env-$BUGUN (root 600)"
+        cp -p -- "$APP/.env" "$GUNLUK/env-$DAMGA"
+        chown root:root "$GUNLUK/env-$DAMGA"; chmod 600 "$GUNLUK/env-$DAMGA"
+        bilgi "Ayar kopyası: $GUNLUK/env-$DAMGA (root 600)"
     else
         uyar ".env bulunamadı ($APP/.env); ayar kopyası alınmadı."
     fi
@@ -161,13 +317,16 @@ gorsel_ayna_al() {
 }
 
 temizle() {
-    local eski desen
-    # Günlük: en yeni N kalsın (ad sırası = tarih sırası).
-    for desen in 'panel-*.db.gz' 'env-*'; do
-        find "$GUNLUK" -mindepth 1 -maxdepth 1 -type f -name "$desen" -printf '%f\n' | sort | head -n -"$GUNLUK_SAKLA" | while IFS= read -r eski; do
-            rm -f -- "${GUNLUK:?}/${eski:?}"; bilgi "Eski günlük yedek silindi: $eski"
+    local eski desen sakla
+    # Gece (panel-YYYYMMDD) ve elle (panel-YYYYMMDD-SSDDSS) yedekler ayrı sayılır: elle yedekler gece yedeklerini erken sildirmez.
+    # Ad sırası = tarih sırası.
+    for desen in 'panel-[0-9]{8}\.db\.gz' 'env-[0-9]{8}' 'panel-[0-9]{8}-[0-9]{6}\.db\.gz' 'env-[0-9]{8}-[0-9]{6}'; do
+        if [[ "$desen" == *'-[0-9]{6}'* ]]; then sakla="$EL_SAKLA"; else sakla="$GUNLUK_SAKLA"; fi
+        find "$GUNLUK" -mindepth 1 -maxdepth 1 -type f -regextype posix-extended -regex ".*/$desen" -printf '%f\n' | sort | head -n -"$sakla" | while IFS= read -r eski; do
+            rm -f -- "${GUNLUK:?}/${eski:?}"; bilgi "Eski yedek silindi: $eski"
         done
     done
+    py_yardim budama "$GUNLUK" || true
     # Haftalık: en yeni N dizin kalsın.
     find "$HAFTALIK" -mindepth 1 -maxdepth 1 -type d -name '[0-9][0-9][0-9][0-9]-W[0-9][0-9]' -printf '%f\n' | sort | head -n -"$HAFTALIK_SAKLA" | while IFS= read -r eski; do
         rm -rf -- "${HAFTALIK:?}/${eski:?}"; bilgi "Eski haftalık ayna silindi: $eski"
@@ -185,11 +344,12 @@ temizle() {
 DOGRULA_GECICI=''
 dogrula() {
     local son sonuc
-    son="$(find "$GUNLUK" -mindepth 1 -maxdepth 1 -type f -name 'panel-*.db.gz' -printf '%f\n' 2>/dev/null | sort | tail -1)"
+    # En yeni (değişme zamanına göre) yedek: gece, elle ya da panel.
+    son="$({ find "$GUNLUK" "$PANEL_DIZIN" -mindepth 1 -maxdepth 1 -type f -name 'panel-*.db.gz' -printf '%T@ %p\n' 2>/dev/null || true; } | sort -n | tail -1 | cut -d' ' -f2-)"
     [[ -n "$son" ]] || fail "Doğrulanacak yedek yok ($GUNLUK/panel-*.db.gz)."
     DOGRULA_GECICI="$KOK/.dogrula-$$.db"
     trap '[[ -n "$DOGRULA_GECICI" ]] && rm -f -- "$DOGRULA_GECICI"' EXIT
-    gunzip -c -- "$GUNLUK/$son" > "$DOGRULA_GECICI" || fail "YEDEK_BOZUK: $son açılamadı (gzip)."
+    gunzip -c -- "$son" > "$DOGRULA_GECICI" || fail "YEDEK_BOZUK: $(basename -- "$son") açılamadı (gzip)."
     sonuc="$("$PY" -I - "$DOGRULA_GECICI" <<'PY'
 import sqlite3, sys
 try:
@@ -202,8 +362,8 @@ except sqlite3.Error as exc:
 print(f"integrity={ic} tablo={len(tablolar)} kayit={kayit}")
 if str(ic).lower() != "ok": sys.exit(1)
 PY
-)" || fail "YEDEK_BOZUK: $son -> ${sonuc:-açılamadı}"
-    bilgi "YEDEK_DOGRULANDI: $son ($sonuc)"
+)" || fail "YEDEK_BOZUK: $(basename -- "$son") -> ${sonuc:-açılamadı}"
+    bilgi "YEDEK_DOGRULANDI: $(basename -- "$son") ($sonuc)"
 }
 
 # --geri-yukle: yedeği doğrula -> servisleri durdur -> mevcut DB'yi kenara al -> -wal/-shm sil -> yerine koy -> başlat.
@@ -214,6 +374,10 @@ servis_aktif() { "$SYSTEMCTL" is-active --quiet "$1" 2>/dev/null; }
 servis_baslatilacak() { servis_aktif "$1" || "$SYSTEMCTL" is-enabled --quiet "$1" 2>/dev/null; }
 geri_yukle() {
     local yedek="$1" hedef="$DATA/panel.db" onceki sonuc s aktifler=()
+    # Yalnız ad verildiyse (panel-YYYYMMDD[-SSDDSS].db.gz) gece/elle (gunluk/) ve panel (data/yedekler/) klasörlerinde aranır.
+    if [[ "$yedek" != */* ]]; then
+        if [[ -f "$GUNLUK/$yedek" ]]; then yedek="$GUNLUK/$yedek"; elif [[ -f "$PANEL_DIZIN/$yedek" ]]; then yedek="$PANEL_DIZIN/$yedek"; fi
+    fi
     [[ -f "$yedek" ]] || fail "Geri yüklenecek yedek bulunamadı: $yedek (hiçbir şeye dokunulmadı)."
     [[ "$yedek" == *.gz ]] || fail "Yedek dosyası .db.gz uzantılı olmalı: $yedek (hiçbir şeye dokunulmadı)."
     onceki="$ONCEKI_KOK/$(date +%Y%m%d-%H%M%S)-$$"
@@ -270,12 +434,16 @@ PYKONTROL
 }
 
 install -d -m 700 -o root -g root "$KOK" "$GUNLUK" "$HAFTALIK"
+if (( LISTE )); then
+    if (( JSON )); then py_yardim liste "$GUNLUK" "$PANEL_DIZIN" json; else py_yardim liste "$GUNLUK" "$PANEL_DIZIN" tablo; fi
+    exit 0
+fi
 if [[ -n "$GERI_YUKLE" ]]; then geri_yukle "$GERI_YUKLE"; exit 0; fi
 if (( DOGRULA )); then dogrula; exit 0; fi
 
 if (( DRY_RUN )); then
-    printf 'Plan: SQLite -> %s/panel-%s.db.gz; .env -> %s/env-%s; görsel aynası: %s (%s); saklama %s gün / %s hafta\n' \
-        "$GUNLUK" "$BUGUN" "$GUNLUK" "$BUGUN" "$(haftalik_gerekli && echo 'bugün alınacak' || echo 'bugün alınmayacak')" "$HAFTALIK/$HAFTA" "$GUNLUK_SAKLA" "$HAFTALIK_SAKLA"
+    printf 'Plan (%s): SQLite -> %s/panel-%s.db.gz; .env -> %s/env-%s; görsel aynası: %s (%s); saklama %s gece / %s elle / %s hafta\n' \
+        "$TUR" "$GUNLUK" "$DAMGA" "$GUNLUK" "$DAMGA" "$(haftalik_gerekli && echo 'bugün alınacak' || echo 'bugün alınmayacak')" "$HAFTALIK/$HAFTA" "$GUNLUK_SAKLA" "$EL_SAKLA" "$HAFTALIK_SAKLA"
     printf 'Disk: %s\n' "$(df -h --output=avail,pcent,target -- "$KOK" | tail -1)"
     printf 'DRY-RUN_TAMAM: hiçbir dosya yazılmadı.\n'
     exit 0
@@ -285,4 +453,5 @@ sqlite_yedek_al
 env_yedek_al
 if haftalik_gerekli; then gorsel_ayna_al; else bilgi "Görsel aynası bugün alınmadı (haftalık; son: $(son_haftalik || true))."; fi
 temizle
+liste_ozeti_yaz
 bilgi "YEDEK_TAMAM: $(date '+%F %T'); toplam $(du -sh -- "$KOK" | cut -f1); boş alan $(df -h --output=avail -- "$KOK" | tail -1 | tr -d ' ')"

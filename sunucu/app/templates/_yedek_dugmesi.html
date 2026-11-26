@@ -1,0 +1,6 @@
+{# 2.4.0 (B2) — Yeniden kullanılabilir "Önce yedek al" düğmesi. Kullanım:
+   {% from "_yedek_dugmesi.html" import yedek_dugmesi with context %}{{ yedek_dugmesi(request.full_path, 'Önce yedek al') }}
+   Yedek panelden alınır (geri yüklenebilir .db.gz), sonra aynı sayfaya dönülür; dosya adı ve geri yükleme komutu üstte yazar. #}
+{% macro yedek_dugmesi(sonraki='', etiket='Önce yedek al', stil='birincil') -%}
+<form method="post" action="{{ url_for('isletim.yedekler') }}" class="satir-form yedek-dugmesi"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="yedek_al"><input type="hidden" name="sonraki" value="{{ sonraki }}"><button class="btn {{ stil }}">{{ etiket }}</button></form>
+{%- endmacro %}

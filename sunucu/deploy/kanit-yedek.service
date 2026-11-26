@@ -4,7 +4,7 @@ After=kanit-web.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/kanit-yedek.sh
+ExecStart=/usr/local/sbin/kanit-yedek.sh --zamanlayici
 Nice=10
 IOSchedulingClass=idle
 PrivateTmp=true

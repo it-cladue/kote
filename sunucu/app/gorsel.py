@@ -1334,6 +1334,35 @@ def _gyazo_sebep(durum, servis="Gyazo"):
     return "indirilemedi (izinsiz bağlantı ya da meşgul)"
 
 
+GECE_IS_ISARETI = "is:gece_gorsel"
+
+
+def _gece_isareti_yaz(islev):
+    """2.4.0: 'Sistem durumu' kartı için toplu indirmenin son sonucunu ayarlar tablosuna yazar ('is:gece_gorsel').
+    İşaret yazılamazsa (salt okunur DB vb.) indirme sonucu yine döner; hata (ValueError) da 'hata' olarak işaretlenir."""
+    import functools
+    import json as _json
+
+    @functools.wraps(islev)
+    def sarmal(conn, *a, **k):
+        def yaz(veri):
+            try:
+                from . import db
+                db.ayar_yaz(conn, GECE_IS_ISARETI, _json.dumps(dict(veri, zaman=db.simdi()), ensure_ascii=False))
+            except Exception:
+                pass
+        try:
+            sonuc = islev(conn, *a, **k)
+        except ValueError as e:
+            yaz({"bitis_nedeni": "hata", "durduruldu": str(e)[:300]})
+            raise
+        if isinstance(sonuc, dict):
+            yaz({x: sonuc.get(x) for x in ("bitis_nedeni", "indirilen", "zaten_var", "acilamayan", "kalan", "ariza", "durduruldu", "sure_sn")})
+        return sonuc
+    return sarmal
+
+
+@_gece_isareti_yaz
 def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis=None, bekleme_sn=0.15, uyku=None,
                       rapor_yolu=None, ilerleme=None, log=None, on_kontrol=False, simdi=None):
     """Kayıtlardaki tüm Gyazo, Snappark ve Teamzone bağlantılarını (ana ve ikinci görsel) sunucu önbelleğine bir kez indirir.

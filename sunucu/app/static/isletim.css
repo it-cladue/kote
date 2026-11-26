@@ -1,0 +1,57 @@
+/* 2.4.0 (B2) — Sistem durumu kartı, Yedekler ve Çalışma ayarları. Renkler stil.css değişkenlerinden (açık/koyu tema). */
+.sd-kart { margin-top: var(--b3); }
+.sd-genel { font-weight: 650; }
+.sd-liste { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sd-satir { display: grid; grid-template-columns: 14px minmax(140px, 200px) 1fr; gap: 4px 12px; align-items: start; padding: 10px 12px; border-radius: var(--yuvarlak-kucuk); background: var(--yuzey-2); border-left: 4px solid var(--cizgi-koyu); }
+.sd-satir.yesil { border-left-color: var(--yesil); }
+.sd-satir.sari { border-left-color: var(--sari); background: var(--sari-yumusak); }
+.sd-satir.kirmizi { border-left-color: var(--kirmizi); background: var(--kirmizi-yumusak); }
+.sd-nokta { width: 11px; height: 11px; border-radius: 50%; margin-top: 5px; background: var(--soluk); }
+.sd-satir.yesil .sd-nokta { background: var(--yesil); }
+.sd-satir.sari .sd-nokta { background: var(--sari); }
+.sd-satir.kirmizi .sd-nokta { background: var(--kirmizi); }
+.sd-ad { font-weight: 650; color: var(--yazi); }
+.sd-ad small { display: block; font-weight: 600; }
+.sd-satir.yesil .sd-ad small { color: var(--yesil); }
+.sd-satir.sari .sd-ad small { color: var(--sari); }
+.sd-satir.kirmizi .sd-ad small { color: var(--kirmizi); }
+.sd-deger { color: var(--yazi-2); overflow-wrap: anywhere; }
+.sd-aciklama { grid-column: 3; color: var(--yazi-2); font-size: 13px; }
+.sd-komut { grid-column: 3; display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }
+.sd-komut code, .komut-kutu code { white-space: pre-wrap; word-break: break-all; display: block; padding: 6px 8px; flex: 1 1 240px; }
+.sd-alt { display: flex; gap: var(--b1); flex-wrap: wrap; margin-top: var(--b2); }
+@media (max-width: 720px) {
+  .sd-satir { grid-template-columns: 14px 1fr; }
+  .sd-deger, .sd-aciklama, .sd-komut { grid-column: 2; }
+}
+.yd-tablo td, .yd-tablo th { vertical-align: top; }
+/* Telefonda tablo kart olarak yığılır: yan kaydırma yok, komut sütunu doğrudan görünür. */
+@media (max-width: 720px) {
+  .yd-tablo table, .yd-tablo tbody, .yd-tablo tr, .yd-tablo td { display: block; width: 100%; min-width: 0; box-sizing: border-box; }
+  .yd-tablo { max-height: none; border: 0; }
+  .yd-tablo code { overflow-wrap: anywhere; }
+  .yd-tablo thead { display: none; }
+  .yd-tablo tr { border: 1px solid var(--cizgi); border-radius: var(--yuvarlak-kucuk); margin-bottom: 10px; padding: 6px 8px; }
+  .yd-tablo td { border: 0; padding: 3px 0; white-space: normal; }
+  .yd-tablo td::before { content: attr(data-etiket); display: block; font-size: 11.5px; color: var(--soluk); }
+  .yd-tablo .yd-yol { overflow-wrap: anywhere; }
+}
+.komut-kutu { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; flex-wrap: wrap; }
+.yd-adim { margin: 0 0 var(--b2) 18px; padding: 0; }
+.yd-adim li { margin-bottom: 8px; }
+.ay-grup { margin-bottom: var(--b3); }
+.ay-satir { display: grid; grid-template-columns: minmax(200px, 1.1fr) minmax(200px, .9fr) minmax(220px, 1fr); gap: 10px 18px; padding: 14px 6px; border-top: 1px solid var(--cizgi); align-items: start; }
+.ay-satir:first-of-type { border-top: 0; }
+.ay-satir:target, .ay-satir.hatali { background: var(--birincil-yumusak); border-radius: var(--yuvarlak-kucuk); }
+.ay-satir.hatali { background: var(--kirmizi-yumusak); }
+.ay-etiket > b { display: block; }
+.ay-etiket code { font-size: 11.5px; }
+.ay-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ay-form input, .ay-form select { min-width: 0; flex: 1 1 150px; padding: 7px 9px; border: 1px solid var(--cizgi-koyu); border-radius: var(--yuvarlak-kucuk); background: var(--kart); color: var(--yazi); font: inherit; }
+.ay-form input[aria-invalid="true"] { border-color: var(--kirmizi); }
+.ay-hata { color: var(--kirmizi); font-size: 13px; margin: 6px 0 0; width: 100%; }
+.ay-kaynak { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; background: var(--yuzey-3); color: var(--soluk); }
+.ay-kaynak.db { background: var(--birincil-yumusak); color: var(--birincil); }
+.ay-kaynak.env { background: var(--yesil-yumusak); color: var(--yesil); }
+.ay-gecerli b { overflow-wrap: anywhere; }
+@media (max-width: 900px) { .ay-satir { grid-template-columns: 1fr; } }

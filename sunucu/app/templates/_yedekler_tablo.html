@@ -1,0 +1,9 @@
+{# 2.4.0 (B2) — Yedek listesi tablosu (Yedekler sayfası ve Bot sayfası). Girdi: yedekler (yedek.liste()). #}
+{% if yedekler %}
+<div class="kaydir yd-tablo"><table class="tablo kucuk"><thead><tr><th>Yedek</th><th>Tarih</th><th>Tür</th><th>Boyut</th><th>Kayıt</th><th>Geri yükleme komutu (sunucuda)</th></tr></thead><tbody>
+{% for y in yedekler %}<tr data-yedek="{{ y.ad }}"><td data-etiket="Yedek"><code>{{ y.ad }}</code><br><small class="yd-yol">{{ y.yol }}</small></td><td class="nowrap" data-etiket="Tarih">{{ y.zaman }}</td><td data-etiket="Tür">{{ y.tur_adi }}</td><td class="nowrap" data-etiket="Boyut">{{ y.boyut_metin }}</td><td data-etiket="Kayıt">{{ y.kayit if y.kayit is not none and y.kayit >= 0 else '?' }}</td>
+<td data-etiket="Geri yükleme komutu (sunucuda)"><div class="komut-kutu"><code>{{ y.komut.dene }}</code><button type="button" class="btn kucuk" data-kopyala="{{ y.komut.dene }}">Kopyala</button></div><div class="komut-kutu"><code>{{ y.komut.uygula }}</code><button type="button" class="btn kucuk" data-kopyala="{{ y.komut.uygula }}">Kopyala</button></div></td></tr>{% endfor %}
+</tbody></table></div>
+{% else %}
+<div class="bos-tablo">Panelin görebildiği yedek yok. Gece yedeği kurulu değilse sunucuda bir kez: <code>{{ yedek_kurulum_komutu }}</code></div>
+{% endif %}

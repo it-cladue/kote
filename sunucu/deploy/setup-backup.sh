@@ -6,6 +6,8 @@
 # Yaptığı: deploy/kanit-yedek.sh -> /usr/local/sbin/kanit-yedek.sh (root 700); kanit-yedek.service + kanit-yedek.timer
 # -> /etc/systemd/system; daemon-reload; timer etkin (her gün 03:17 + rastgele 15 dk; kaçırılan çalışma açılışta telafi);
 # ilk yedek hemen alınır ve --dogrula ile denetlenir. Mevcut dosyalar aynıysa dokunulmaz.
+# 2.4.0: birim --zamanlayici ile çalışır (gece dosyası panel-YYYYMMDD.db.gz); elle çalıştırma saatli ad alır ve gece dosyasını
+# ezmez. Güncellemeden sonra bu betiği bir kez yeniden çalıştırın (yeni betik + birim kurulur). Liste: kanit-yedek.sh --liste
 set -Eeuo pipefail
 IFS=$'\n\t'
 SBIN_DIR="${KANIT_SBIN_DIR:-/usr/local/sbin}"
@@ -17,7 +19,7 @@ DRY_RUN=0
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=1 ;;
-        -h|--help|--yardim) sed -n '2,9p' "$0"; exit 0 ;;
+        -h|--help|--yardim) sed -n '2,10p' "$0"; exit 0 ;;
         *) echo "HATA: Bilinmeyen seçenek: $arg (--yardim)" >&2; exit 2 ;;
     esac
 done
@@ -50,7 +52,7 @@ fi
 "$SYSTEMCTL" daemon-reload
 "$SYSTEMCTL" enable --now kanit-yedek.timer
 bilgi 'İlk yedek alınıyor...'
-"$HEDEF_SH"
+"$HEDEF_SH" --zamanlayici   # ilk yedek gece biçiminde (panel-YYYYMMDD.db.gz); o geceki çalışma aynı dosyayı yeniler
 "$HEDEF_SH" --dogrula
 "$SYSTEMCTL" list-timers kanit-yedek.timer --no-pager 2>/dev/null | sed 's/^/   /' || true
 bilgi 'YEDEK_ZAMANLAYICI_TAMAM: kanit-yedek.timer etkin. Dış kopya için README "Yedek" bölümündeki rclone/scp örneğini ayrıca kurun.'

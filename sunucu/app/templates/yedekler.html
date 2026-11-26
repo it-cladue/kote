@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_yedek_dugmesi.html" import yedek_dugmesi with context %}
+{% block baslik %}Yedekler — Kanıt Paneli{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='isletim.css', v=SURUM) }}">{% endblock %}
+{% block icerik %}
+<section class="sayfa-baslik">
+  <div><p class="ust-etiket">Süperadmin</p><h1>Yedekler</h1><p>Veritabanı yedekleri (kayıtlar, kullanıcılar, yorumlar, bildirimler, ayarlar). Görseller ayrıca haftalık aynada yedeklenir. Geri yükleme yalnız sunucuda, komutla yapılır.</p></div>
+  <div class="baslik-eylemler">{{ yedek_dugmesi(url_for('isletim.yedekler'), 'Yedek al (geri yüklenebilir)') }}<a class="btn" href="{{ url_for('isletim.ayarlar') }}">Çalışma ayarları</a></div>
+</section>
+
+<section class="kart" aria-labelledby="son-yedek-baslik">
+  <div class="kart-baslik"><h2 id="son-yedek-baslik">Son yedek</h2></div>
+  {% if son %}
+  <p><b><code>{{ son.ad or son.dosya }}</code></b> · {{ son.zaman }} · {{ son.kayit if son.kayit is not none else '?' }} kayıt · bütünlük: <b>{{ son.integrity or '?' }}</b></p>
+  {% else %}
+  <div class="bilgi uyari">Henüz yedek bilgisi yok. Gece yedeği kurulu değilse sunucuda bir kez çalıştırın: <code>{{ yedek_kurulum_komutu }}</code></div>
+  {% endif %}
+  <p class="kucukyazi">Gece yedeği her gün 03:17'de (+ en çok 15 dk) otomatik alınır, 14 gün saklanır. Sunucuda elle ya da panelden alınan yedekler gece dosyasının <b>üzerine yazmaz</b>: adlarında saat de vardır (<code>panel-YYYYAAGG-SSDDSS.db.gz</code>). Panelden alınan son 10 yedek tutulur.</p>
+</section>
+
+<section class="kart" aria-labelledby="yedek-liste-baslik" style="margin-top:var(--b3)">
+  <div class="kart-baslik"><h2 id="yedek-liste-baslik">Yedek listesi</h2><span class="kucukyazi">{{ yedekler|length }} yedek</span></div>
+  {% include "_yedekler_tablo.html" %}
+  <p class="kucukyazi">Gece yedekleri root'a ait klasördedir (panel onları silemez); liste, yedek betiğinin her çalışmada yazdığı özetten okunur. Sunucudaki tam liste: <code>sudo {{ yedek_betik }} --liste</code></p>
+</section>
+
+<section class="kart" aria-labelledby="geri-yukle-baslik" style="margin-top:var(--b3)">
+  <div class="kart-baslik"><h2 id="geri-yukle-baslik">Geri yükleme — adım adım</h2></div>
+  <ol class="yd-adim">
+    <li>Sunucuya SSH ile bağlanın (root ya da sudo yetkili hesap).</li>
+    <li>Yukarıdaki listeden dönmek istediğiniz yedeği seçin; önce <b>deneme</b> komutunu (<code>--dry-run</code>) çalıştırın: hiçbir şeye dokunmadan planı yazar.</li>
+    <li>Plan doğruysa aynı komutu <code>--dry-run</code> olmadan çalıştırın. Betik yedeği açıp doğrular (bozuksa hiçbir şeye dokunmaz), panel ve botu durdurur, mevcut veritabanını <code>/root/kanit-onceki/&lt;zaman&gt;/</code> altına kopyalar, yedeği yerine koyar ve servisleri yeniden başlatır.</li>
+    <li>Çıktının sonunda <code>GERI_YUKLEME_TAMAM</code> satırını görün; paneli yenileyin.</li>
+    <li>Yedekten sonra eklenen kayıtlar geri gelmez; gerekirse <code>/root/kanit-onceki/</code> altındaki dosya saklanır.</li>
+  </ol>
+  <p class="kucukyazi">Dosya adını yalnız ad olarak da verebilirsiniz: <code>sudo {{ yedek_betik }} --geri-yukle panel-20261126-101500.db.gz --dry-run</code> (betik gece ve panel klasörlerinde arar).</p>
+  <p class="kucukyazi">Yedek klasörleri: <code>{{ kok }}/gunluk</code> (gece ve sunucuda elle; root), <code>{{ panel_dizini }}</code> (panelden).</p>
+</section>
+{% endblock %}

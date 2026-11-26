@@ -64,7 +64,9 @@ app.config.update(SESSION_COOKIE_NAME='__Host-kanit_session' if secure else 'kan
                   SESSION_COOKIE_SECURE=secure, SESSION_COOKIE_SAMESITE='Lax',
                   PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
                   MAX_CONTENT_LENGTH=EN_BUYUK_ISTEK)
-COZUCU = gorsel.GorselCozucu(AYAR, AYAR['ONBELLEK'])
+# 2.4.0: GYAZO_PROXY / DIS_GORSEL_PROXY panelden değiştirildiyse (veritabanı) açılışta o değer kullanılır (app/ayarlar.py).
+from . import ayarlar as _calisma_ayarlari
+COZUCU = gorsel.GorselCozucu(_calisma_ayarlari.birlesik(AYAR), AYAR['ONBELLEK'])
 
 def simdi():
     return db.simdi()
@@ -734,12 +736,16 @@ def _kategori_kanonik(cat,codes):
 _GECIKEN_SQL="julianday(date('now','localtime')) - julianday(date(COALESCE(NULLIF(ilk_gorulme,''),tarih))) >= ?"
 
 def _hatirlatma_gun():
-    try: return max(1,int(AYAR.get('HATIRLATMA_GUN',3)))
+    # 2.4.0: panelden değiştirilen değer (veritabanı) önce; yoksa açılıştaki .env değeri (AYAR). Ayrıntı: app/ayarlar.py
+    from . import ayarlar as calisma_ayarlari
+    try: return max(1,int(calisma_ayarlari.ust('HATIRLATMA_GUN',AYAR.get('HATIRLATMA_GUN',3))))
     except (TypeError,ValueError): return 3
 
 def _onaysiz_modu():
-    """'gizle' ya da 'uyar' (varsayılan). Kural yalnız kullanıcının kt yetkisi OLMAYAN projelerde uygulanır."""
-    return 'gizle' if str(AYAR.get('ONAYSIZ_GORUNUM','uyar') or '').strip().lower()=='gizle' else 'uyar'
+    """'gizle' ya da 'uyar' (varsayılan). Kural yalnız kullanıcının kt yetkisi OLMAYAN projelerde uygulanır.
+    2.4.0: panelden değiştirilen değer (veritabanı) önce; yoksa .env (AYAR)."""
+    from . import ayarlar as calisma_ayarlari
+    return 'gizle' if str(calisma_ayarlari.ust('ONAYSIZ_GORUNUM',AYAR.get('ONAYSIZ_GORUNUM','uyar')) or '').strip().lower()=='gizle' else 'uyar'
 
 def _kt_yok(projeler_listesi):
     """Verilen projelerden kullanıcının onay (kt) yetkisi olmayanları döndürür."""
@@ -1628,14 +1634,14 @@ def bot_sayfasi():
                 from . import katalog
                 katalog.save_category(c,request.form.get('code',''),request.form.get('label',''),mode=request.form.get('mode','tek_uye'),projects=projeler(),questions=None,actor=kim)
             elif op=='kategori_sil': bot_yonetim.kategori_sil(AYAR,c,request.form.get('code',''),kim)
-            elif op=='yedek': bot_yonetim.yedek_al(AYAR,c,kim)
+            elif op=='yedek': mesaj=bot_yonetim.geri_yuklenebilir_yedek_al(AYAR,c,kim,ip())  # 2.4.0: --geri-yukle ile açılır (.db.gz)
             elif op=='tam_sifirla': bot_yonetim.tam_sifirla(AYAR,c,tg,kim)
             elif op in ('bot_duraklat','bot_surdur'): bot_yonetim.bot_kontrol(AYAR,c,op=='bot_duraklat',kim)
             elif op=='kategori_yayinla': mesaj='Kategori değişiklikleri kaydedildiği anda geçerlidir.'
             elif op=='inbox_tekrar': bot_yonetim.tekrar_dene(AYAR,c,request.form.get('update_id') or None,kim)
             elif op=='yenile': pass
             else: raise ValueError('Bilinmeyen işlem.')
-            mesaj='İşlem sunucuya uygulandı.'
+            mesaj=mesaj or 'İşlem sunucuya uygulandı.'
         except (ValueError,OSError) as e: mesaj='Hata: '+str(e)
     sure=bot_yonetim.sure_normalle(request.args.get('sure',''))
     if request.args.get('sure','') and not sure and not mesaj: mesaj='Son görülme filtresi tanınmadı; tüm zamanlar gösteriliyor.'
@@ -1826,6 +1832,8 @@ def _bildirim_hedef(row):
         return url_for('kayitlar',proje=kt,durum='bekleyen')
     if olay.startswith('gun-sonu:'):
         return url_for('kayitlar',durum='bekleyen')
+    if olay.startswith('sistem:'):  # 2.4.0: Sistem durumu uyarısı → ana sayfadaki kart
+        return url_for('ana',_anchor='sistem-durumu')
     if olay.startswith('hatirlatma-saat-ozet:'):
         return url_for('kayitlar',proje=row.get('proje'),durum='bekleyen')
     if row.get('ozet') or olay.startswith('hatirlatma-ozet:'):
@@ -2382,14 +2390,29 @@ def _start_hatirlatma_isi():
     2.3.3: varsayılan 10 dk; 2 saat bildirimi eşikten en geç ~10 dk sonra, gün sonu özeti İstanbul 18:00–18:10 arasında gider."""
     import sqlite3,threading
     from . import hatirlatma
-    dk=hatirlatma.ayarlar(AYAR)['kontrol_dk']
+    # 2.4.0: aralık her turda yeniden okunur (panelden değiştirilebilir; app/ayarlar.py). Açılışta 0 ise iş hiç başlamaz.
+    # Her turdan sonra Sistem durumu kırmızıysa süperadminlere günde bir 'Sistem' bildirimi yazılır (durum.uyari_uret).
+    try:
+        _c=db.baglan(AYAR['DB'])
+        try:dk=hatirlatma.ayarlar(AYAR,_c)['kontrol_dk']
+        finally:_c.close()
+    except Exception:
+        dk=hatirlatma.ayarlar(AYAR)['kontrol_dk']
     if dk<=0:return None
     def loop():
+        nonlocal dk
         time.sleep(20)
         while True:
             conn=None
             try:
-                conn=db.baglan(AYAR['DB']);hatirlatma.uret(conn,AYAR)
+                conn=db.baglan(AYAR['DB'])
+                dk=hatirlatma.ayarlar(AYAR,conn)['kontrol_dk']
+                if dk>0:hatirlatma.uret(conn,AYAR)
+                try:
+                    from . import durum as _durum
+                    _durum.uyari_uret(conn,_durum.satirlar(conn,AYAR,SURUM))
+                except Exception as error:
+                    print('Sistem durumu uyarısı: '+type(error).__name__,flush=True)
             except sqlite3.Error as error:
                 # SQLite metni gizli veri içermez ve teşhis için gerekir ('database is locked' / 'disk I/O error').
                 print('Hatırlatma işi: %s: %s' % (type(error).__name__,str(error)[:160]),flush=True)
@@ -2397,7 +2420,7 @@ def _start_hatirlatma_isi():
                 print('Hatırlatma işi: '+type(error).__name__,flush=True)
             finally:
                 if conn:conn.close()
-            try:time.sleep(dk*60)
+            try:time.sleep(dk*60 if dk>0 else 60)  # 0 = panelden durduruldu: dakikada bir yeniden bakılır
             except (OverflowError,ValueError):time.sleep(600)
     t=threading.Thread(target=loop,name='kanit-web-hatirlatma',daemon=True);t.start();return t
 
@@ -2517,6 +2540,10 @@ def kategori_temizligi():
         for grp in gruplar:grp['secili']=grp['varsayilan']
     return render_template('kategori_temizligi.html',gruplar=gruplar,hedefler=kt.hedefler(c),onizleme=onizleme,sonuc=sonuc,mesaj=mesaj,
                            BOS_HEDEF=kt.BOS_HEDEF,BOS_AD=kt.BOS_AD,toplam_kayit=sum(x['hepsi'] for x in gruplar)),durum
+
+# 2.4.0 (B2): Sistem durumu, Yedekler ve Çalışma ayarları (/yonetim/...); ayrıntı app/isletim.py
+from . import isletim as _isletim
+_isletim.kaydet(app)
 
 if __name__=='__main__':
     calistir()

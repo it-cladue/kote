@@ -68,7 +68,16 @@ def main():
     eri.add_argument('--temizle',action='store_true',help='Listeyi boşalt: sınır kalkar (.env değeri de geçersiz olur)')
     eri.add_argument('--ekle',action='append',default=[],metavar='IP',help='Listeye adres ya da blok ekle (ör. 85.105.12.34 veya 85.105.12.0/24); birden çok kez verilebilir')
     eri.add_argument('--tur',choices=('panel','api','hepsi'),default=None,metavar='TUR',help='Hangi liste: panel, api ya da hepsi (varsayılan: --temizle için hepsi, --ekle için panel)')
-    _alt(sub,'durum','Kayıt sayısı, dosya yolları ve bot gelen kutusu özeti');_alt(sub,'veritabani-kur','Veritabanı dosyasını ve şemayı oluştur')
+    dur=_alt(sub,'durum','Sistem durumu (bot, son yedek, gece görsel işi, hatırlatma işi, disk, kuyruk) ve kayıt/dosya özeti. Çıkış kodu: kırmızı satır varsa 1')
+    dur.add_argument('--json',action='store_true',help='Yalnız sistem durumu satırlarını JSON olarak yaz')
+    dur.add_argument('--uyar',action='store_true',help='Kırmızı satırlar için süperadminlere günde bir "Sistem" bildirimi yaz (panelin 10 dakikalık işi de yapar)')
+    _alt(sub,'veritabani-kur','Veritabanı dosyasını ve şemayı oluştur')
+    ay=_alt(sub,'ayar','Çalışma ayarları (panelde Yönetim → Çalışma ayarları ile aynı): listele, değiştir, varsayılana döndür. Öncelik: veritabanı > .env > varsayılan')
+    ay.add_argument('ad',nargs='?',metavar='AD',help='Ayar adı, ör. BEKLEYEN_OZET_SAAT')
+    ay.add_argument('deger',nargs='?',metavar='DEGER',help='Yeni değer (boş değer için "")')
+    ay.add_argument('--listele',action='store_true',help='Bütün değiştirilebilir ayarları, geçerli değeri ve nereden geldiğini (DB / .env / varsayılan) yaz')
+    ay.add_argument('--sil',action='store_true',help='Veritabanındaki değeri sil (.env ya da varsayılan geçerli olur)')
+    ay.add_argument('--kim',default='sunucu-cli',metavar='AD',help="İşlem Geçmişi'ne yazılacak kullanıcı adı (varsayılan sunucu-cli)")
     args=parser.parse_args()
     if args.command in ('admin-ekle','sifre-sifirla'):
         env=getattr(args,'password_env',None)
@@ -117,8 +126,10 @@ def main():
                     print('GYAZO_ONBELLEK_PENCERE_DISI: '+aciklama+' ('+args.saat_dilimi+'); hiçbir şey yapılmadı.');return
                 print('Pencere: '+aciklama+'; bitiş '+bitis.strftime('%H:%M')+' ('+args.saat_dilimi+')',flush=True)
             ayrintili=args.ayrintili or (0<args.en_cok<=100)
+            from . import ayarlar as calisma_ayarlari
+            etkin=calisma_ayarlari.birlesik(AYAR,c)  # 2.4.0: panelden değiştirilen GYAZO_PROXY / DIS_GORSEL_PROXY bu çalıştırmada geçerli
             try:
-                r=gorsel.gyazo_toplu_indir(c,gorsel.GorselCozucu(AYAR,AYAR['ONBELLEK']),AYAR,en_cok=args.en_cok,yeni_en_cok=args.yeni_en_cok,bitis=bitis,
+                r=gorsel.gyazo_toplu_indir(c,gorsel.GorselCozucu(etkin,AYAR['ONBELLEK']),etkin,en_cok=args.en_cok,yeni_en_cok=args.yeni_en_cok,bitis=bitis,
                                            bekleme_sn=args.bekleme,rapor_yolu=args.rapor,ilerleme=ilerleme,log=log if ayrintili else (lambda m: print(m,flush=True) if ('bekleniyor' in m or 'ulaşılamıyor' in m or 'sınırı' in m or 'Bitiş' in m or 'Gyazo erişimi:' in m or 'taranıyor' in m or 'muhtemelen' in m or 'bir kez daha denenmeden' in m or 'ulaşılamadı; kalan' in m) else None),
                                            on_kontrol=not args.on_kontrol_atla)
             except ValueError as e: raise SystemExit('Hata: '+str(e))
@@ -152,6 +163,7 @@ def main():
             (target/'YEDEK_NOTU.txt').write_text('Veritabanı SQLite backup API ile alınmıştır. Dosya yollarını koruyarak geri yükleyin. Tam medya tutarlılığı için bot+web kapalıyken --gorseller ile alın. .env/anahtarlar ayrıca özel olarak yedeklenmelidir.\n')
             print('Yedek oluşturuldu:',target)
         elif args.command=='durum':
+            _durum(c,args)
             print('Kayıt:',c.execute('SELECT COUNT(*) FROM kayitlar').fetchone()[0]);print('DB:',AYAR['DB'])
             print('Görseller:',AYAR['GORSEL_KLASOR']);print('Arşiv:',AYAR['ARSIV_KLASOR'])
             print('Gelen kutusu:',[dict(r) for r in c.execute('SELECT bot_id,durum,COUNT(*) adet FROM tg_gelen GROUP BY bot_id,durum')])
@@ -161,6 +173,7 @@ def main():
                 print('Görsel önbelleği:',f"{d.get('toplam_mb',0)} MB toplam;"," ".join(f"{ad}: {v.get('dosya',0)} dosya / {v.get('mb',0)} MB (sınır {v.get('sinir_mb',0) or 'yok'} MB)" for ad,v in d.items() if isinstance(v,dict) and 'dosya' in v))
             except Exception as hata:
                 print('Görsel önbelleği: okunamadı:',hata)
+            if any(r['renk']=='kirmizi' for r in args._satirlar): raise SystemExit(1)
         elif args.command=='hatirlatma-uret':
             from . import hatirlatma
             bugun=None
@@ -173,6 +186,7 @@ def main():
             # Kısa Türkçe özet stderr'e: stdout saf JSON kalır (betikler okuyabilsin).
             print(hatirlatma.rapor_metni(rapor),file=sys.stderr)
         elif args.command=='kategori-temizle': _kategori_temizle(c,args)
+        elif args.command=='ayar': _ayar(c,args)
         elif args.command=='veritabani-kur': print('Veritabanı hazır:',AYAR['DB'])
     finally:c.close()
 
@@ -200,6 +214,48 @@ def _erisim_izin(c,args):
     print('Sunucunun kendisinden doğrudan gelen istekler', 'muaf (ERISIM_LOOPBACK_SERBEST=1).' if erisim.dongu_serbest() else 'muaf DEĞİL (ERISIM_LOOPBACK_SERBEST=0); /saglik yine açık.')
     if str(AYAR.get('TRUST_PROXY','0')).lower() not in ('1','true'):
         print('UYARI: TRUST_PROXY=1 değil. Nginx arkasında panel herkesi 127.0.0.1 görür ve liste doluysa herkesi engeller.')
+
+def _durum(c,args):
+    """2.4.0: sistem durumu satırları (panelin ana sayfa kartıyla aynı). --json: yalnız JSON yazar ve çıkar."""
+    import re
+    from . import durum
+    m=re.search(r"^SURUM = '([^']+)'",(ROOT/'app'/'panel.py').read_text(encoding='utf-8'),re.M)  # panel içe aktarılmaz (Flask açılmasın)
+    satirlar=durum.satirlar(c,AYAR,m.group(1) if m else '?',komut_satiri=True);args._satirlar=satirlar
+    if getattr(args,'uyar',False):
+        n=durum.uyari_uret(c,satirlar);print('Sistem bildirimi: %d yeni satır.' % n,file=sys.stderr)
+    if getattr(args,'json',False):
+        print(json.dumps(dict(satirlar=satirlar,ozet=durum.ozet(satirlar)),ensure_ascii=False,indent=2))
+        raise SystemExit(1 if any(r['renk']=='kirmizi' for r in satirlar) else 0)
+    isaret={'yesil':'[ YEŞİL ]','sari':'[ SARI  ]','kirmizi':'[KIRMIZI]','gri':'[  GRİ  ]'}
+    print('Sistem durumu: '+durum.ozet(satirlar)['metin'])
+    for r in satirlar:
+        print('  %s %-18s %s' % (isaret[r['renk']],r['ad'],r['deger']))
+        if r['renk']!='yesil': print('             %s' % r['aciklama'])
+        if r['komut'] and r['renk'] in ('kirmizi','sari'): print('             Komut: %s' % r['komut'])
+
+def _ayar(c,args):
+    """2.4.0: python -m app.cli ayar --listele | ayar AD DEGER | ayar AD --sil. Hata: 'Hata: …' ve çıkış kodu 1."""
+    from . import ayarlar as ca
+    if args.listele or not args.ad:
+        satirlar=ca.tablo(c)
+        for grup in ca.GRUPLAR:
+            print('== '+grup)
+            for s in satirlar:
+                if s['grup']!=grup: continue
+                print('  %-24s %-22s [%s]  %s' % (s['ad'],str(ca.gosterim(s))[:22],s['kaynak'],s['etiket']))
+                if s['ortam_uyari']: print('  %-24s UYARI: %s' % ('',s['ortam_uyari']))
+        print("Değiştir: python -m app.cli ayar AD DEGER · varsayılana dön: python -m app.cli ayar AD --sil",file=sys.stderr)
+        return
+    ad=args.ad.strip().upper()
+    try:
+        if args.sil:
+            if args.deger is not None: raise ValueError('--sil ile değer verilmez.')
+            print(('%s veritabanından silindi; geçerli: .env ya da varsayılan.' if ca.sil(c,ad,args.kim) else '%s zaten veritabanında yoktu.') % ad)
+            return
+        if args.deger is None: raise ValueError('Değer verin: python -m app.cli ayar %s DEGER (varsayılana dönmek için --sil)' % ad)
+        yeni=ca.yaz(c,ad,args.deger,args.kim)
+        print('%s = %s (veritabanı; yeniden başlatma gerekmez)' % (ad,yeni if yeni!='' else '(boş)'))
+    except ValueError as e: raise SystemExit('Hata: '+str(e))
 
 def _kategori_temizle(c,args):
     """stdout: JSON (betikler okuyabilsin); stderr: kısa Türkçe özet/tablo. Hata: 'Hata: …' ve çıkış kodu 1."""

@@ -14,8 +14,14 @@
   <span>Telegram kullanıcısı: <b>{{ istatistik.kullanicilar.toplam }}</b> · onaylı <b>{{ istatistik.kullanicilar.onayli }}</b> · engelli <b>{{ istatistik.kullanicilar.engelli }}</b></span>
   <span>Sürüm: <b>{{ durum.surum }}</b></span>
 </div>
-<div class="buton-satir">{% if bakim %}{{ button('bakim_kapat','Bakımı kapat') }}{% else %}{{ button('bakim_ac','Bakımı aç','tehlike','Kullanıcı akışları bakım moduna alınsın mı?') }}{% endif %}{% if istatistik.duraklatildi %}{{ button('bot_surdur','Botu sürdür','birincil') }}{% else %}{{ button('bot_duraklat','Botu güvenli duraklat','tehlike','Bot mesaj işlemeyi duraklatacak. Site çalışmaya devam eder; Sürdür ile açabilirsiniz. Onaylıyor musunuz?') }}{% endif %}{{ button('yedek','SQLite yedeği al') }}{{ button('oturum_temizle','Tüm oturumları temizle','','Tüm yarım kullanıcı akışları silinecek. Onaylıyor musunuz?') }}</div>
-<p class="kucukyazi">Duraklatma kalıcıdır; süreç yeniden başlasa bile Sürdür seçilene kadar mesaj işleme durur. Yedek düğmesi yalnız veritabanı içindir; görsel arşivini ayrıca yedekleyin.</p>
+<div class="buton-satir">{% if bakim %}{{ button('bakim_kapat','Bakımı kapat') }}{% else %}{{ button('bakim_ac','Bakımı aç','tehlike','Kullanıcı akışları bakım moduna alınsın mı?') }}{% endif %}{% if istatistik.duraklatildi %}{{ button('bot_surdur','Botu sürdür','birincil') }}{% else %}{{ button('bot_duraklat','Botu güvenli duraklat','tehlike','Bot mesaj işlemeyi duraklatacak. Site çalışmaya devam eder; Sürdür ile açabilirsiniz. Onaylıyor musunuz?') }}{% endif %}{{ button('yedek','Yedek al (geri yüklenebilir)') }}{{ button('oturum_temizle','Tüm oturumları temizle','','Tüm yarım kullanıcı akışları silinecek. Onaylıyor musunuz?') }}</div>
+<p class="kucukyazi">Duraklatma kalıcıdır; süreç yeniden başlasa bile Sürdür seçilene kadar mesaj işleme durur. Yedek düğmesi veritabanını gece yedeğiyle aynı biçimde (<code>.db.gz</code>) alır; sunucuda <code>kanit-yedek.sh --geri-yukle</code> ile geri yüklenir. Görseller haftalık aynada ayrıca yedeklenir.</p>
+{% set yedekler = yedek_listesi(5) if yedek_listesi is defined else [] %}
+<section id="yedekler" class="kart" aria-labelledby="bot-yedek-baslik" style="margin-bottom:var(--b3)">
+  <link rel="stylesheet" href="{{ url_for('static', filename='isletim.css', v=SURUM) }}">
+  <div class="kart-baslik"><div><h2 id="bot-yedek-baslik">Yedekler</h2><p class="kucukyazi" style="margin:0">Son 5 yedek; tamamı ve adım adım geri yükleme için Yedekler sayfası.</p></div><a class="btn kucuk" href="{{ url_for('isletim.yedekler') }}">Tüm yedekler ve geri yükleme</a></div>
+  {% include "_yedekler_tablo.html" %}
+</section>
 
 <section id="kullanicilar" class="kart" aria-labelledby="tg-kullanici-baslik">
   <div class="kart-baslik"><div><h2 id="tg-kullanici-baslik">Telegram kullanıcıları</h2><p class="kucukyazi" style="margin:0">En çok 500 sonuç gösterilir; arama ile daraltın.</p></div></div>

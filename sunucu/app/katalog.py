@@ -276,9 +276,11 @@ _TR_ASCII = str.maketrans({"ı": "i", "İ": "i", "ş": "s", "Ş": "s", "ğ": "g"
                            "ö": "o", "Ö": "o", "ç": "c", "Ç": "c"})
 
 
-def panel_kategori_etiketi() -> str:
-    """PANEL_EKLEME_KATEGORI (boşsa 'SMS'); kontrol karakterleri silinir, en çok 120 karakter."""
-    deger = db.metin_temizle(os.getenv("PANEL_EKLEME_KATEGORI", "") or "", 200).replace("\n", " ").strip()
+def panel_kategori_etiketi(conn=None) -> str:
+    """PANEL_EKLEME_KATEGORI (boşsa 'SMS'); kontrol karakterleri silinir, en çok 120 karakter.
+    2.4.0: panelden (/yonetim/ayarlar) yazılan değer önce, sonra .env (app/ayarlar.py öncelik kuralı)."""
+    from . import ayarlar as calisma_ayarlari
+    deger = db.metin_temizle(calisma_ayarlari.deger("PANEL_EKLEME_KATEGORI", "", conn) or "", 200).replace("\n", " ").strip()
     return deger[:120].strip() or PANEL_KATEGORI_VARSAYILAN
 
 
@@ -319,7 +321,7 @@ def panel_kategori_hazirla(conn, etiket: str | None = None) -> dict[str, Any] | 
 
     Var olan kategori bulunursa yalnız kodu ayarlara yazılır; adı, aktifliği, proje bağları ve soruları değişmez.
     """
-    etiket = etiket or panel_kategori_etiketi()
+    etiket = etiket or panel_kategori_etiketi(conn)
     goc = PANEL_KATEGORI_GOC + _etiket_anahtari(etiket)
     if not _table_exists(conn, "kategoriler") or not _table_exists(conn, "projeler"):
         return None
