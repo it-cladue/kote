@@ -213,9 +213,12 @@ def test_ana_sayfa_karti_ilk_10_lider_ve_rapor_baglantisi(web):
     assert 'Tüm tablo ve rapor' in kart and 'href="/rapor/personel?donem=bugun' in unescape(kart)
     govde = kart.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
     assert govde.count('<tr>') == 10
-    assert 'kişi daha var' in kart and 'po-lider-kart sira-1' in kart and 'po-lider-kart sira-3' in kart and 'po-lider-kart sira-4' not in kart
+    # 2.3.5: "İlk 3" şeridi yerine herkes için kişi kartı; ilk üçte madalya, ilk 6 görünür.
+    assert 'kişi daha var' in kart and 'po-kisi-kart sira-1' in kart and 'po-kisi-kart sira-3' in kart and 'sira-4' not in kart
+    n_kart = len(re.findall(r'data-po-kart(?=[ >])', kart))
+    assert n_kart > 12 and kart.count('data-po-kart hidden') == n_kart - 6 and 'Daha fazla göster (%d kişi daha)' % (n_kart - 6) in kart
     for parca in ('name="proje"', 'name="donem"', 'value="hafta"', 'value="son30"', 'name="durum"', 'name="grup"', 'value="ekleyen"', 'data-po-otomatik',
-                  'class="po-mobil"', 'class="po-pay"', '>Bugün<', '>Bu hafta<', '>Bu ay<', '>Son 30 gün<', '>Tümü<'):
+                  'data-po-kartlar', 'name="kategori"', 'class="po-pay"', '>Bugün<', '>Bu hafta<', '>Bu ay<', '>Son 30 gün<', '>Tümü<'):
         assert parca in kart, parca
     assert 'value="ozel"' not in kart  # özel aralık yalnız rapor sayfasında
     assert 'rapor.js?v=' + panel.SURUM in html
@@ -253,9 +256,9 @@ def test_hucre_baglantilari_kayitlar_listesiyle_birebir(web):
         url, n = re.search(r'<a href="(/kayitlar\?[^"]+)"><b>(\d+)</b></a>', alt).groups()
         assert sonuc_sayisi(c.get(unescape(url) + '&boy=96').get_data(as_text=True)) == int(n)
     assert denenen >= 20
-    # Sıfır hücre bağlantı değildir; boş kategori sütunu bağlantısızdır.
+    # Sıfır hücre bağlantı değildir; 2.3.5: boş kategori sütunu '__bos__' ile Kayıtlar'da açılır.
     html = c.get('/rapor/personel?donem=hepsi').get_data(as_text=True)
-    assert '<span class="po-sifir">0</span>' in html and 'kategori=%28bo%C5%9F%29' not in html
+    assert '<span class="po-sifir">0</span>' in html and 'kategori=%28bo%C5%9F%29' not in html and 'kategori=__bos__' in html
     # Boş personel: __bos__ işareti.
     sayfa = c.get('/kayitlar?durum=hepsi&personel=__bos__&silinmemis=1').get_data(as_text=True)
     assert sonuc_sayisi(sayfa) == 1 and 'Personel: (boş)' in sayfa
@@ -425,7 +428,8 @@ def test_api_personel_ozet(web):
     assert r.status_code == 200 and r.json['ok'] is True
     d = r.json
     assert set(d) >= {'satirlar', 'sutunlar', 'toplam', 'kisi_sayisi', 'kayit_sayisi', 'donem', 'filtre'}
-    assert d['filtre'] == dict(proje=None, projeler=d['filtre']['projeler'], donem='hepsi', durum='hepsi', grup='personel', sutun='kategori', tarih1=None, tarih2=None)
+    assert d['filtre'] == dict(proje=None, projeler=d['filtre']['projeler'], donem='hepsi', durum='hepsi', grup='personel', sutun='kategori', kategori=None,
+                               tarih1=None, tarih2=None)
     assert d['toplam']['toplam'] == 18 and set(d['satirlar'][0]) == {'personel', 'bos', 'toplam', 'onayli', 'bekleyen', 'onay_orani', 'sutunlar'}
     assert d['satirlar'][0]['personel'] == 'ali' and d['satirlar'][0]['sutunlar']['CVPS'] == 4
     assert 'Cache-Control' in r.headers and 'no-store' in r.headers['Cache-Control']

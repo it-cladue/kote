@@ -2,14 +2,17 @@
 {% import "_personel_ozet.html" as poz %}
 {% block baslik %}Personel raporu — Kanıt Paneli{% endblock %}
 {% block icerik %}
-<div class="rapor-sayfa" id="rapor-personel"{% if yazdir %} data-po-yazdir{% endif %}>
+{# 2.3.5: data-po-hatirla — süzgeçler bu kullanıcıya özel anahtarla tarayıcıda saklanır; yalın /rapor/personel açılınca rapor.js bir kez uygular. #}
+<div class="rapor-sayfa" id="rapor-personel"{% if yazdir %} data-po-yazdir{% endif %}{% if po %} data-po-hatirla="kp.raporSuzgec.{{ k.kullanici_adi }}"{% endif %}{% if hatirlanan %} data-po-hatirlanan{% endif %}{% if sifirla %} data-po-sifirla{% endif %}>
 {% if po %}
   <div class="sayfa-baslik rapor-ust">
     <div>
       <p class="ust-etiket">Rapor</p>
       <h1>Personel bazında kanıtlar</h1>
-      <p class="rapor-alt-baslik">{{ po.proje_etiketi }} · {{ po.donem.etiket }} · Durum: {{ po.durum_adi }} · Gruplama: {{ po.grup_adi }} · Sütun: {{ po.sutun_adi }}</p>
+      <p class="rapor-alt-baslik">{{ po.proje_etiketi }} · {{ po.donem.etiket }}{% if po.kategori_adi %} · Kategori: {{ po.kategori_adi }}{% endif %} · Durum: {{ po.durum_adi }} · Gruplama: {{ po.grup_adi }} · Sütun: {{ po.sutun_adi }}</p>
       <p class="kucukyazi rapor-zaman">Oluşturma: {{ po.olusturma }} · {{ k.ad or k.kullanici_adi }} · Yalnız silinmemiş kayıtlar sayılır.</p>
+      {% if hatirlanan %}<p class="po-hatirlanan-not" data-po-hatirlanan-not role="status">Son kullandığınız süzgeçler uygulandı. <a href="{{ url_for('rapor_personel', sifirla='1') }}">Varsayılana dön</a><button type="button" class="po-not-kapat" data-po-not-kapat aria-label="Bu notu kapat">×</button></p>{% endif %}
+      {% if sifirla %}<p class="po-hatirlanan-not" role="status">Hatırlanan süzgeçler silindi; varsayılan görünüm açıldı.</p>{% endif %}
     </div>
     <div class="baslik-eylemler rapor-eylemler">
       <a class="btn" href="{{ po.xlsx_url }}" download>Excel'e aktar</a>
@@ -21,9 +24,9 @@
     {{ poz.filtre_cubugu(po, url_for('rapor_personel'), rapor=True) }}
   </section>
   {{ poz.ozet_cipleri(po) }}
-  {{ poz.ilk3(po) }}
+  {{ poz.kisi_kartlari(po) }}
   <section class="kart po-kart po-rapor-tablo" aria-label="Tablo">
-    <div class="kart-baslik"><div><h2>{{ po.grup_adi }} × {{ po.sutun_adi|lower }}</h2><p class="kucukyazi" style="margin:0">Sütun başlığına tıklayarak sıralayın. Hücre rengi değer büyüdükçe koyulaşır; sayıya tıklayınca o kayıtlar listelenir.</p></div></div>
+    <div class="kart-baslik"><div><h2>{{ po.grup_adi }} × {{ po.sutun_adi|lower }}{% if po.kategori_adi %} <small class="po-baslik-kategori">({{ po.kategori_adi }})</small>{% endif %}</h2><p class="kucukyazi" style="margin:0">Sütun başlığına tıklayarak sıralayın. Hücre rengi değer büyüdükçe koyulaşır; sayıya tıklayınca o kayıtlar listelenir.</p></div></div>
     {{ poz.tablo(po, siralanir=True) }}
   </section>
 {% else %}

@@ -1,4 +1,49 @@
-# 2.3.5
+# Kanıt Paneli 2.3.5 — personel kartları, kategori süzgeci, hatırlanan süzgeçler, API kullanım kılavuzu ve kategori temizliği (26 Kasım 2026)
+
+2.3.4 üzerine `deploy/apply-update.sh` ile uygulanır (KURULUM §13, güncelleme yolu değişmedi). Veritabanı şeması ve `.env` değişmez, yeni ayar yoktur. Değişen dosyalar: `app/personel_ozeti.py`, `panel.py`, `api.py`, `cli.py`, yeni `app/api_kilavuz.py` ve `app/kategori_temizlik.py`, şablonlar (`_personel_ozet.html`, `ana.html`, `rapor_personel.html`, `kayitlar.html`, `api_anahtarlari.html`, `_api_kilavuz.html`, `katalog.html`, `kategori_temizligi.html`), `stil.css`, `rapor.js`. Bu belgede önce personel kartları, sonra API kılavuzu ve kategori temizliği anlatılır. Tarayıcı yeni dosyaları kendiliğinden alır (sürüm numaralı adresler).
+
+## Ekip ne görür?
+
+### Kategori süzgeci
+
+Ana sayfadaki "Personel bazında kanıtlar" kartında ve **Rapor** sayfasında süzgeç çubuğuna **Kategori** seçimi eklendi: "Tüm kategoriler" ya da tek kategori (ör. CVPS). Listede önce seçili projelerin katalog kategorileri (katalog sırasıyla), sonra kayıtlarda geçen diğer adlar (btagsz, 30gün, S.ARK …), en sonda kategorisi boş kayıtlar için **(boş)** bulunur. Kullanıcı yalnız yetkili olduğu projelerin kategorilerini görür; proje seçiliyse liste o projeyle sınırlanır.
+
+Kategori seçilince:
+
+- özet çiplerinde "Kategori: CVPS" görünür, kişi/kanıt/onaylı/bekleyen sayıları yalnız o kategoriyi sayar;
+- tabloda Toplam / Onaylı / Bekleyen yanında yalnız o kategori sütunu kalır (Sütun = **Tip** seçiliyse o kategorinin Sessiz / Telesekreter sayıları);
+- kişi kartlarında yalnız o kategorinin kutusu görünür;
+- rapor başlığına, yazdırma çıktısına, Excel'in "Bilgi" sayfasına ve dosya adına kategori eklenir (ör. `rapor-personel-of-ay-cvps-2026-11-26.xlsx`).
+
+Büyük/küçük harf ve baştaki/sondaki boşluk, sekme ya da bölünmez boşluk fark etmez ("cvps", "CVPS " → CVPS); adın içindeki boşluklar olduğu gibi korunur ("S  ARK" ayrı bir addır). "İPTAL" ile "iptal" gibi yalnız Türkçe İ/ı harfiyle ayrılan yazımlar ayrı kutu olarak sayılır ve her kutu kendi kayıtlarını açar; Kayıtlar listesiyle aynı eşleme kullanılır, bu yüzden sayılar ile tıklanınca açılan liste birebir tutar. Listede olmayan bir ad adrese yazılırsa hata vermez, sıfır kayıt gösterir.
+
+### Herkes için kişi kartları
+
+"İlk 3" şeridinin yerine artık **her kişi için bir kart** vardır (tablo sırasıyla, en çok kanıt ekleyen önce). İlk üç kart altın / gümüş / bronz madalyasını korur.
+
+- Kartta: sıra numarası, personel kodu (tıklanınca o kişinin seçili süzgeçlerdeki tüm kayıtları açılır), **N kanıt**, onaylı yüzdesi, onaylı ve bekleyen sayısı (bekleyen varsa kırmızı), kategori paylarını gösteren ince renkli çubuk.
+- **Kategori kutuları:** kartın altında "CVPS 68", "ARK 8", "HGST 1" gibi küçük kutular — kategori renginde nokta, ad ve sayı. Yalnız sıfırdan büyük kategoriler, çoktan aza sıralı. **Kutuya tıklamak** Kayıtlar sayfasını o kişinin o kategorideki kayıtlarıyla açar (aynı proje, dönem ve durum; silinenler hariç) — açılan liste kutudaki sayı kadar kayıttır. "Grupla: Ekleyen" seçiliyse kutular ekleyene, "Sütun: Tip" seçiliyse tipe göredir. (boş) kutusu kategorisi boş kayıtları açar.
+- İlk **6 kart** görünür. **Daha fazla göster (N kişi daha)** her basışta 12 kart daha açar (sayfa yenilenmez, düğme metni kalan kişi sayısını gösterir, klavyeyle kullanılabilir; odak ilk yeni kartın adına geçer). **Daha az göster** yeniden 6 karta döner.
+- Geniş ekranda satırda 3 kart, 1100 px ve altında 2, telefonda 1 kart (kutular alt satıra sarar). Ana sayfada telefonda tablo yerine bu kartlar görünür. Koyu temada da aynı düzen.
+- Yazdırmada kartlar basılmaz (rapor tablodur); kartlar da istenirse `…/rapor/personel?…&yazdir=1&kartlar=1`. `?kartlar=hepsi` tüm kartları baştan açık getirir (tarayıcıda betik kapalıysa "Tümünü göster" bağlantısı bunu kullanır).
+
+### Hatırlanan süzgeçler (takım liderleri için)
+
+Rapor sayfasında **Uygula**'ya basıldığında ya da bir seçim değiştiğinde süzgeçler bu tarayıcıda, kullanıcıya özel olarak hatırlanır. Menüden **Rapor**'a (süzgeçsiz adres) gelindiğinde son kullanılan süzgeçler kendiliğinden uygulanır ve başlığın altında "Son kullandığınız süzgeçler uygulandı. **Varsayılana dön**" notu görünür (× ile kapanır). **Varsayılana dön** hatırlananı siler. Ör. yalnız PA'dan sorumlu takım lideri bir kez "PA · Bu ay · CVPS" seçer, sonraki girişlerde rapor doğrudan bu seçimle açılır.
+
+- Adreste herhangi bir süzgeç varsa (yer imi, paylaşılan bağlantı) hatırlanan uygulanmaz.
+- Artık yetkisi olmayan bir proje hatırlanmışsa sayfa hata vermez: varsayılan görünüm açılır ve hatırlanan silinir.
+- Hatırlama tarayıcıya özeldir (başka bilgisayarda varsayılanla açılır); sunucuda bir şey saklanmaz.
+- Ana sayfa kartı her zaman varsayılanla açılır; kartta süzgeç seçildiyse "Tüm tablo ve rapor →" o seçimle, seçilmediyse hatırlanan süzgeçlerle açılır.
+
+### Kayıtlar ve API
+
+- Kayıtlar sayfası `kategori=__bos__` ile kategorisi boş kayıtları listeler (seçimde "(boş) — kategorisi olmayanlar" yazar). `tip` süzgeci 2.3.4'ten beri vardır.
+- `GET /api/v1/personel-ozet` yeni `kategori` parametresini alır; yanıttaki `filtre.kategori` uygulanan adı (ya da `null`) gösterir (`API_KULLANIM.md` §3.6). Excel/CSV çıktıları da `kategori` parametresini taşır: Excel dosyasının bilgi satırında ve dosya adında kategori yazar; CSV tablo olarak içe aktarılabilsin diye ek satır almaz, seçilen kategori dosya adından anlaşılır (ör. `rapor-personel-of-ay-cvps-2026-11-26.csv`).
+
+## Test
+
+Yeni `tests/test_personel_kartlari_235.py` (9 test) ve tarayıcı senaryosu `tests/personel_kartlari_tarayici.js`: kategori süzgecinin tüm proje/dönem (özel tarih aralığı dahil)/durum/grup/sütun birleşimlerinde bağımsız SQL ile karşılaştırılması, sonunda sekme / bölünmez boşluk ya da içinde çift boşluk olan eski kategoriler ile "İPTAL" / "iptal" gibi Türkçe harf biçimlerinde sayı ile listenin birebir tutması, kart kutusu ve ad bağlantılarının Kayıtlar listesiyle birebir tutması, kategori seçeneklerinin yetkiyle sınırlanması, 6 kart / 12'şer açma / geri kapama / odak, betik kapalıyken `?kartlar=hepsi`, hatırlanan süzgeçler (yönlendirme, not, sıfırlama, yetkisi kalkan proje, döngü koruması), Excel/CSV/API ve 1280 px, koyu tema, 390 px telefon ekran görüntüleri. 2.3.4 testleri "İlk 3" yerine kişi kartlarına uyarlandı.
 
 ## Panelde API kullanım kılavuzu
 

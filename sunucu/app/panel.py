@@ -484,28 +484,38 @@ def _personel_ozet_filtre(allowed):
     f['yalniz_onayli']=bool(secili) and gizle and len(kt_yok)==len(secili)
     if f['yalniz_onayli']: f['durum']='onayli'
     f['gizli_onaysiz']=gizle and bool(kt_yok)
-    return f,hatalar+uyarilar,_gizli_kayit_sql('',secili)
+    gizli=_gizli_kayit_sql('',secili)
+    # 2.3.5: kategori seçenekleri seçili kapsamdan (proje seçiliyse yalnız o proje) gelir; yazılan değer katalogdaki harf biçimine eşlenir.
+    f['kategori_secenekleri']=personel_ozeti.kategori_secenekleri(baglanti(),secili,gizli)
+    f['kategori']=personel_ozeti.kategori_kanonik(f['kategori_secenekleri'],f.get('kategori') or '')
+    return f,hatalar+uyarilar,gizli
+
+PO_SUZGEC_ADLARI=('proje','donem','durum','grup','sutun','kategori','tarih1','tarih2')
 
 def _personel_ozet_url(endpoint,f,**ek):
-    a={k:f[k] for k in ('proje','donem','durum','grup','sutun') if f.get(k)}
+    a={k:f[k] for k in ('proje','donem','durum','grup','sutun','kategori') if f.get(k)}
     if f.get('donem')=='ozel': a.update(tarih1=f.get('tarih1') or None,tarih2=f.get('tarih2') or None)
     a.update(ek)
     return url_for(endpoint,**{k:v for k,v in a.items() if v not in (None,'')})
 
 def _personel_ozet_kayit_url(f,satir=None,sutun=None):
-    """Kayıtlar listesine bağlantı: aynı proje + dönem + durum (+ personel/ekleyen + kategori/tip). Silinenler hariç tutulur."""
+    """Kayıtlar listesine bağlantı: aynı proje + dönem + durum (+ kategori süzgeci + personel/ekleyen + kategori/tip). Silinenler hariç tutulur.
+    2.3.5: kategorisi boş kayıtlar '__bos__' ile açılır; kişi kartlarındaki kutular da bu yardımcıyı kullanır."""
     a=dict(durum=f['durum'],silinmemis='1')
     if f.get('proje'): a['proje']=f['proje']
+    if f.get('kategori'): a['kategori']=f['kategori']
     if f.get('tarih1'): a['tarih1']=f['tarih1']
     if f.get('tarih2'): a['tarih2']=f['tarih2']
     if satir is not None:
         a['ekleyen_ad' if f['grup']=='ekleyen' else 'personel']=satir['deger'] or personel_ozeti.BOS_DEGER
     if sutun is not None:
         if f['sutun']=='kategori':
-            if sutun['bos']: return None  # Kayıtlar'da "kategorisi boş" süzgeci yok: hücre bağlantısız
-            a['kategori']=sutun['deger']
+            a['kategori']=personel_ozeti.BOS_DEGER if sutun['bos'] else sutun['deger']
         else: a['tip']=sutun['deger'] or personel_ozeti.BOS_DEGER
     return url_for('kayitlar',**a)
+
+PO_KART_ILK=6   # 2.3.5: kişi kartları — ilk 6 görünür, "Daha fazla göster" her basışta 12 kart daha açar
+PO_KART_ADIM=12
 
 def _personel_ozet_hazirla(allowed,ana_sayfa=False):
     f,uyarilar,gizli=_personel_ozet_filtre(allowed)
@@ -516,30 +526,45 @@ def _personel_ozet_hazirla(allowed,ana_sayfa=False):
         bilgi=[b for b in bilgi if b['toplam']] or bilgi[:6]
     for b in bilgi:b['url']=_personel_ozet_kayit_url(f,sutun=b) if b['toplam'] else None
     satirlar=o['satirlar'][:ANA_OZET_SATIR] if ana_sayfa else o['satirlar']
-    for x in satirlar:
+    renkler={b['ad']:b['renk'] for b in o['sutun_bilgi']}
+    # 2.3.5: kişi kartları tüm satırlar için hazırlanır (tablo ana sayfada ilk 10 ile sınırlı kalır).
+    # Kart kutuları ("CVPS 68"): yalnız sıfırdan büyük sütunlar, sayıya göre azalan; bağlantılar hücre bağlantısıyla aynıdır.
+    for x in o['satirlar']:
         x['url']=_personel_ozet_kayit_url(f,satir=x)
-        x['url_sutun']={b['ad']:(_personel_ozet_kayit_url(f,satir=x,sutun=b) if x['sutunlar'].get(b['ad']) else None) for b in bilgi}
+        x['url_sutun']={b['ad']:(_personel_ozet_kayit_url(f,satir=x,sutun=b) if x['sutunlar'].get(b['ad']) else None) for b in o['sutun_bilgi']}
         x['paylar']=[dict(ad=b['ad'],renk=b['renk'],n=x['sutunlar'].get(b['ad'],0),oran=round(x['sutunlar'].get(b['ad'],0)*100/x['toplam'],1)) for b in o['sutun_bilgi'] if x['toplam'] and x['sutunlar'].get(b['ad'])]
+        x['cipler']=sorted((dict(ad=ad,n=n,renk=renkler.get(ad,'#94a3b8'),url=x['url_sutun'].get(ad)) for ad,n in x['sutunlar'].items() if n),
+                           key=lambda c:(-c['n'],c['ad']==personel_ozeti.BOS,c['ad'].casefold()))
+    kart_endpoint='ana' if ana_sayfa else 'rapor_personel'
+    # Ana sayfadaki "Tüm tablo ve rapor": süzgeç seçilmediyse yalın adres (rapor sayfası kişinin son süzgeçlerini uygulayabilsin).
+    suzgecli=any(request.args.get(k) for k in PO_SUZGEC_ADLARI)
     o.update(f=f,uyarilar=uyarilar,gosterilen_sutunlar=bilgi,gosterilen_satirlar=satirlar,toplam_url=_personel_ozet_kayit_url(f),
-             ilk3=satirlar[:3],kalan=max(0,len(o['satirlar'])-len(satirlar)),
+             kartlar=o['satirlar'],kart_ilk=PO_KART_ILK,kart_adim=PO_KART_ADIM,kartlar_hepsi=request.args.get('kartlar') in ('hepsi','1'),
+             kartlar_baski=request.args.get('yazdir')=='1' and request.args.get('kartlar')=='1',
+             kartlar_hepsi_url=_personel_ozet_url(kart_endpoint,f,kartlar='hepsi')+'#po-kartlar',
+             kategori_secenekleri=f['kategori_secenekleri'],
+             kategori_secenekte=not f.get('kategori') or any(s['deger']==f['kategori'] for s in f['kategori_secenekleri']),
+             kalan=max(0,len(o['satirlar'])-len(satirlar)),
              proje_secenekleri=[p for p in _all_project_info() if p['code'] in allowed],
              donemler=personel_ozeti.DONEMLER,durumlar=personel_ozeti.DURUMLAR,gruplar=personel_ozeti.GRUPLAR,sutun_secenekleri=personel_ozeti.SUTUNLAR,
-             rapor_url=_personel_ozet_url('rapor_personel',f),xlsx_url=_personel_ozet_url('rapor_personel_xlsx',f),
+             rapor_url=(_personel_ozet_url('rapor_personel',f) if suzgecli or not ana_sayfa else url_for('rapor_personel')),xlsx_url=_personel_ozet_url('rapor_personel_xlsx',f),
              csv_url=_personel_ozet_url('rapor_personel_csv',f),yazdir_url=_personel_ozet_url('rapor_personel',f,yazdir='1'),
              olusturma=datetime.now().strftime('%d.%m.%Y %H:%M'),durum_adi=personel_ozeti.DURUM_ADLARI.get(f['durum'],''),
              proje_etiketi=(next((p['label'] for p in _all_project_info() if p['code']==f['proje']),f['proje']) if f['proje'] else 'Tüm yetkili projeler'))
-    for x in o['satirlar']:x.setdefault('url',None)
     return o
 
 def _personel_ozet_dosya_adi(f,uzanti):
-    return 'rapor-personel-%s-%s-%s.%s' % ((f['proje'] or 'tum').lower(),f['donem'],datetime.now().strftime('%Y-%m-%d'),uzanti)
+    kat=('-'+personel_ozeti.dosya_parcasi(f['kategori'])) if f.get('kategori') else ''
+    return 'rapor-personel-%s-%s%s-%s.%s' % ((f['proje'] or 'tum').lower(),f['donem'],kat,datetime.now().strftime('%Y-%m-%d'),uzanti)
 
 @app.route('/rapor/personel')
 @giris_gerekli
 def rapor_personel():
     allowed=_allowed()
     po=_personel_ozet_hazirla(allowed) if allowed else None
-    return render_template('rapor_personel.html',po=po,yazdir=request.args.get('yazdir')=='1')
+    # 2.3.5: "hatirlanan=1" sayfanın tarayıcıda hatırlanan süzgeçlerle açıldığını, "sifirla=1" hatırlananların silinmesini bildirir (rapor.js).
+    return render_template('rapor_personel.html',po=po,yazdir=request.args.get('yazdir')=='1',
+                           hatirlanan=request.args.get('hatirlanan')=='1',sifirla=request.args.get('sifirla')=='1')
 
 @app.route('/rapor/personel.xlsx')
 @giris_gerekli
@@ -568,7 +593,7 @@ def rapor_personel_xlsx():
     ws.auto_filter.ref='A1:%s%d' % (get_column_letter(len(baslik)),max(1,son-1))
     bilgi=wb.create_sheet('Bilgi')
     for satir in (('Rapor','Personel bazında kanıtlar'),('Proje',po['proje_etiketi']),('Dönem',po['donem']['etiket']),
-                  ('Durum',personel_ozeti.DURUM_ADLARI[f['durum']]),('Gruplama',po['grup_adi']),('Sütunlar',po['sutun_adi']),
+                  ('Durum',personel_ozeti.DURUM_ADLARI[f['durum']]),('Kategori',po['kategori_adi'] or 'Tüm kategoriler'),('Gruplama',po['grup_adi']),('Sütunlar',po['sutun_adi']),
                   ('Kişi',po['kisi_sayisi']),('Kanıt',po['kayit_sayisi']),('Oluşturma',po['olusturma']),('Oluşturan',g.k['kullanici_adi']),
                   ('Not','Yalnız silinmemiş kayıtlar sayılır.'+(' Onay yetkiniz olmayan projelerde onay bekleyenler sayılmaz.' if f['gizli_onaysiz'] else ''))):
         bilgi.append([personel_ozeti.guvenli_hucre(v) for v in satir])
@@ -621,7 +646,12 @@ def _tr_kucuk(value):
 def _kategori_kanonik(cat,codes):
     """Kullanıcının yazdığı/seçtiği kategoriyi projelerdeki tanımlı adla (doğru harf biçimiyle) eşler."""
     if not cat: return cat
-    try: return next((k for k in _scoped_categories(codes) if _tr_kucuk(k)==_tr_kucuk(cat)),cat)
+    try:
+        kapsam=_scoped_categories(codes)
+        # 2.3.5: değer kapsamdaki bir adla zaten harf duyarsız (casefold, SQL'deki UNICODE_NOCASE) eşleşiyorsa olduğu gibi kalır;
+        # böylece personel raporundaki 'İPTAL' kutusu 'iptal' kayıtlarına değil kendi kayıtlarına gider. Türkçe eşleme yalnız elle yazılan değere uygulanır.
+        if any(personel_ozeti.kirp(k).casefold()==cat.casefold() for k in kapsam): return cat
+        return next((k for k in kapsam if _tr_kucuk(k)==_tr_kucuk(cat)),cat)
     except Exception: return cat
 
 # 2.3.1 — Onaysız kayıt görünürlüğü ve bekleme süresi. Yaş = bugün − date(COALESCE(ilk_gorulme,tarih)); ? = gün eşiği.
@@ -662,8 +692,10 @@ def _filtre_sql(args,izinli):
         gizli_sql,gizli_par=_gizli_kayit_sql('',selected); where.append(gizli_sql); par.extend(gizli_par)
     bekleme=0 if yalniz_onayli else _bekleme_gun(args)  # onaylıya sabitlenen listede 'gündür bekleyen' süzgeci anlamsız: yok sayılır
     if bekleme: where.append(_GECIKEN_SQL); par.append(bekleme)
-    cat=_kategori_kanonik(args.get('kategori','').strip()[:120],selected)
-    if cat: where.append("TRIM(COALESCE(kategori,'')) COLLATE UNICODE_NOCASE=?"); par.append(cat)  # 2.3.4: baş/son boşluklu eski kategoriler de eşleşir
+    # 2.3.5: personel raporuyla aynı kırpma (boşluk, sekme, satır sonu, bölünmez boşluk; iç boşluklar korunur).
+    cat=_kategori_kanonik(personel_ozeti.kirp(args.get('kategori',''))[:120],selected)
+    if cat==personel_ozeti.BOS_DEGER: where.append(personel_ozeti.kirp_sql('kategori')+"=''")  # 2.3.5: rapordaki "(boş)" kategori kutusu/hücresi
+    elif cat: where.append(personel_ozeti.kirp_sql('kategori')+" COLLATE UNICODE_NOCASE=?"); par.append(cat)  # 2.3.4: baş/son boşluklu eski kategoriler de eşleşir
     q=args.get('q','').strip()[:200]
     if q:
         where.append('(personel LIKE ? OR uye_id LIKE ? OR ana_uye_id LIKE ? OR lead_id LIKE ? OR link LIKE ? OR aciklama LIKE ? OR ekleyen_ad LIKE ? OR kategori LIKE ?)'); par += ['%'+q+'%']*8
@@ -671,8 +703,8 @@ def _filtre_sql(args,izinli):
     if by: where.append('(ekleyen_ad LIKE ? OR ekleyen_id=?)'); par += ['%'+by+'%',by]
     # 2.3.4: personel raporundaki hücre bağlantıları için tam eşleşen süzgeçler ('__bos__' = boş değer) ve "silinenler hariç".
     tam={}
-    for name,kolon in (('personel',"TRIM(COALESCE(personel,''))"),('ekleyen_ad',"TRIM(COALESCE(ekleyen_ad,''))"),('tip',"TRIM(COALESCE(tip,'')) COLLATE UNICODE_NOCASE")):
-        v=args.get(name,'').strip()[:200]
+    for name,kolon in (('personel',personel_ozeti.kirp_sql('personel')),('ekleyen_ad',personel_ozeti.kirp_sql('ekleyen_ad')),('tip',personel_ozeti.kirp_sql('tip')+" COLLATE UNICODE_NOCASE")):
+        v=personel_ozeti.kirp(args.get(name,''))[:200]
         if v: where.append(kolon+'=?'); par.append('' if v==personel_ozeti.BOS_DEGER else v)
         tam[name]=v
     silinmemis=args.get('silinmemis')=='1' and state in ('hepsi','onayli','bekleyen')

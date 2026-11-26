@@ -361,7 +361,7 @@ def personel_ozet():
     secili = _secili_projeler()
     if len(secili) > 1:
         raise _Red(400, 'proje tek bir proje kodu olmalı (boş = kapsamdaki tüm projeler).')
-    args = {k: request.args.get(k, '') for k in ('donem', 'durum', 'grup', 'sutun', 'tarih1', 'tarih2')}
+    args = {k: request.args.get(k, '') for k in ('donem', 'durum', 'grup', 'sutun', 'tarih1', 'tarih2', 'kategori')}
     args['proje'] = secili[0] if secili else ''
     try:
         f, hatalar, uyarilar = po.filtre_coz(args, projeler, bugun=datetime.now().date())
@@ -373,6 +373,10 @@ def personel_ozet():
         if f['durum'] != 'onayli' and (request.args.get('durum') or '').strip():
             uyarilar.insert(0, 'Bu anahtar yalnız onaylı kayıtları görür; durum süzgeci yok sayıldı.')
         f['durum'] = 'onayli'
+    if f.get('kategori'):
+        # 2.3.5: kategori adı panelle aynı biçimde (katalog adı, harf duyarsız) eşlenir; bilinmeyen ad sıfır satır döndürür.
+        secili_kapsam = [f['proje']] if f['proje'] else list(projeler)
+        f['kategori'] = po.kategori_kanonik(po.kategori_secenekleri(_panel().baglanti(), secili_kapsam), f['kategori'])
     ozet_ = po.personel_ozeti(_panel().baglanti(), projeler, None, f)
     g.api_satir = ozet_['kisi_sayisi']
     sonuc = dict(ok=True, **po.api_gorunumu(ozet_, f))

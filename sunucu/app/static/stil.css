@@ -774,10 +774,44 @@ fieldset.po-alan > legend + * { clear: left; }
 .po-cip.onayli b { color: var(--yesil); } .po-cip.bekleyen b { color: var(--turuncu); }
 .po-donem { margin-left: auto; }
 .po-not { margin: -4px 0 10px; }
-.po-lider { list-style: none; margin: 0 0 16px; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+/* 2.3.5: kişi kartları (eski "İlk 3" kartlarının görünümü; ilk üçte altın/gümüş/bronz madalya). */
+.po-mobil-bos { display: none; }
+.po-kartlar { margin: 0 0 16px; }
+.po-kart-izgara { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.po-kart-izgara > li[hidden] { display: none; }
 .po-lider-kart { --madalya: #94a3b8; position: relative; padding: 14px 16px 12px; border: 1px solid var(--cizgi); border-radius: var(--yuvarlak); background: linear-gradient(180deg, color-mix(in srgb, var(--madalya) 10%, var(--kart)), var(--kart) 70%); box-shadow: var(--golge); overflow: hidden; min-width: 0; }
 .po-lider-kart::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--madalya); }
 .po-lider-kart.sira-1 { --madalya: #d4a017; } .po-lider-kart.sira-2 { --madalya: #8a97ab; } .po-lider-kart.sira-3 { --madalya: #b8733a; }
+.po-kisi-kart:not(.sira-1):not(.sira-2):not(.sira-3) { --madalya: var(--cizgi-koyu); background: var(--kart); }
+.po-kisi-kart:not(.sira-1):not(.sira-2):not(.sira-3)::before { opacity: .45; }
+.po-kisi-kart:not(.sira-1):not(.sira-2):not(.sira-3) .po-sira { background: var(--yuzey-3); color: var(--yazi-2); box-shadow: none; font-weight: 700; }
+.po-lider-ad:is(a):hover { color: var(--birincil); text-decoration: underline; }
+.po-kart-durum { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: -4px 0 10px; font-size: 12.5px; color: var(--soluk); }
+.po-kart-onayli { color: var(--yesil); }
+.po-kart-bekleyen.var { color: var(--kirmizi); font-weight: 650; }
+/* Kategori kutuları ("CVPS 68"): tıklanabilir kutu, kategori rengi nokta + açık zemin + kenar. */
+.po-kat-kutular { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.po-kat-kutular li { min-width: 0; max-width: 100%; }
+.po-kat-kutu { --kat-renk: var(--birincil); display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 30px; padding: 3px 4px 3px 8px; border-radius: 7px; border: 1px solid color-mix(in srgb, var(--kat-renk) 40%, var(--cizgi)); background: color-mix(in srgb, var(--kat-renk) 9%, var(--kart)); color: var(--yazi); font-size: 12.5px; font-weight: 600; line-height: 1.2; text-decoration: none; transition: background .12s, border-color .12s; }
+.po-kat-kutu i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--kat-renk); }
+.po-kat-kutu-ad { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.po-kat-kutu b { flex: none; min-width: 22px; padding: 2px 6px; border-radius: 5px; background: var(--kart); border: 1px solid color-mix(in srgb, var(--kat-renk) 25%, var(--cizgi)); text-align: center; font-weight: 800; font-variant-numeric: tabular-nums; }
+a.po-kat-kutu { cursor: pointer; }
+a.po-kat-kutu:hover { background: color-mix(in srgb, var(--kat-renk) 20%, var(--kart)); border-color: var(--kat-renk); text-decoration: none; }
+a.po-kat-kutu:focus-visible, .po-lider-ad:focus-visible { outline: 3px solid var(--odak); outline-offset: 1px; }
+.po-kart-dugmeler { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 12px 0 0; }
+.po-kart-dugmeler[hidden], .po-kart-dugmeler [hidden] { display: none; }
+.po-kart-sayac { margin-left: auto; }
+.po-cip-kategori { align-items: center; color: var(--yazi-2); }
+.po-cip-kategori i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.po-cip-kategori b { font-size: 14px; }
+.po-baslik-kategori { font-size: 14px; color: var(--soluk); font-weight: 500; }
+.po-hatirlanan-not { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 8px 0 0; padding: 6px 6px 6px 12px; border-radius: var(--yuvarlak-kucuk); background: var(--mavi-yumusak); border: 1px solid color-mix(in srgb, var(--birincil) 25%, var(--cizgi)); color: var(--yazi); font-size: 13px; }
+.po-hatirlanan-not[hidden] { display: none; }
+.po-hatirlanan-not a { font-weight: 650; }
+.po-not-kapat { all: unset; cursor: pointer; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--soluk); font-size: 18px; line-height: 1; }
+.po-not-kapat:hover { background: color-mix(in srgb, var(--birincil) 12%, transparent); color: var(--yazi); }
+.po-not-kapat:focus-visible { outline: 3px solid var(--odak); }
 .po-lider-ust { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .po-sira { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--madalya); color: #fff; font-weight: 800; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
 .po-lider-ad { font-weight: 650; font-size: 15px; color: var(--yazi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -787,9 +821,7 @@ fieldset.po-alan > legend + * { clear: left; }
 .po-lider-sayi .po-oran { margin-left: auto; font-size: 12px; font-weight: 650; color: var(--yesil); background: var(--yesil-yumusak); padding: 2px 8px; border-radius: 999px; }
 .po-pay { display: flex; height: 7px; border-radius: 999px; overflow: hidden; background: var(--yuzey-3); gap: 1px; }
 .po-pay span { display: block; height: 100%; min-width: 3px; }
-.po-lider-kat { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 0; font-size: 12px; color: var(--soluk); }
-.po-lider-kat span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.po-lider-kat i, .po-kat-nokta { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.po-kat-nokta { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .po-kat-nokta { margin-right: 5px; vertical-align: 1px; }
 .po-tablo-sarici { box-shadow: none; }
 .po-rapor-tablo .po-tablo-sarici { max-height: 72vh; }
@@ -828,23 +860,13 @@ fieldset.po-alan > legend + * { clear: left; }
 .po-tablo thead th[aria-sort] button { color: var(--yazi); }
 .po-tablo thead th[aria-sort="descending"] button::after { content: " ↓"; }
 .po-tablo thead th[aria-sort="ascending"] button::after { content: " ↑"; }
-.po-mobil { display: none; list-style: none; margin: 0; padding: 0; gap: 10px; }
-.po-mobil-kart { border: 1px solid var(--cizgi); border-radius: var(--yuvarlak); padding: 12px 14px; background: var(--yuzey-2); min-width: 0; }
-.po-mobil-ust { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-.po-mobil-ad { font-weight: 650; color: var(--yazi); overflow-wrap: anywhere; min-width: 0; }
-.po-mobil-toplam { white-space: nowrap; color: var(--soluk); font-size: 13px; }
-.po-mobil-toplam b { font-size: 18px; color: var(--yazi); font-variant-numeric: tabular-nums; }
-.po-mobil-durum { font-size: 12.5px; color: var(--soluk); margin: 2px 0 8px; }
-.po-mobil-rozetler { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.po-rozet { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 6px; background: var(--kart); border: 1px solid var(--cizgi); border-left: 3px solid var(--kat-renk, var(--birincil)); color: var(--yazi); font-size: 12.5px; min-height: 32px; }
-.po-rozet b { font-variant-numeric: tabular-nums; }
 .po-alt { margin: 12px 0 0; }
 .rapor-ust .rapor-alt-baslik { color: var(--yazi-2); font-weight: 500; }
 .rapor-ust .rapor-zaman { margin-top: 2px; }
 .rapor-filtre-kart { margin-top: 0; padding: 0; border: 0; box-shadow: none; background: transparent; }
 .rapor-sayfa > .po-ozet { margin-top: 4px; }
 .rapor-suzgec-notu { margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-@media (max-width: 1100px) { .po-lider { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } }
+@media (max-width: 1100px) { .po-kart-izgara { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 900px) {
   .po-kart { padding: 14px; }
   .po-filtre { padding: 10px; gap: 10px; }
@@ -856,26 +878,20 @@ fieldset.po-alan > legend + * { clear: left; }
   .po-tarihler label { flex: 1 1 0; min-width: 0; }
   .po-tarihler input { width: 100%; }
   .po-donem { margin-left: 0; flex-basis: 100%; }
-  .po-lider { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-  .po-lider-kart { padding: 10px 10px 9px; }
-  .po-lider-ust { gap: 6px; }
-  .po-sira { width: 20px; height: 20px; font-size: 11px; }
-  .po-lider-ad { font-size: 13px; }
-  .po-lider-sayi { flex-wrap: wrap; margin: 6px 0 8px; gap: 4px; }
-  .po-lider-sayi b { font-size: 22px; }
-  .po-lider-sayi .po-oran { margin-left: 0; font-size: 11px; padding: 1px 6px; }
-  .po-lider-kat { display: none; }
   #personel-ozet .po-masaustu { display: none; }
-  #personel-ozet .po-mobil { display: grid; }
+  #personel-ozet .po-mobil-bos { display: block; }
+  .po-kart-sayac { margin-left: 0; flex-basis: 100%; }
   .po-tablo .po-ad-sutun { min-width: 110px; max-width: 150px; }
   .rapor-eylemler { width: 100%; }
   .rapor-eylemler .btn { flex: 1 1 0; }
   .rapor-filtre-kart { padding: 0; }
 }
-/* 2.3.4: dar telefonda "İlk 3" kartları alt alta; adlar kısaltılmadan tam görünür. */
-@media (max-width: 480px) {
-  .po-lider { grid-template-columns: minmax(0, 1fr); }
+/* 2.3.5: telefonda kişi kartları alt alta (satırda bir kart); adlar kısaltılmadan tam görünür, kutular alt satıra sarar. */
+@media (max-width: 640px) {
+  .po-kart-izgara { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .po-lider-ad { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+  .po-kart-dugmeler .btn { flex: 1 1 auto; }
+  .po-kat-kutu { min-height: 34px; }
 }
 @media print {
   :root, :root[data-theme="dark"] { --arka: #fff; --kart: #fff; --yuzey-2: #f5f7fa; --yuzey-3: #e9edf3; --yazi: #000; --yazi-2: #1f2937; --soluk: #4b5563; --cizgi: #cfd6e0; --cizgi-koyu: #9aa5b5; --birincil: #2457d6; --birincil-yumusak: #e8efff; --yesil: #15803d; --yesil-yumusak: #e3f6ea; --turuncu: #c2410c; --golge: none; }
@@ -897,7 +913,12 @@ fieldset.po-alan > legend + * { clear: left; }
   /* 2.3.4: kâğıtta adlar kısaltılmaz; benzer önekli adlar ayırt edilebilsin. */
   .po-tablo .po-ad-sutun { max-width: 260px; min-width: 160px; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
   .po-kart { margin-top: 8px; padding: 8px; }
-  .po-lider { grid-template-columns: repeat(3, 1fr); }
+  /* 2.3.5: kişi kartları basılmaz (tablo rapordur); ?yazdir=1&kartlar=1 ile kartlar da basılır. */
+  .po-kartlar, .po-kart-dugmeler { display: none !important; }
+  .po-kartlar.po-kartlar-baski { display: block !important; }
+  .po-kart-izgara { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .po-kart-izgara > li { break-inside: avoid; }
+  .po-hatirlanan-not { display: none !important; }
   .po-tablo-sarici, .po-rapor-tablo .po-tablo-sarici { overflow: visible !important; max-height: none !important; border: 0; }
   .po-tablo { font-size: 10px; }
   .po-tablo th, .po-tablo td { padding: 3px 5px; position: static !important; }

@@ -182,8 +182,19 @@ Silinmiş kayıtlar sayılmaz; anahtarın proje kapsamı uygulanır.
 | `durum` | **`hepsi`** \| `onayli` \| `bekleyen`. "Yalnız onaylı" anahtarda her zaman `onayli` (başka değer istenirse `uyari` döner). |
 | `grup` | **`personel`** \| `ekleyen` (Telegram'dan ekleyen kişinin adı) |
 | `sutun` | **`kategori`** \| `tip` |
+| `kategori` | (2.3.5) Tek kategori adı; boş = tüm kategoriler. Büyük/küçük harf ve baş/son boşluk fark etmez (katalogdaki adla eşlenir), `(boş)` ya da `__bos__` = kategorisi boş kayıtlar. `sutun=kategori` ile yanıtta yalnız o sütun döner; `sutun=tip` ile o kategorinin tip sayıları. Bilinmeyen ad hata değildir: sıfır satır döner. Yanıttaki `filtre.kategori` uygulanan adı ya da `null` verir. |
 
 Tanınmayan değer ya da hatalı tarih → 400 (`hata` alanında hangi parametre olduğu yazar).
+
+Örnek (2.3.5): PA projesinde bu ay kim kaç CVPS eklemiş, Sessiz/Telesekreter ayrımıyla:
+
+```bash
+curl -s -H "Authorization: Bearer kp_…" "https://panel.ornek/api/v1/personel-ozet?proje=PA&donem=ay&kategori=CVPS&sutun=tip"
+```
+
+Panelde aynı süzgeçler `/rapor/personel`, `/rapor/personel.xlsx` ve `/rapor/personel.csv` adreslerinde de geçerlidir (`kategori` dahil).
+Rapor sayfasındaki sayı ve kutu bağlantıları Kayıtlar listesini şu tam eşleşen parametrelerle açar: `personel`, `ekleyen_ad`,
+`tip` (harf duyarsız), `kategori` (harf duyarsız; `__bos__` = boş) ve `silinmemis=1`; boş değer için `__bos__` yazılır.
 
 ```bash
 curl -s -H "Authorization: Bearer kp_…" "https://panel.ornek/api/v1/personel-ozet?proje=OF&donem=ay&durum=hepsi&grup=personel&sutun=kategori"

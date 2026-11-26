@@ -6,7 +6,11 @@ sayılır. Sayım tek GROUP BY sorgusuyla yapılır (bağlı parametreler); topl
 
 Tarih kuralı Kayıtlar süzgeciyle aynıdır: ``tarih >= 'YYYY-AA-GG'`` ve ``tarih <= 'YYYY-AA-GG 23:59:59'``; böylece hem
 Telegram kayıtlarının tam zaman damgası hem eski Excel kayıtlarının yalnız tarih değeri doğru aralığa düşer. "Bugün"
-sunucunun yerel takvim günüdür (ana sayfadaki "Bugün eklenen" sayacı ve db.simdi() ile aynı saat dilimi)."""
+sunucunun yerel takvim günüdür (ana sayfadaki "Bugün eklenen" sayacı ve db.simdi() ile aynı saat dilimi).
+
+2.3.5: tek değerli ``kategori`` süzgeci (boş = tüm kategoriler). Kayıtlar süzgeciyle aynı eşleme kullanılır
+(``TRIM(kategori)`` harf duyarsız; ``__bos__`` = kategorisi boş), böylece sayılar ile bağlantıların açtığı liste birebir tutar."""
+import re
 from datetime import date, datetime, timedelta
 
 from . import katalog
@@ -24,8 +28,23 @@ BOS_DEGER = '__bos__'
 PALET = ('#2457d6', '#15803d', '#c2410c', '#7c3aed', '#0e7490', '#be185d', '#a16207', '#4d7c0f', '#b91c1c', '#0f766e', '#9333ea', '#475569')
 ISI_KADEME = 5
 
-_GRUP_KOLON = {'personel': "TRIM(COALESCE(personel,''))", 'ekleyen': "TRIM(COALESCE(ekleyen_ad,''))"}
-_SUTUN_KOLON = {'kategori': "TRIM(COALESCE(kategori,''))", 'tip': "TRIM(COALESCE(tip,''))"}
+# 2.3.5: baş/son kırpılan karakterler (boşluk, sekme, satır sonu, bölünmez boşluk). SQL tarafı ve Python tarafı aynı kümeyi
+# kırpar; böylece Excel'den gelen "CVPS<sekme>" gibi eski değerler hem sayımda hem Kayıtlar süzgecinde aynı değere düşer.
+KIRP = ' \t\n\r\xa0'
+
+
+def kirp(deger):
+    """Süzgeç değerini SQL tarafıyla aynı karakter kümesiyle kırpar (iç boşluklara dokunmaz)."""
+    return str(deger or '').strip(KIRP)
+
+
+def kirp_sql(kolon):
+    """``kirp`` ile aynı kırpmayı yapan SQL ifadesi (NULL → '')."""
+    return "TRIM(COALESCE(%s,''),' '||char(9)||char(10)||char(13)||char(160))" % kolon
+
+
+_GRUP_KOLON = {'personel': kirp_sql('personel'), 'ekleyen': kirp_sql('ekleyen_ad')}
+_SUTUN_KOLON = {'kategori': kirp_sql('kategori'), 'tip': kirp_sql('tip')}
 
 
 def _tarih(deger):
@@ -70,6 +89,12 @@ def filtre_coz(args, izinli, bugun=None):
     elif proje not in izinli:
         raise PermissionError(proje)
     f = dict(proje=proje)
+    # 2.3.5: kategori süzgeci (tek değer). '(boş)' ya da '__bos__' = kategorisi boş kayıtlar. Bilinmeyen değer hata değildir: sıfır satır döner.
+    # Kayıtlar süzgeciyle aynı: yalnız baş/son kırpılır, iç boşluklar korunur (seçenek değerleri de böyle üretilir).
+    kategori = kirp(args.get('kategori'))[:120]
+    if kategori in (BOS, BOS_DEGER) or kategori.casefold() == BOS.casefold():
+        kategori = BOS_DEGER
+    f['kategori'] = kategori
     for ad, liste in (('donem', DONEM_ADLARI), ('durum', DURUM_ADLARI), ('grup', GRUP_ADLARI), ('sutun', SUTUN_ADLARI)):
         deger = tek(ad).lower()
         if ad == 'donem' and not deger and (tek('tarih1') or tek('tarih2')):
@@ -125,6 +150,54 @@ def _katalog_sirasi(conn, projeler):
     return sira
 
 
+def kategori_adi(deger):
+    """Süzgeç değerinin ekranda görünen adı ('__bos__' → '(boş)')."""
+    return BOS if deger == BOS_DEGER else (deger or '')
+
+
+def kategori_secenekleri(conn, projeler, gizli_sql=None):
+    """2.3.5: süzgeç çubuğundaki "Kategori" seçenekleri: önce seçili projelerin katalog adları (katalog sırası), sonra bu
+    projelerin silinmemiş kayıtlarında geçen diğer adlar (harf duyarsız tekrarsız, alfabetik), en sonda kategorisi boş kayıt
+    varsa '(boş)'. Dönüş: [{deger, ad, katalog}] — deger süzgeç parametresine yazılır."""
+    if not projeler:
+        return []
+    katalog_adlari = _katalog_sirasi(conn, projeler)
+    gorulen = {a.casefold() for a in katalog_adlari}
+    kosul = ['silindi=0', 'proje IN (%s)' % ','.join('?' * len(projeler))]; par = list(projeler)
+    if gizli_sql and gizli_sql[0]:
+        kosul.append(gizli_sql[0]); par.extend(gizli_sql[1])
+    digerleri, bos_var = [], False
+    for r in conn.execute("SELECT DISTINCT %s k FROM kayitlar WHERE %s" % (kirp_sql('kategori'), ' AND '.join(kosul)), par):
+        ad = r[0] or ''
+        if not ad:
+            bos_var = True
+        elif ad.casefold() not in gorulen:
+            gorulen.add(ad.casefold()); digerleri.append(ad)
+    digerleri.sort(key=str.casefold)
+    out = [dict(deger=a, ad=a, katalog=True) for a in katalog_adlari] + [dict(deger=a, ad=a, katalog=False) for a in digerleri]
+    if bos_var:
+        out.append(dict(deger=BOS_DEGER, ad=BOS, katalog=False))
+    return out
+
+
+def kategori_kanonik(secenekler, deger):
+    """Kullanıcının yazdığı kategoriyi seçeneklerdeki adla (doğru harf biçimiyle) eşler; eşleşme yoksa değer aynen kalır."""
+    if not deger or deger == BOS_DEGER:
+        return deger
+    return next((s['deger'] for s in secenekler if s['deger'].casefold() == deger.casefold()), deger)
+
+
+_TR_ASCII = str.maketrans('çğıöşüÇĞİÖŞÜâîû', 'cgiosuCGIOSUaiu')
+
+
+def dosya_parcasi(deger):
+    """Dosya adına girecek güvenli parça (ör. 'S.ARK' → 's-ark', '30gün' → '30gun', '(boş)' → 'bos')."""
+    if deger == BOS_DEGER:
+        return 'bos'
+    parca = re.sub(r'[^a-z0-9]+', '-', str(deger or '').translate(_TR_ASCII).lower()).strip('-')[:40].strip('-')
+    return parca or 'kategori'
+
+
 def isi_seviyesi(n, en_buyuk):
     """Hücre ısı kademesi 0..5 (0 = boş hücre)."""
     if not n or not en_buyuk:
@@ -135,11 +208,12 @@ def isi_seviyesi(n, en_buyuk):
 def personel_ozeti(conn, izinli_projeler, gizli_sql, filtre):
     """Personel (veya ekleyen) × kategori (veya tip) sayım tablosu.
 
-    filtre: filtre_coz() çıktısı (proje, donem, durum, grup, sutun, tarih1, tarih2).
+    filtre: filtre_coz() çıktısı (proje, donem, durum, grup, sutun, tarih1, tarih2, kategori).
     gizli_sql: (sql, parametreler) — ONAYSIZ_GORUNUM=gizle koşulu; uygulanmıyorsa None veya ('', [])."""
     f = dict(filtre)
     projeler = [f['proje']] if f.get('proje') else list(izinli_projeler)
     grup, sutun = f.get('grup', 'personel'), f.get('sutun', 'kategori')
+    kategori = f.get('kategori') or ''
     hucre = {}
     if projeler:
         kosul = ['silindi=0', 'proje IN (%s)' % ','.join('?' * len(projeler))]; par = list(projeler)
@@ -153,6 +227,11 @@ def personel_ozeti(conn, izinli_projeler, gizli_sql, filtre):
             kosul.append('tarih >= ?'); par.append(f['tarih1'])
         if f.get('tarih2'):
             kosul.append('tarih <= ?'); par.append(f['tarih2'] + ' 23:59:59')
+        if kategori == BOS_DEGER:
+            kosul.append(kirp_sql('kategori') + "=''")
+        elif kategori:
+            # Kayıtlar süzgeciyle aynı: baş/son kırpılır (KIRP), harf duyarsız (UNICODE_NOCASE = casefold) eşleşir.
+            kosul.append(kirp_sql('kategori') + " COLLATE UNICODE_NOCASE=?"); par.append(kategori)
         sql = ('SELECT %s g,%s s,COUNT(*) n,COALESCE(SUM(kt=1),0) o FROM kayitlar WHERE %s GROUP BY 1,2'
                % (_GRUP_KOLON[grup], _SUTUN_KOLON[sutun], ' AND '.join(kosul)))
         for r in conn.execute(sql, par):
@@ -175,6 +254,17 @@ def personel_ozeti(conn, izinli_projeler, gizli_sql, filtre):
     katalogda = {a.casefold() for a in katalog_adlari}
     sutun_bilgi = [dict(ad=a or BOS, deger=a, bos=not a, katalog=a.casefold() in katalogda, renk=PALET[i % len(PALET)] if a else '#94a3b8',
                         toplam=sutun_toplam.get(a, 0)) for i, a in enumerate(sira)]
+    kategori_gorunen = ''
+    if kategori:
+        # 2.3.5: kategori seçiliyken kategori sütunlarında yalnız o kategori kalır (renk tüm listedeki sırasından gelir);
+        # kayıt yoksa bile sütun sıfırla gösterilir. Tip sütunlarında yalnız sayılar o kategoriyle sınırlanır.
+        hedef = '' if kategori == BOS_DEGER else kategori.casefold()
+        kategori_gorunen = BOS if kategori == BOS_DEGER else ad_haritasi.get(hedef, kategori)
+        if sutun == 'kategori':
+            sutun_bilgi = [b for b in sutun_bilgi if b['deger'].casefold() == hedef]
+            if not sutun_bilgi:
+                sutun_bilgi = [dict(ad=kategori_gorunen, deger='' if kategori == BOS_DEGER else kategori, bos=kategori == BOS_DEGER, katalog=False,
+                                    renk='#94a3b8' if kategori == BOS_DEGER else PALET[len(katalog_adlari) % len(PALET)], toplam=0)]
     satirlar = {}
     for (gk, s), (n, o) in hucre.items():
         sat = satirlar.setdefault(gk, dict(personel=gk or BOS, deger=gk, bos=not gk, toplam=0, onayli=0, bekleyen=0,
@@ -193,7 +283,8 @@ def personel_ozeti(conn, izinli_projeler, gizli_sql, filtre):
                  etiket=donem_etiketi(f))
     return dict(satirlar=liste, sutunlar=[b['ad'] for b in sutun_bilgi], sutun_bilgi=sutun_bilgi, toplam=toplam,
                 kisi_sayisi=len(liste), kayit_sayisi=toplam['toplam'], donem=donem, projeler=projeler,
-                grup_adi=GRUP_ADLARI.get(grup, ''), sutun_adi=SUTUN_ADLARI.get(sutun, ''), en_buyuk_hucre=en_buyuk)
+                grup_adi=GRUP_ADLARI.get(grup, ''), sutun_adi=SUTUN_ADLARI.get(sutun, ''), en_buyuk_hucre=en_buyuk,
+                kategori=kategori, kategori_adi=kategori_gorunen)
 
 
 def api_gorunumu(ozet, filtre):
@@ -204,6 +295,7 @@ def api_gorunumu(ozet, filtre):
                 kayit_sayisi=ozet['kayit_sayisi'], donem=dict(ozet['donem']),
                 filtre=dict(proje=filtre.get('proje') or None, projeler=list(ozet['projeler']), donem=filtre.get('donem'),
                             durum=filtre.get('durum'), grup=filtre.get('grup'), sutun=filtre.get('sutun'),
+                            kategori=(ozet.get('kategori_adi') or None),
                             tarih1=filtre.get('tarih1') or None, tarih2=filtre.get('tarih2') or None))
 
 

@@ -51,15 +51,16 @@ async function senaryo(browser, ad, ayar) {
   const telefon = ayar.context.viewport.width <= 900;
   await page.goto(PANEL + '/?donem=hepsi');
   await page.waitForSelector('#personel-ozet');
-  dogrula(await page.locator('#personel-ozet .po-lider-kart').count() === 3, ad + ': ilk 3 kartı yok');
+  // 2.3.5: "İlk 3" şeridi yerine kişi kartları (ilk 6 görünür); ilk üçte madalya.
+  dogrula(await page.locator('#personel-ozet .po-kisi-kart:visible').count() === 6, ad + ': ilk 6 kişi kartı görünmüyor');
+  dogrula(await page.locator('#personel-ozet .po-kisi-kart.sira-3').count() === 1, ad + ': madalyalı ilk 3 yok');
   dogrula(await page.locator('#personel-ozet table.po-tablo tbody tr').count() === 10, ad + ': kart tablosu 10 satır değil');
   const masaustuGorunur = await page.locator('#personel-ozet .po-masaustu').isVisible();
-  const mobilGorunur = await page.locator('#personel-ozet .po-mobil').isVisible();
-  dogrula(telefon ? (!masaustuGorunur && mobilGorunur) : (masaustuGorunur && !mobilGorunur), ad + ': telefon/masaüstü görünümü yanlış');
+  dogrula(telefon ? !masaustuGorunur : masaustuGorunur, ad + ': telefon/masaüstü görünümü yanlış');
   await tasmaYok(page, ad + ' ana sayfa');
   if (telefon) {
     // İlk 3 kartları dar ekranda alt alta dizilir; uzun adlar kısaltılmadan sığar.
-    const lider = await page.$$eval('#personel-ozet .po-lider-kart', (k) => k.map((x) => {
+    const lider = await page.$$eval('#personel-ozet .po-kisi-kart.sira-1, #personel-ozet .po-kisi-kart.sira-2, #personel-ozet .po-kisi-kart.sira-3', (k) => k.map((x) => {
       const a = x.querySelector('.po-lider-ad'), r = x.getBoundingClientRect();
       return { ad: a.textContent, s: a.scrollWidth, c: a.clientWidth, to: getComputedStyle(a).textOverflow, sol: Math.round(r.left), ust: Math.round(r.top) };
     }));
@@ -92,7 +93,7 @@ async function senaryo(browser, ad, ayar) {
 
   await page.goto(PANEL + '/rapor/personel?donem=hepsi');
   await page.waitForSelector('table.po-tablo');
-  dogrula(await page.locator('.po-lider-kart').count() === 3, ad + ': raporda ilk 3 yok');
+  dogrula(await page.locator('.po-kisi-kart:visible').count() === 6, ad + ': raporda ilk 6 kart yok');
   dogrula(await page.locator('table.po-tablo tbody tr').count() >= 12, ad + ': rapor tablosu eksik');
   dogrula(await page.locator('table.po-tablo tfoot').count() === 1, ad + ': toplam satırı yok');
   await tasmaYok(page, ad + ' rapor');
@@ -177,7 +178,9 @@ async function menuSigiyor(browser) {
     return { bas, secUst: Math.round(sec.top), secY: Math.round(sec.height), segUst: Math.round(seg.top), segY: Math.round(seg.height) };
   });
   process.stdout.write('HIZA ' + JSON.stringify(hiza) + '\n');
-  dogrula(Math.max(...hiza.bas) - Math.min(...hiza.bas) <= 1, 'süzgeç başlıkları hizasız ' + hiza.bas.join(','));
+  // 2.3.5: Kategori seçimiyle çubuk iki satıra sarabilir; her satırdaki başlıklar kendi içinde aynı hizada olmalı.
+  const ustler = hiza.bas.slice().sort((x, y) => x - y);
+  dogrula(ustler.every((v, i) => i === 0 || v - ustler[i - 1] <= 1 || v - ustler[i - 1] >= 40), 'süzgeç başlıkları hizasız ' + hiza.bas.join(','));
   dogrula(Math.abs(hiza.secUst - hiza.segUst) <= 1 && Math.abs(hiza.secY - hiza.segY) <= 1, 'seçim kutusu ile dönem düğmeleri hizasız ' + JSON.stringify(hiza));
   await context.close();
 }
