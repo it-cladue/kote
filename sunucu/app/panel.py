@@ -2149,6 +2149,13 @@ def calistir():
     from waitress import serve
     _start_web_converter();_start_hatirlatma_isi()
     eski_kontrolleri_temizle();gecici_sifreleri_temizle()
+    # 2.3.6: panel ekleme kategorisi (SMS) ilk istek beklenmeden açılışta hazır olsun; hata panelin açılmasını engellemez.
+    try:
+        from . import katalog as _kat
+        _k=db.baglan(AYAR['DB'])
+        try: _kat.panel_kategori(_k)
+        finally: _k.close()
+    except Exception as hata: print('Panel ekleme kategorisi hazırlanamadı: '+type(hata).__name__,flush=True)
     print(f'Kanıt Paneli {SURUM} — {AYAR["DINLE"]}:{AYAR["PORT"]}',flush=True)
     serve(app,host=AYAR['DINLE'],port=AYAR['PORT'],**sunucu_ayarlari())
 
