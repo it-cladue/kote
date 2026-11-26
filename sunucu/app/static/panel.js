@@ -504,6 +504,10 @@ window.Panel = (function () {
     }catch(_){return false;}
   }
   function hatirlatmaMi(n){return !!n&&n.tur==='hatirlatma';}
+  /* 2.3.8: "Bekleyen özeti" (2 saatte bir) kart, ses ve zil olarak gelir ama hatırlatma penceresini kendiliğinden açmaz;
+     pencere başka bir nedenle açıksa ya da zilden elle açılırsa listede görünür. */
+  function bekleyenOzetMi(n){return !!n&&String(n.olay||'').indexOf('bekleyen-ozet:')===0;}
+  function pencereAcarMi(n){return hatirlatmaMi(n)&&!bekleyenOzetMi(n);}
   function bildirimAnahtari(n){return n.key||n.bildirim_id||'';}
   /* 2.3.3: bugünün bildiriminde yalnız saat (10:14), eski günlerde tarih + saat. */
   function kisaZaman(z){z=String(z||'');if(z.length<16)return z;return z.slice(0,10)===bugunTarih()?z.slice(11,16):z.slice(0,16);}
@@ -581,7 +585,7 @@ window.Panel = (function () {
     /* 2.3.4: pencere her hatırlatma için günde en çok bir kez kendiliğinden açılır. Gösterilen anahtarlar kullanıcı ve gün
        başına localStorage'da tutulur; Kapat/Esc/Aç/okundu sonrası başka sayfaya geçince pencere yeniden açılmaz. Ertesi gün sıfırlanır. */
     function gosterilenler(){var d=gunlukOku(gosKey),b={};((d&&d.anahtarlar)||[]).forEach(function(x){b[x]=1;});return b;}
-    function yeniHatirlatmaVar(){var b=gosterilenler();return hatirlatmalar().some(function(n){return !b[bildirimAnahtari(n)];});}
+    function yeniHatirlatmaVar(){var b=gosterilenler();return hatirlatmalar().some(function(n){return pencereAcarMi(n)&&!b[bildirimAnahtari(n)];});}
     function gosterildiIsaretle(liste){var b=gosterilenler(),a=Object.keys(b);liste.forEach(function(n){var k=bildirimAnahtari(n);if(k&&!b[k]){b[k]=1;a.push(k);}});try{localStorage.setItem(gosKey,JSON.stringify({gun:bugunTarih(),anahtarlar:a.slice(-500)}));}catch(_){}}
     /* 2.3.4: zil listesinin başlığındaki "Hatırlatmalar (N)" düğmesi pencereyi her zaman elle açar. */
     var hpDugme=document.getElementById('bildirim-hp-ac');
@@ -592,7 +596,7 @@ window.Panel = (function () {
       /* Liste değişmediyse yeniden çizilmez (odaktaki düğme kaybolmasın); değiştiyse odak aynı satıra geri konur. */
       if(imza===hpImza&&hpListe.firstChild)return liste;hpImza=imza;
       var odak=document.activeElement,odakKey=odak&&hpListe.contains(odak)?odak.getAttribute('data-hp-ac'):null;
-      hpListe.innerHTML=liste.map(function(n){var id=bildirimAnahtari(n),kid=n.kayit_id||n.id,bas=n.ozet?(String(n.olay||'').indexOf('gun-sonu:')===0?'Gün sonu özeti':esc(n.proje||'')+' · Proje özeti'):'Kayıt #'+esc(kid)+(n.personel?' · '+esc(n.personel):'');
+      hpListe.innerHTML=liste.map(function(n){var id=bildirimAnahtari(n),kid=n.kayit_id||n.id,bas=n.ozet?(String(n.olay||'').indexOf('gun-sonu:')===0?'Gün sonu özeti':bekleyenOzetMi(n)?'Bekleyen özeti':esc(n.proje||'')+' · Proje özeti'):'Kayıt #'+esc(kid)+(n.personel?' · '+esc(n.personel):'');
         return '<li class="'+(n.ozet?'ozet':'')+'">'+rozet(n)+'<span class="hp-metin"><b>'+bas+'</b> <span>'+esc(n.metin||'')+'</span></span><a class="btn kucuk ikincil" href="'+esc(hedef(n))+'" data-hp-ac="'+esc(id)+'">'+(n.ozet?'Bekleyenleri aç':'Aç')+'</a></li>';}).join('')||'<li class="bos">Bekleyen hatırlatma kalmadı.</li>';
       var s=document.getElementById('hp-sayi');if(s)s.textContent=liste.length?liste.length+' hatırlatma':'';
       if(odakKey!==null){var geri=hpListe.querySelector('[data-hp-ac="'+odakKey+'"]')||hpListe.querySelector('[data-hp-ac]')||hp.querySelector('[data-hp-sonra]');if(geri)geri.focus();}
@@ -656,7 +660,7 @@ window.Panel = (function () {
         /* Arka plan sekmesinde de ses ve masaüstü bildirimi hemen; kartlar sekme öne gelince. */
         sesCal(hatYeni);masaustuBildir(yeniler);
         if(document.hidden)bekleyenKartlar=bekleyenKartlar.concat(yeniler);else kartGoster(yeniler);
-        if(hatYeni)hpAc(false);
+        if(yeniler.some(pencereAcarMi))hpAc(false);
       }
       /* Sayfa ilk yüklenişte: yalnız bugün henüz gösterilmemiş bir hatırlatma varsa (ve "Daha sonra" denmediyse) açılır. */
       if(ilk)hpAc(true);

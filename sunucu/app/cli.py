@@ -54,6 +54,7 @@ def main():
     hat=_alt(sub,'hatirlatma-uret','Onay bekleyen kayıtlar için hatırlatma bildirimlerini hemen üret (JSON rapor). Günlük kullanıcı sınırı ve günde bir kuralı nedeniyle aynı gün tekrar çalıştırmak yeni satır eklemez')
     hat.add_argument('--tarih',metavar='YYYY-AA-GG',help='3 gün kuralını bugün yerine bu (geçmiş) güne göre üret; ileri tarih kabul edilmez (gerçek günleri susturur). 2 saat ve gün sonu adımları her zaman şimdiki saate göre çalışır')
     hat.add_argument('--gun-sonu-zorla',action='store_true',help='Bugünün gün sonu özetini 18:00 beklenmeden hemen üret (sunucuda deneme için; yine günde bir kez)')
+    hat.add_argument('--bekleyen-ozet-zorla',action='store_true',help='Şu anki dilimin bekleyen özetini ("Onay bekleyen N kayıt var") pencere dışında da hemen üret (sunucuda deneme için; yine dilim başına bir kez)')
     kat=_alt(sub,'kategori-temizle','Kayıtlardaki kategori yazımlarını listele ve katalog adlarında birleştir (2.3.5). Çıkış kodu: 0 başarı (değişiklik olmasa da), 1 hata (hiçbir şey yazılmaz)')
     kat.add_argument('--listele',action='store_true',help='Kayıtlardaki bütün kategori değerlerini grupla ve say (yazmaz)')
     kat.add_argument('--donustur',action='append',default=[],metavar='"ESKI=YENI"',help='ESKI değerini (harf duyarsız, baş/son boşluksuz) YENI katalog kategorisine (kod ya da görünen ad) çevir; (boş) yapmak için YENI yerine (boş). Birden çok kez verilebilir')
@@ -150,7 +151,7 @@ def main():
                 try: bugun=datetime.strptime(args.tarih,'%Y-%m-%d').date()
                 except ValueError: raise SystemExit('Hata: tarih YYYY-AA-GG biçiminde olmalı.')
                 if bugun>datetime.now().date(): raise SystemExit('Hata: --tarih bugünden ileri olamaz; ileri tarihli hatırlatma gerçek günleri susturur.')
-            rapor=hatirlatma.uret(c,AYAR,bugun=bugun,gun_sonu_zorla=args.gun_sonu_zorla)
+            rapor=hatirlatma.uret(c,AYAR,bugun=bugun,gun_sonu_zorla=args.gun_sonu_zorla,bekleyen_ozet_zorla=args.bekleyen_ozet_zorla)
             print(json.dumps(rapor,ensure_ascii=False,indent=2))
             # Kısa Türkçe özet stderr'e: stdout saf JSON kalır (betikler okuyabilsin).
             print(hatirlatma.rapor_metni(rapor),file=sys.stderr)

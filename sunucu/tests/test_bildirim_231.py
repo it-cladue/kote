@@ -52,7 +52,7 @@ def rows(a, sql, *params):
 def conn_uret(a, **kw):
     # 2.3.3 adımları (2 saat, gün sonu) burada kapalı: bu dosya yalnız 3 gün kuralını sınar (test_hatirlatma_233.py ayrı sınar).
     c = db.baglan(a['DB'])
-    try: return hatirlatma.uret(c, dict(a, HATIRLATMA_SAAT=0, GUN_SONU_SAAT=''), **kw)
+    try: return hatirlatma.uret(c, dict(a, HATIRLATMA_SAAT=0, GUN_SONU_SAAT='', BEKLEYEN_OZET_SAAT=0), **kw)
     finally: c.close()
 
 
@@ -166,7 +166,7 @@ def test_hatirlatma_akista_etiket_baglanti_ve_okundu(web):
 
 def test_hatirlatma_cli_raporu_ve_kapali_arka_plan(tmp_path):
     veri = tmp_path / 'veri'
-    ortam = dict(os.environ, PANEL_VERI=str(veri), GYAZO_WORKER='0', HATIRLATMA_GUN='2', HATIRLATMA_SAAT='0', GUN_SONU_SAAT='')
+    ortam = dict(os.environ, PANEL_VERI=str(veri), GYAZO_WORKER='0', HATIRLATMA_GUN='2', HATIRLATMA_SAAT='0', GUN_SONU_SAAT='', BEKLEYEN_OZET_SAAT='0')
     kur = subprocess.run([sys.executable, '-m', 'app.cli', 'veritabani-kur'], cwd=str(ROOT), env=ortam, capture_output=True, text=True, timeout=120)
     assert kur.returncode == 0, kur.stderr
     ayar = {'DB': str(veri / 'panel.db')}

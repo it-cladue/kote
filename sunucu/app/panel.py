@@ -1593,8 +1593,17 @@ def _bildirim_hedef(row):
     """2.3.1: bildirime tıklanınca açılacak adres. Kayıt → kayıt modalı (durum=hepsi, liste dışı olsa da açılır);
     yorum/soru/yanıt → aynı modalda ilgili yorum vurgulanır (&yorum=); hatırlatma özeti → projenin bekleyen listesi.
     2.3.3: gün sonu özeti → tüm projelerin bekleyen listesi; 2 saat toplu bildirimi → projenin bekleyen listesi (gün süzgeci yok);
-    2 saat kayıt hatırlatması → kayıt modalı (aşağıdaki genel yol)."""
+    2 saat kayıt hatırlatması → kayıt modalı (aşağıdaki genel yol).
+    2.3.8: bekleyen özeti → kullanıcının onay yetkisi olan projelerinin bekleyen listesi (yönetici ya da tüm projelerinde
+    onay yetkisi olan kullanıcı: proje süzgeci yok)."""
     olay=str(row.get('olay') or '')
+    if olay.startswith('bekleyen-ozet:'):
+        yk=g.get('yk') or yetki.coz('')
+        izinli=yetki.izinli_projeler(yk,projeler()) if g.get('yk') else []
+        kt=[p for p in izinli if yetki.izin(yk,p,'kt')]
+        if yk.get('admin') or not kt or len(kt)==len(izinli):
+            return url_for('kayitlar',durum='bekleyen')
+        return url_for('kayitlar',proje=kt,durum='bekleyen')
     if olay.startswith('gun-sonu:'):
         return url_for('kayitlar',durum='bekleyen')
     if olay.startswith('hatirlatma-saat-ozet:'):

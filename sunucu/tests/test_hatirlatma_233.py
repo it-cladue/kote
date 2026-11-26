@@ -28,7 +28,9 @@ def ts(dt):
 
 
 def uret(a, an, yerel_tz=IST, **kw):
-    ayar = dict(a, HATIRLATMA_GUN=36500)
+    # 2.3.8: kayıt başına 2 saat bildirimi varsayılan kapalı; bu dosya onu sınar (HATIRLATMA_SAAT=2). Bekleyen özeti
+    # test_bekleyen_ozet_238.py'de sınanır, burada kapalı.
+    ayar = dict(a, HATIRLATMA_GUN=36500, HATIRLATMA_SAAT=2, BEKLEYEN_OZET_SAAT=0)
     ayar.update(kw.pop('ayar', {}))
     c = db.baglan(a['DB'])
     try:
@@ -253,7 +255,7 @@ def test_hedef_baglantilar_bildirim_json_ve_sayfa(web):
 def test_ayarlar_dogrulama_ve_kapatma(web, capsys):
     c, a = web
     v = hatirlatma.ayarlar({})
-    assert (v['kontrol_dk'], v['saat'], v['saat_toplu'], v['gun_sonu'], v['gun_sonu_alicilar']) == (10, 2, 5, dtime(18, 0), None)
+    assert (v['kontrol_dk'], v['saat'], v['saat_toplu'], v['gun_sonu'], v['gun_sonu_alicilar']) == (10, 0, 5, dtime(18, 0), None)  # 2.3.8: saat 0
     hatirlatma._LOGLANAN.clear()
     assert hatirlatma.ayarlar({'GUN_SONU_SAAT': '25:00'})['gun_sonu'] == dtime(18, 0)
     assert 'GUN_SONU_SAAT geçersiz' in capsys.readouterr().out
@@ -261,7 +263,7 @@ def test_ayarlar_dogrulama_ve_kapatma(web, capsys):
     assert capsys.readouterr().out == ''                               # bir kez
     for ham, beklenen in (('abc', dtime(18, 0)), ('18.00', dtime(18, 0)), ('17.30', dtime(17, 30)), ('7.5', dtime(18, 0)), ('', None), ('0', None), (' 07:30 ', dtime(7, 30)), ('9:05', dtime(9, 5)), (None, dtime(18, 0))):
         assert hatirlatma.ayarlar({'GUN_SONU_SAAT': ham})['gun_sonu'] == beklenen, ham
-    for ham, beklenen in (('0', 0), (0, 0), (-3, 2), ('x', 2), (None, 2), (5, 5), (10 ** 9, 720)):
+    for ham, beklenen in (('0', 0), (0, 0), (-3, 0), ('x', 0), (None, 0), (2, 2), (5, 5), (10 ** 9, 720)):
         assert hatirlatma.ayarlar({'HATIRLATMA_SAAT': ham})['saat'] == beklenen, ham
     for ham, beklenen in ((0, 5), ('x', 5), (1, 1), (12, 12)):
         assert hatirlatma.ayarlar({'HATIRLATMA_SAAT_TOPLU': ham})['saat_toplu'] == beklenen, ham
@@ -296,8 +298,9 @@ def test_sema_gecisi_eski_veritabani(web):
 def test_cli_gun_sonu_zorla_ve_turkce_rapor(tmp_path):
     veri = tmp_path / 'veri'
     ortam = dict(os.environ, PANEL_VERI=str(veri), GYAZO_WORKER='0')
-    for k in ('HATIRLATMA_SAAT', 'GUN_SONU_SAAT', 'GUN_SONU_ALICILAR', 'HATIRLATMA_GUN'):
+    for k in ('HATIRLATMA_SAAT', 'GUN_SONU_SAAT', 'GUN_SONU_ALICILAR', 'HATIRLATMA_GUN', 'BEKLEYEN_OZET_SAAT', 'BEKLEYEN_OZET_PENCERE'):
         ortam.pop(k, None)
+    ortam['HATIRLATMA_SAAT'] = '2'  # 2.3.8: varsayılan kapalı; bu test 2 saat bildirimini de sınar
     kur = subprocess.run([sys.executable, '-m', 'app.cli', 'veritabani-kur'], cwd=str(ROOT), env=ortam, capture_output=True, text=True, timeout=120)
     assert kur.returncode == 0, kur.stderr
     ayar = {'DB': str(veri / 'panel.db')}
@@ -353,6 +356,8 @@ def test_gun_sonu_gizle_modunda_kt_yetkisiz_alici(web):
 def test_ortam_negatif_hatirlatma_saat_varsayilana_doner(monkeypatch):
     from app import settings
     monkeypatch.setenv('HATIRLATMA_SAAT', '-3')
+    assert hatirlatma.ayarlar(settings.settings())['saat'] == 0   # 2.3.8: varsayılan 0
+    monkeypatch.setenv('HATIRLATMA_SAAT', '2')
     assert hatirlatma.ayarlar(settings.settings())['saat'] == 2
     monkeypatch.setenv('HATIRLATMA_SAAT', '0')
     assert hatirlatma.ayarlar(settings.settings())['saat'] == 0

@@ -396,7 +396,7 @@ def test_liste_ayrinti_excel_api_rapor_ve_hatirlatma(web):
     an = datetime.strptime(kayit(a, kid)['tarih'], '%Y-%m-%d %H:%M:%S') + timedelta(hours=2, minutes=1)
     con = db.baglan(a['DB'])
     try:
-        rapor = hatirlatma.uret(con, dict(a, HATIRLATMA_GUN=36500), simdi=lambda: an)
+        rapor = hatirlatma.uret(con, dict(a, HATIRLATMA_GUN=36500, HATIRLATMA_SAAT=2, BEKLEYEN_OZET_SAAT=0), simdi=lambda: an)
     finally:
         con.close()
     assert rapor['saat']['aday'] == 1 and rapor['saat']['hatirlatma'] >= 1

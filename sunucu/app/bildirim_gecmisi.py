@@ -4,8 +4,8 @@ from datetime import datetime
 from . import db
 
 # Tek kayda değil bir listeye bağlanan hatırlatmalar (arayüz "Kayıt #" yerine "Bekleyenleri aç" gösterir).
-# 2.3.3: 2 saat toplu bildirimi ve gün sonu özeti eklendi.
-OZET_ONEKLERI = ('hatirlatma-ozet:', 'hatirlatma-saat-ozet:', 'gun-sonu:')
+# 2.3.3: 2 saat toplu bildirimi ve gün sonu özeti eklendi. 2.3.8: bekleyen özeti (2 saatte bir).
+OZET_ONEKLERI = ('hatirlatma-ozet:', 'hatirlatma-saat-ozet:', 'gun-sonu:', 'bekleyen-ozet:')
 
 
 def _base(username, allowed, gizli=None):

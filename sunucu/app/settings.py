@@ -62,10 +62,16 @@ def settings():
         # 2.3.3 — 2 saat bildirimi (saat; 0 = kapalı), aynı projeden kaç kayıttan fazlası tek toplu bildirime döner,
         # gün sonu özeti saati (İstanbul, SS:DD; boş ya da 0 = kapalı) ve alıcıları (boş = tüm aktif yöneticiler).
         # Doğrulama hatirlatma.ayarlar() içinde: geçersiz değer varsayılana döner.
-        'HATIRLATMA_SAAT': _tam_sayi('HATIRLATMA_SAAT', 2, en_az=-1),  # negatif → -1 → hatirlatma.ayarlar() varsayılan 2'ye çevirir
+        # 2.3.8: HATIRLATMA_SAAT varsayılanı 0 (kapalı); yerini bekleyen özeti aldı. Eski davranış için HATIRLATMA_SAAT=2.
+        'HATIRLATMA_SAAT': _tam_sayi('HATIRLATMA_SAAT', 0, en_az=-1),  # negatif → -1 → hatirlatma.ayarlar() varsayılan 0'a çevirir
         'HATIRLATMA_SAAT_TOPLU': _pozitif('HATIRLATMA_SAAT_TOPLU', 5),
         'GUN_SONU_SAAT': os.getenv('GUN_SONU_SAAT', '18:00'),
         'GUN_SONU_ALICILAR': os.getenv('GUN_SONU_ALICILAR', ''),
+        # 2.3.8 — Bekleyen özeti: kaç saatte bir (0 = kapalı), hangi saatler arasında (İstanbul, SS:DD-SS:DD; boş = bütün gün)
+        # ve yöneticiler (süperadmin) de alsın mı (1/0). Doğrulama hatirlatma.ayarlar() içinde.
+        'BEKLEYEN_OZET_SAAT': _tam_sayi('BEKLEYEN_OZET_SAAT', 2, en_az=-1),
+        'BEKLEYEN_OZET_PENCERE': os.getenv('BEKLEYEN_OZET_PENCERE', '08:00-20:00'),
+        'BEKLEYEN_OZET_YONETICI': os.getenv('BEKLEYEN_OZET_YONETICI', '1'),
         # 2.3.6 — Panelden eklenen kanıtların kategorisi (varsayılan SMS). Katalogda yoksa açılışta oluşturulur
         # (etkin, tüm etkin projelere bağlı). Asıl okuma katalog.panel_kategori_etiketi() içindedir; burası bilgi amaçlıdır.
         'PANEL_EKLEME_KATEGORI': (os.getenv('PANEL_EKLEME_KATEGORI', '') or '').strip() or 'SMS',

@@ -42,7 +42,7 @@ def rows(a, sql, *params):
 def uret(a, **kw):
     # 2.3.3 adımları (2 saat, gün sonu) burada kapalı: bu dosya yalnız 3 gün kuralını sınar (test_hatirlatma_233.py ayrı sınar).
     c = db.baglan(a['DB'])
-    try: return hatirlatma.uret(c, dict(a, HATIRLATMA_SAAT=0, GUN_SONU_SAAT=''), **kw)
+    try: return hatirlatma.uret(c, dict(a, HATIRLATMA_SAAT=0, GUN_SONU_SAAT='', BEKLEYEN_OZET_SAAT=0), **kw)
     finally: c.close()
 
 

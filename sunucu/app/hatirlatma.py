@@ -20,6 +20,13 @@ Kurallar (ayarlar .env'den, settings.AYAR):
   Yaş hesabı sunucunun yerel saatiyle yapılır (db.simdi() ile aynı saat).
 - Gün sonu: İstanbul saatiyle GUN_SONU_SAAT (18:00) geçince, İstanbul günü başına bir kez, yöneticilere (ya da GUN_SONU_ALICILAR)
   'gun-sonu:<YYYY-AA-GG>' özeti: kaç kayıt onaylanmadı, proje dağılımı, bugün eklenen/onaylanan, 2 saatten uzun bekleyen.
+
+2.3.8 — Bekleyen özeti (ayrıntı: _bekleyen_ozet_adimi):
+- İstanbul saatiyle BEKLEYEN_OZET_PENCERE (08:00-20:00) içinde, pencere başından itibaren BEKLEYEN_OZET_SAAT (2) saatte bir
+  (08:00, 10:00, …, 20:00) onay yetkisi olan her kullanıcıya TEK satır: 'bekleyen-ozet:<YYYY-AA-GG SS:DD>' ("Onay bekleyen N kayıt var …").
+  Yeni özet yazılınca kullanıcının önceki okunmamış özetleri okundu sayılır (zilde yalnız en sonuncusu kalır).
+  Yalnız içinde bulunulan dilim gönderilir; panel kapalıyken kaçan dilimler sonradan gönderilmez.
+- Bu özet kayıt başına 2 saat bildiriminin yerini alır: HATIRLATMA_SAAT varsayılanı 2.3.8'de 0 (kapalı).
 """
 import re
 from datetime import date, datetime, time as dtime, timedelta
@@ -32,6 +39,13 @@ KIM = 'sistem'
 EN_COK_KONTROL_DK = 7 * 24 * 60
 VARSAYILAN_GUN_SONU = '18:00'
 EN_COK_SAAT = 30 * 24
+# 2.3.8 — Bekleyen özeti: varsayılan aralık (saat), pencere (İstanbul) ve pencere bitişinden sonra en çok kaç dakika
+# geç gönderilebileceği (bitiş saatine denk gelen dilim, panel o sırada kısa süre kapalıysa yine gitsin; daha geç gitmesin).
+VARSAYILAN_OZET_SAAT = 2
+VARSAYILAN_OZET_PENCERE = '08:00-20:00'
+EN_COK_OZET_SAAT = 24
+OZET_GEC_KALMA_DK = 60
+OZET_ONEK = 'bekleyen-ozet:'
 # 2.3.3: kaydın başlangıç zamanı. Telegram kaydında ilk_gorulme boştur; tarih eklenme anıdır (tam zaman damgası).
 # guncelleme en sona konur: düzenleme/onay kaldırma her seferinde guncelleme'yi yeniler, 2 saat sayacını sıfırlamasın.
 BASLANGIC_SQL = "datetime(COALESCE(NULLIF(ilk_gorulme,''),NULLIF(tarih,''),NULLIF(guncelleme,'')))"
@@ -84,6 +98,37 @@ def _alici_listesi(ham):
     return adlar or None
 
 
+def _saat_dk(saat, dakika):
+    saat, dakika = int(saat), int(dakika or 0)
+    if dakika > 59 or saat > 24 or (saat == 24 and dakika):
+        return None
+    return saat * 60 + dakika
+
+
+def _ozet_penceresi(ham):
+    """BEKLEYEN_OZET_PENCERE 'SS:DD-SS:DD' (İstanbul) → (başlangıç dk, bitiş dk). Boş → bütün gün (0, 1440).
+    Geçersiz ya da başlangıç ≥ bitiş → 08:00-20:00 (bir kez günlüğe yazılır). '08-20', '8.30-19.30' de kabul edilir."""
+    if ham is None:
+        ham = VARSAYILAN_OZET_PENCERE
+    metin = str(ham).strip()
+    if metin == '':
+        return (0, 24 * 60)
+    m = re.fullmatch(r'(\d{1,2})(?:[:.](\d{2}))?\s*[-–]\s*(\d{1,2})(?:[:.](\d{2}))?', metin)
+    if m:
+        bas, bit = _saat_dk(m.group(1), m.group(2)), _saat_dk(m.group(3), m.group(4))
+        if bas is not None and bit is not None and bas < bit and bas < 24 * 60:
+            return (bas, bit)
+    _log_bir_kez('BEKLEYEN_OZET_PENCERE geçersiz (%r); %s kullanılıyor.' % (metin[:20], VARSAYILAN_OZET_PENCERE))
+    return (8 * 60, 20 * 60)
+
+
+def _evet(ham, varsayilan=True):
+    metin = str('' if ham is None else ham).strip().casefold()
+    if metin == '':
+        return varsayilan
+    return metin not in ('0', 'false', 'hayir', 'hayır', 'no', 'kapali', 'kapalı')
+
+
 YAS_SQL = "CAST(julianday(?) - julianday(date(COALESCE(NULLIF(ilk_gorulme,''), tarih))) AS INTEGER)"
 
 
@@ -99,13 +144,18 @@ def ayarlar(ayar=None):
             return varsayilan
         return min(deger, en_cok) if en_cok else deger
     # 2.3.3: kontrol sıklığı varsayılanı 10 dk (18:00 özeti 18:00–18:10 arasında, 2 saat bildirimi en geç 10 dk gecikmeyle).
-    # HATIRLATMA_SAAT 0 = 2 saat bildirimi kapalı (negatif/geçersiz → 2); GUN_SONU_SAAT boş/0 = gün sonu özeti kapalı.
+    # HATIRLATMA_SAAT 0 = 2 saat bildirimi kapalı; GUN_SONU_SAAT boş/0 = gün sonu özeti kapalı.
+    # 2.3.8: HATIRLATMA_SAAT varsayılanı 0 (bekleyen özeti yerini aldı; negatif/geçersiz → 0). BEKLEYEN_OZET_SAAT 0 = özet kapalı
+    # (negatif/geçersiz → 2, en çok 24); BEKLEYEN_OZET_YONETICI=0 → yöneticiler (süperadmin) özet almaz.
     return dict(gun=oku('HATIRLATMA_GUN', 3), tekrar=oku('HATIRLATMA_TEKRAR_GUN', 3), sinir=oku('HATIRLATMA_GUNLUK_SINIR', 50),
                 kontrol_dk=oku('HATIRLATMA_KONTROL_DK', 10, en_az=0, en_cok=EN_COK_KONTROL_DK),
-                saat=oku('HATIRLATMA_SAAT', 2, en_az=0, en_cok=EN_COK_SAAT), saat_toplu=oku('HATIRLATMA_SAAT_TOPLU', 5),
+                saat=oku('HATIRLATMA_SAAT', 0, en_az=0, en_cok=EN_COK_SAAT), saat_toplu=oku('HATIRLATMA_SAAT_TOPLU', 5),
                 gun_sonu=_gun_sonu_saati(ayar.get('GUN_SONU_SAAT', VARSAYILAN_GUN_SONU)),
                 gun_sonu_alicilar=_alici_listesi(ayar.get('GUN_SONU_ALICILAR')),
-                gizle=str(ayar.get('ONAYSIZ_GORUNUM', 'uyar') or '').strip().lower() == 'gizle')
+                gizle=str(ayar.get('ONAYSIZ_GORUNUM', 'uyar') or '').strip().lower() == 'gizle',
+                ozet_saat=oku('BEKLEYEN_OZET_SAAT', VARSAYILAN_OZET_SAAT, en_az=0, en_cok=EN_COK_OZET_SAAT),
+                ozet_pencere=_ozet_penceresi(ayar.get('BEKLEYEN_OZET_PENCERE', VARSAYILAN_OZET_PENCERE)),
+                ozet_yonetici=_evet(ayar.get('BEKLEYEN_OZET_YONETICI', '1')))
 
 
 def _ekle(conn, alici, kayit_id, proje, olay, metin, en_cok=300, zaman=None):
@@ -130,18 +180,20 @@ def ozet_metni(proje, toplam, eski, gun, katlanan=0):
     return metin + (' (' + '; '.join(parcalar) + ')' if parcalar else '') + '.'
 
 
-def uret(conn, ayar=None, bugun=None, simdi=None, yerel_tz=None, tz=None, gun_sonu_zorla=False):
+def uret(conn, ayar=None, bugun=None, simdi=None, yerel_tz=None, tz=None, gun_sonu_zorla=False, bekleyen_ozet_zorla=False):
     """Hatırlatmaları üretir; JSON'a yazılabilir rapor döndürür. Yeniden çağrılması yeni satır eklemez (idempotent).
 
     3 gün kuralı 'bugun' gününe göre çalışır (CLI --tarih). 2.3.3 adımları gerçek saate göre çalışır:
     simdi: sunucu yerel saatini (db.simdi() ile aynı saat) naive datetime olarak döndüren çağrılabilir (test için);
     yerel_tz: sunucu saatinin dilimi (None = işletim sisteminin yerel dilimi); tz: İstanbul dilimi (None = Europe/Istanbul);
-    gun_sonu_zorla: GUN_SONU_SAAT beklenmeden bugünün gün sonu özetini üret (yine günde bir)."""
+    gun_sonu_zorla: GUN_SONU_SAAT beklenmeden bugünün gün sonu özetini üret (yine günde bir).
+    bekleyen_ozet_zorla (2.3.8): içinde bulunulan dilimin bekleyen özetini pencere dışında da hemen üret (yine dilim başına bir)."""
     a = ayarlar(ayar)
     rapor = _uc_gun_adimi(conn, a, bugun)
     an = (simdi or datetime.now)()
     rapor['saat'] = _saat_adimi(conn, a, an)
     rapor['gun_sonu'] = _gun_sonu_adimi(conn, a, an, yerel_tz, tz, gun_sonu_zorla)
+    rapor['bekleyen_ozet'] = _bekleyen_ozet_adimi(conn, a, an, yerel_tz, tz, bekleyen_ozet_zorla)
     return rapor
 
 
@@ -375,8 +427,11 @@ def _gun_sonu_adimi(conn, a, an, yerel_tz=None, tz=None, zorla=False):
             "SELECT proje,COUNT(*) n FROM kayitlar WHERE kt=1 AND silindi=0 AND datetime(NULLIF(kt_zaman,'')) >= ? "
             "AND datetime(NULLIF(kt_zaman,'')) < ? GROUP BY proje", (bas_s, bit_s))}
         uzun = {}
-        if a['saat'] > 0:
-            sinir_s = (an - timedelta(hours=a['saat'])).strftime('%Y-%m-%d %H:%M:%S')
+        # 2.3.8: kayıt başına 2 saat bildirimi varsayılan kapalı; "N saatten uzun bekleyen" parçası o zaman bekleyen özeti
+        # aralığıyla (varsayılan 2) yazılır, gün sonu metni değişmesin. İkisi de kapalıysa parça yok.
+        uzun_saat = a['saat'] if a['saat'] > 0 else a.get('ozet_saat', 0)
+        if uzun_saat > 0:
+            sinir_s = (an - timedelta(hours=uzun_saat)).strftime('%Y-%m-%d %H:%M:%S')
             uzun = {r['proje']: r['n'] for r in conn.execute(
                 'SELECT proje,COUNT(*) n FROM kayitlar WHERE kt=0 AND silindi=0 AND ' + BASLANGIC_SQL + ' <= ? GROUP BY proje', (sinir_s,))}
         en_eski = {}
@@ -405,13 +460,147 @@ def _gun_sonu_adimi(conn, a, an, yerel_tz=None, tz=None, zorla=False):
             kt_li = [x for x in dagilim if yetki.izin(yk, x[0], 'kt')]
             proje = (kt_li or dagilim)[0][0]
             metin = gun_sonu_metni(gun, toplam, dagilim, sum(eklenen.get(p, 0) for p in gorur),
-                                   sum(onaylanan.get(p, 0) for p in gorur), sum(uzun.get(p, 0) for p in gorur), a['saat'])
+                                   sum(onaylanan.get(p, 0) for p in gorur), sum(uzun.get(p, 0) for p in gorur), uzun_saat)
             rapor['bildirim'] += _ekle(conn, ad, en_eski_kayit(proje), proje, olay, metin, en_cok=500, zaman=an_s)
         if rapor['bildirim']:
             rapor['durum'] = 'gönderildi'
             db.denetim_yaz(conn, KIM, 'hatirlatma_uret', yeni={'gun_sonu': rapor['bildirim']}, hedef_turu='bildirim', hedef_id=olay)
         else:
             rapor['durum'] = 'bugün zaten gönderildi' if gonderilmis else 'bekleyen kayıt yok'
+    return rapor
+
+
+# =============================================================== 2.3.8 — Bekleyen özeti (İstanbul saati, dilim başına bir)
+def _dk_metni(dk):
+    return '%02d:%02d' % (dk // 60, dk % 60)
+
+
+def pencere_metni(pencere):
+    bas, bit = pencere
+    return 'bütün gün' if (bas, bit) == (0, 24 * 60) else '%s-%s' % (_dk_metni(bas), _dk_metni(bit))
+
+
+def ozet_dilimleri(pencere, saat):
+    """Pencere içindeki gönderim saatleri (gece yarısından dakika): başlangıç + k × aralık, bitiş dâhil (24:00 hariç)."""
+    bas, bit = pencere
+    if saat <= 0:
+        return []
+    adim = saat * 60
+    return [d for d in range(bas, bit + 1, adim) if d < 24 * 60]
+
+
+def ozet_dilimi(ist, pencere, saat, zorla=False):
+    """İstanbul saati 'ist' için içinde bulunulan dilim (gece yarısından dakika) ya da None (pencere dışı).
+    Dilim, pencere başından itibaren aralık ızgarasında 'ist'ten önceki son noktadır; bir sonraki dilime kadar geçerlidir.
+    Pencere bitişinden OZET_GEC_KALMA_DK sonrasına kalan gönderim yapılmaz. zorla=True: pencere dışında da ızgaradaki son nokta."""
+    bas, bit = pencere
+    adim = saat * 60
+    dk = ist.hour * 60 + ist.minute
+    k = (dk - bas) // adim
+    dilim = max(0, bas + k * adim)
+    if zorla:
+        return dilim
+    if k < 0 or dilim > bit or dilim >= 24 * 60:
+        return None
+    if dk > bit and dk >= bit + OZET_GEC_KALMA_DK:
+        return None
+    return dilim
+
+
+def bekleyen_ozet_metni(toplam, dagilim, en_eski_sn, yeni, saat, en_cok_proje=8):
+    parcalar = ['%s %d' % (p, n) for p, n in dagilim[:en_cok_proje]]
+    if len(dagilim) > en_cok_proje:
+        parcalar.append('diğer %d proje %d' % (len(dagilim) - en_cok_proje, sum(n for _, n in dagilim[en_cok_proje:])))
+    metin = 'Onay bekleyen %d kayıt var (%s)' % (toplam, ', '.join(parcalar))
+    if en_eski_sn is not None:
+        if en_eski_sn < 3600:
+            metin += '; en eskisi 1 saatten kısa süredir bekliyor'
+        else:
+            metin += '; en eskisi %s bekliyor' % _yas_metni(en_eski_sn)
+    metin += '.'
+    if yeni:
+        metin += ' Son %d saatte %d yeni kayıt geldi.' % (saat, yeni)
+    return metin
+
+
+def _ozet_alicilari(conn, a):
+    """Onay (kt) yetkisi olan aktif kullanıcılar; yöneticiler (süperadmin) BEKLEYEN_OZET_YONETICI=1 iken (tüm projeler)."""
+    sonuc = []
+    for ad, yk in _kullanicilar(conn):
+        if yk.get('admin'):
+            if a['ozet_yonetici']:
+                sonuc.append((ad, yk))
+        elif any(yetki.izin(yk, p, 'kt') for p in yk.get('projeler', {})):
+            sonuc.append((ad, yk))
+    return sonuc
+
+
+def _bekleyen_ozet_adimi(conn, a, an, yerel_tz=None, tz=None, zorla=False):
+    saat = a.get('ozet_saat', 0)
+    pencere = a.get('ozet_pencere') or (8 * 60, 20 * 60)
+    rapor = dict(aralik_saat=saat, pencere=pencere_metni(pencere), dilim=None, bildirim=0, bos=0, eskiyen=0, durum='')
+    if saat <= 0:
+        rapor['durum'] = 'kapalı'
+        return rapor
+    if tz is None:
+        tz = istanbul_tz()
+    ist, _, _ = istanbul_gunu(an, yerel_tz, tz)
+    rapor['istanbul_saati'] = ist.strftime('%H:%M')
+    dilim = ozet_dilimi(ist, pencere, saat, zorla)
+    if dilim is None:
+        rapor['durum'] = 'pencere dışı'
+        return rapor
+    dilim_s = '%s %s' % (ist.date().isoformat(), _dk_metni(dilim))
+    rapor['dilim'] = dilim_s
+    olay = OZET_ONEK + dilim_s
+    an_s = an.strftime('%Y-%m-%d %H:%M:%S')
+    yeni_sinir = (an - timedelta(hours=saat)).strftime('%Y-%m-%d %H:%M:%S')
+    with db.transaction(conn):
+        gonderilmis = {r['kullanici_adi'] for r in conn.execute('SELECT kullanici_adi FROM mesaj_bildirimleri WHERE olay=?', (olay,))}
+        alicilar = [(ad, yk) for ad, yk in _ozet_alicilari(conn, a) if ad not in gonderilmis]
+        if not alicilar:
+            rapor['durum'] = 'bu dilim zaten gönderildi' if gonderilmis else 'alıcı yok'
+            return rapor
+        bekleyen, en_eski = {}, {}
+        for r in conn.execute('SELECT id,proje,' + BASLANGIC_SQL + ' bas FROM kayitlar WHERE kt=0 AND silindi=0 ORDER BY '
+                              + BASLANGIC_SQL + ' IS NULL,' + BASLANGIC_SQL + ',id'):
+            bekleyen[r['proje']] = bekleyen.get(r['proje'], 0) + 1
+            en_eski.setdefault(r['proje'], (r['id'], r['bas']))
+        yeni = {r['proje']: r['n'] for r in conn.execute(
+            'SELECT proje,COUNT(*) n FROM kayitlar WHERE silindi=0 AND ' + EKLENME_SQL + ' > ? AND ' + EKLENME_SQL + ' <= ? GROUP BY proje',
+            (yeni_sinir, an_s))}
+
+        def eskileri_kapat(ad):
+            # Zilde yalnız son özet kalsın: kullanıcının bu dilimden önceki okunmamış özetleri okundu sayılır.
+            return conn.execute("UPDATE mesaj_bildirimleri SET okundu=1 WHERE kullanici_adi=? AND okundu=0 AND tur='hatirlatma' "
+                                'AND olay LIKE ? AND olay<>?', (ad, OZET_ONEK + '%', olay)).rowcount
+
+        for ad, yk in alicilar:
+            # Kapsam: onay yetkisi olan projeler (yönetici: hepsi). Onay yetkisi olmayan projenin onaysız kaydı sayılmaz;
+            # ONAYSIZ_GORUNUM=gizle de bu kişiye yalnız bu projelerin onaysız kayıtlarını gösterdiği için ayrıca süzgeç gerekmez.
+            kapsam = [p for p in bekleyen if yetki.izin(yk, p, 'kt')]
+            dagilim = sorted(((p, bekleyen[p]) for p in kapsam), key=lambda x: (-x[1], x[0]))
+            toplam = sum(n for _, n in dagilim)
+            if not toplam:
+                rapor['bos'] += 1
+                rapor['eskiyen'] += eskileri_kapat(ad)
+                continue
+            proje = dagilim[0][0]
+            kayit_id = en_eski[proje][0]  # satır bir kayda bağlı olmak zorunda: en kalabalık projenin en eski bekleyeni
+            baslar = [en_eski[p][1] for p in kapsam if en_eski[p][1]]
+            en_eski_sn = None
+            if baslar:
+                en_eski_sn = max(0, (an - datetime.strptime(min(baslar), '%Y-%m-%d %H:%M:%S')).total_seconds())
+            metin = bekleyen_ozet_metni(toplam, dagilim, en_eski_sn, sum(yeni.get(p, 0) for p in kapsam), saat)
+            eklendi = _ekle(conn, ad, kayit_id, proje, olay, metin, en_cok=500, zaman=an_s)
+            if eklendi:
+                rapor['bildirim'] += 1
+                rapor['eskiyen'] += eskileri_kapat(ad)
+        if rapor['bildirim']:
+            rapor['durum'] = 'gönderildi'
+            db.denetim_yaz(conn, KIM, 'hatirlatma_uret', yeni={'bekleyen_ozet': rapor['bildirim']}, hedef_turu='bildirim', hedef_id=olay)
+        else:
+            rapor['durum'] = 'bu dilim zaten gönderildi' if gonderilmis else 'bekleyen kayıt yok'
     return rapor
 
 
@@ -432,4 +621,14 @@ def rapor_metni(rapor):
             g.get('istanbul_saati'), g.get('saat')))
     else:
         satirlar.append('Gün sonu özeti (%s): %d alıcıya gönderildi; durum: %s.' % (g.get('tarih'), g.get('bildirim', 0), durum))
+    b = rapor.get('bekleyen_ozet') or {}
+    durum = b.get('durum') or ''
+    if durum == 'kapalı':
+        satirlar.append('Bekleyen özeti: kapalı (BEKLEYEN_OZET_SAAT=0).')
+    elif durum == 'pencere dışı':
+        satirlar.append('Bekleyen özeti: pencere dışında (İstanbul saati %s, pencere %s, %d saatte bir). Hemen denemek için --bekleyen-ozet-zorla.' % (
+            b.get('istanbul_saati'), b.get('pencere'), b.get('aralik_saat', 0)))
+    elif b:
+        satirlar.append('Bekleyen özeti (%s): %d alıcıya gönderildi, %d önceki özet okundu sayıldı, %d alıcının bekleyeni yok; durum: %s.' % (
+            b.get('dilim'), b.get('bildirim', 0), b.get('eskiyen', 0), b.get('bos', 0), durum))
     return '\n'.join(satirlar)
