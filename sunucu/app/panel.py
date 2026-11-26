@@ -2731,7 +2731,7 @@ def kategori_temizligi():
 # 2.4.0 (B2): Sistem durumu, Yedekler ve Çalışma ayarları (/yonetim/...); ayrıntı app/isletim.py
 from . import isletim as _isletim
 import sys as _sys
-_isletim.kaydet(app,_sys.modules[__name__])  # __main__ olarak çalışırken de panel modülü isletim'e tanıtılır
+_isletim.kaydet(app,_sys.modules.get(__name__) or _sys.modules.get('app.panel'))  # __main__ olarak çalışırken de panel modülü isletim'e tanıtılır
 
 if __name__=='__main__':
     calistir()

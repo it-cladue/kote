@@ -602,7 +602,7 @@ def test_panel_main_olarak_calisinca_isletim_kaydi_calisir(monkeypatch):
     from app import isletim
     eski = sys.modules.pop('app.panel', None); eski_panel = isletim._PANEL
     try:
-        ad = runpy.run_module('app.panel', run_name='kanit_prova_main')  # calistir() çağrılmaz (ad __main__ değil)
+        ad = runpy.run_module('app.panel', run_name='kanit_prova_main', alter_sys=True)  # 'python -m' gibi: sys.modules[run_name] kurulur; calistir() çağrılmaz
         assert 'app' in ad and isletim._PANEL is not None and isletim._PANEL.ISLEM_ADLARI['ayar_degistir']
     finally:
         if eski is not None: sys.modules['app.panel'] = eski
