@@ -446,13 +446,22 @@ def cihaz_ekle(conn, ad, gun, ip=None, ua=None):
     return belirtec
 
 
+def _bitis_sql(gun):
+    """Cihazın etkin bitişi: kayıttaki bitiş ile (oluşturma + geçerli gün) değerlerinin küçüğü. Böylece sahip süreyi
+    sonradan kısaltırsa (ör. 30 → 7 gün) önceden güvenilen cihazlar da yeni süreye uyar; uzatma eski kayıtları uzatmaz."""
+    return "MIN(bitis,COALESCE(datetime(olusturma,'+%d days'),bitis))" % int(gun)
+
+
 def cihaz_gecerli(conn, ad, belirtec, ip=None):
     """Çerezdeki belirteç bu hesap için geçerli ve süresi dolmamış mı? Geçerliyse son kullanım/IP güncellenir.
-    Panelde güven süresi 0'a çekildiyse (özellik kapalı) hiçbir cihaz kodu atlatamaz."""
-    if not belirtec or not isinstance(belirtec, str) or len(belirtec) > 100 or guven_gun(conn) <= 0:
+    Panelde güven süresi 0'a çekildiyse (özellik kapalı) hiçbir cihaz kodu atlatamaz; süre kısaltıldıysa eski cihazlar
+    da yeni süreye göre değerlendirilir (_bitis_sql)."""
+    gun = guven_gun(conn)
+    if not belirtec or not isinstance(belirtec, str) or len(belirtec) > 100 or gun <= 0:
         return False
     with db.transaction(conn):
-        row = conn.execute('SELECT id,bitis FROM iki_adim_cihazlar WHERE kullanici_adi=? AND ozet=?', (ad, _ozet(belirtec))).fetchone()
+        row = conn.execute('SELECT id,%s AS bitis FROM iki_adim_cihazlar WHERE kullanici_adi=? AND ozet=?' % _bitis_sql(gun),
+                           (ad, _ozet(belirtec))).fetchone()
         if not row:
             return False
         if row['bitis'] <= db.simdi():
@@ -463,8 +472,11 @@ def cihaz_gecerli(conn, ad, belirtec, ip=None):
 
 
 def cihazlar(conn, ad):
-    return [dict(r) for r in conn.execute('SELECT id,olusturma,bitis,son_kullanim,son_ip,tarayici FROM iki_adim_cihazlar '
-                                          'WHERE kullanici_adi=? AND bitis>? ORDER BY id DESC', (ad, db.simdi()))]
+    """Geçerli güvenilen cihazlar; bitiş, güven süresi sonradan kısaltıldıysa oluşturma + geçerli gün olarak gösterilir."""
+    gun = guven_gun(conn)
+    bitis = _bitis_sql(gun) if gun > 0 else 'bitis'
+    return [dict(r) for r in conn.execute('SELECT id,olusturma,%s AS bitis,son_kullanim,son_ip,tarayici FROM iki_adim_cihazlar '
+                                          'WHERE kullanici_adi=? AND %s>? ORDER BY id DESC' % (bitis, bitis), (ad, db.simdi()))]
 
 
 def cihaz_kaldir(conn, ad, cihaz_id, kim=None, ip=None):

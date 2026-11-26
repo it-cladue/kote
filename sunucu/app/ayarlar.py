@@ -97,6 +97,7 @@ KAYIT = [
     Ayar('IKI_ADIM_GUVEN_GUN', 'Güvenlik', '"Bu cihazda sorma" süresi (gün)',
          'Kod adımında "Bu cihazda N gün sorma" kutusu işaretlenirse o tarayıcı bu kadar gün kod istemez (parola her zaman istenir). '
          'Parola, rol değişikliği, iki adımlı doğrulamanın kapatılması ya da sıfırlanması bütün güvenilen cihazları iptal eder. '
+         'Süreyi kısaltırsanız önceden güvenilen cihazlar da yeni süreye uyar (oluşturma tarihinden sayılır). '
          '0 = özellik kapalı (her girişte kod istenir; mevcut güvenilen cihazlar da kullanılamaz).',
          'tam', '30', 0, 365, okuyan='Giriş (kod adımı)', sifir='0 = kapalı'),
 ]

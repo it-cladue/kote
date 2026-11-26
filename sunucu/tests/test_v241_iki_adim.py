@@ -478,6 +478,26 @@ def test_guvenilen_cihaz_cerezi_ve_iptalleri(web, saat):
     con.close()
     cikis(c)
     assert parola_adimi(c).headers['Location'].endswith('/giris/dogrulama')
+    assert not satirlar(a, 'SELECT * FROM iki_adim_cihazlar')
+    # Süre sonradan kısaltılınca önceden güvenilen cihazlar da yeni süreye uyar: 30 günlük cihaz 10 gün önce oluşturulmuş sayılır
+    ayar(a, 'IKI_ADIM_GUVEN_GUN', '30')
+    kod_adimi(c, saat(sir), guven=True); cikis(c)
+    con = baglanti(a)
+    with db.transaction(con):
+        con.execute("UPDATE iki_adim_cihazlar SET olusturma=datetime('now','localtime','-10 days')")
+    assert len(iki_adim.cihazlar(con, 'testadmin')) == 1 and iki_adim.cihazlar(con, 'testadmin')[0]['bitis'] > db.simdi()
+    con.close()
+    r = parola_adimi(c)                                      # 30 gün: cihaz hâlâ geçerli, kod sorulmaz
+    assert not r.headers['Location'].endswith('/giris/dogrulama') and oturum_var(c)
+    cikis(c)
+    ayar(a, 'IKI_ADIM_GUVEN_GUN', '7')                       # 7 gün: 10 günlük cihaz listede görünmez ve kodu atlatamaz
+    con = baglanti(a)
+    assert iki_adim.cihazlar(con, 'testadmin') == []
+    con.close()
+    assert parola_adimi(c).headers['Location'].endswith('/giris/dogrulama') and not oturum_var(c)
+    assert not satirlar(a, 'SELECT * FROM iki_adim_cihazlar')  # süresi dolan kayıt silindi
+    ayar(a, 'IKI_ADIM_GUVEN_GUN', '30')                      # uzatma geçmiş kaydı geri getirmez
+    assert parola_adimi(c).headers['Location'].endswith('/giris/dogrulama')
 
 
 # ================================================================ kapatma

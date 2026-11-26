@@ -93,7 +93,9 @@ Her işlem İşlem Geçmişi'ne yazılır: `2fa_ac` (açtı / yeniden kurdu), `2
 ### Güvenilen cihaz süresi
 
 Çalışma ayarları → Güvenlik → **"Bu cihazda sorma" süresi (gün)** (`IKI_ADIM_GUVEN_GUN`, varsayılan 30, 0–365). **0** özelliği
-kapatır: kutu girişte görünmez ve daha önce güvenilen cihazlar da kodu atlatamaz. Şifre değişikliği, rol değişikliği, hesabın
+kapatır: kutu girişte görünmez ve daha önce güvenilen cihazlar da kodu atlatamaz. Süreyi **kısaltırsanız** (ör. 30 → 7)
+önceden güvenilen cihazlar da yeni süreye uyar: cihazın oluşturma tarihinden 7 gün geçmişse bir sonraki girişte kod istenir
+(uzatma eski cihazları uzatmaz). Şifre değişikliği, rol değişikliği, hesabın
 pasife alınması, iki adımlı doğrulamanın kapatılması ya da sıfırlanması kişinin bütün güvenilen cihazlarını iptal eder.
 
 ### Acil durum (sunucudan)
