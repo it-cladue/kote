@@ -424,7 +424,7 @@ window.Panel = (function () {
   function bildirimPopup(api){
     var kutu=document.getElementById('bildirim-popuplar'),hp=document.getElementById('hatirlatma-popup');
     var EN_COK=4,SURE=15000,sonListe=[],bekleyenKartlar=[],hpBekliyor=null,hpOnceki=null,izinGosterildi=false;
-    var ertKey='kanit-hatirlatma-sonra:'+(window.PANEL_KULLANICI||'');
+    var ertKey='kanit-hatirlatma-sonra:'+(window.PANEL_KULLANICI||''),gosKey='kp.hpGosterildi.'+(window.PANEL_KULLANICI||'');
     var TUR=api.turAdlari;
     function renk(n){return (window.PROJE_RENKLERI||{})[n.proje]||'#64748b';}
     function rozet(n){var c=renk(n);return '<span class="rozet" style="background:'+esc(c)+';color:'+yaziRengi(c)+'">'+esc(n.proje||'—')+'</span>';}
@@ -484,9 +484,17 @@ window.Panel = (function () {
     var hpListe=hp&&hp.querySelector('#hp-liste'),hpPencere=hp&&hp.querySelector('.hp-pencere');
     function hpAcik(){return !!hp&&!hp.classList.contains('gizli');}
     function hatirlatmalar(){return sonListe.filter(function(n){return hatirlatmaMi(n)&&!n.okundu;});}
-    function ertelemeOku(){try{var d=JSON.parse(localStorage.getItem(ertKey)||'null');return d&&d.gun===bugunTarih()?d:null;}catch(_){return null;}}
-    /* "Daha sonra": aynı gün, o an listelenen hatırlatmalar için pencere yeniden açılmaz; yeni hatırlatma gelirse açılır. */
-    function ertelenmis(liste){var d=ertelemeOku();if(!d)return false;var b={};(d.anahtarlar||[]).forEach(function(x){b[x]=1;});return liste.every(function(n){return b[bildirimAnahtari(n)];});}
+    function gunlukOku(k){try{var d=JSON.parse(localStorage.getItem(k)||'null');return d&&d.gun===bugunTarih()?d:null;}catch(_){return null;}}
+    /* 2.3.4: "Daha sonra" = bugün pencere bir daha kendiliğinden açılmaz (yeni hatırlatmalar kart, ses ve zil olarak gelir). */
+    function ertelenmis(){return !!gunlukOku(ertKey);}
+    /* 2.3.4: pencere her hatırlatma için günde en çok bir kez kendiliğinden açılır. Gösterilen anahtarlar kullanıcı ve gün
+       başına localStorage'da tutulur; Kapat/Esc/Aç/okundu sonrası başka sayfaya geçince pencere yeniden açılmaz. Ertesi gün sıfırlanır. */
+    function gosterilenler(){var d=gunlukOku(gosKey),b={};((d&&d.anahtarlar)||[]).forEach(function(x){b[x]=1;});return b;}
+    function yeniHatirlatmaVar(){var b=gosterilenler();return hatirlatmalar().some(function(n){return !b[bildirimAnahtari(n)];});}
+    function gosterildiIsaretle(liste){var b=gosterilenler(),a=Object.keys(b);liste.forEach(function(n){var k=bildirimAnahtari(n);if(k&&!b[k]){b[k]=1;a.push(k);}});try{localStorage.setItem(gosKey,JSON.stringify({gun:bugunTarih(),anahtarlar:a.slice(-500)}));}catch(_){}}
+    /* 2.3.4: zil listesinin başlığındaki "Hatırlatmalar (N)" düğmesi pencereyi her zaman elle açar. */
+    var hpDugme=document.getElementById('bildirim-hp-ac');
+    function hpDugmeGuncelle(){if(!hpDugme)return;var n=hatirlatmalar().length;hpDugme.classList.toggle('gizli',!n||!hp);hpDugme.textContent='Hatırlatmalar ('+n+')';}
     var hpImza=null;
     function hpCiz(){
       var liste=hatirlatmalar(),imza=liste.map(bildirimAnahtari).join(',');
@@ -501,16 +509,19 @@ window.Panel = (function () {
     }
     function hpKapat(ertele){
       if(!hpAcik())return;
-      if(ertele){try{localStorage.setItem(ertKey,JSON.stringify({gun:bugunTarih(),anahtarlar:hatirlatmalar().map(bildirimAnahtari)}));}catch(_){}}
+      if(ertele){try{localStorage.setItem(ertKey,JSON.stringify({gun:bugunTarih(),hepsi:true}));}catch(_){}}
       hp.classList.add('gizli');hp.setAttribute('aria-hidden','true');document.body.classList.remove('hatirlatma-acik');
       var geri=hpOnceki;hpOnceki=null;if(geri&&geri.focus&&geri!==document.body&&document.contains(geri))geri.focus();
     }
-    function hpAc(sesli){
+    /* elle=true: kullanıcı zil başlığındaki düğmeyle açtı; "Daha sonra" ve "gösterildi" kaydı yok sayılır, erteleme yapılmaz. */
+    function hpAc(sesli,elle){
       if(!hp)return;
       if(!hatirlatmalar().length){hpBekliyor=null;return;}
-      /* Kayıt penceresi/görsel büyütme açıkken, kullanıcı bir alana yazarken ya da sekme arka plandayken ertelenir. */
-      if(acikPencereVar()||yaziyor(document.activeElement)||document.hidden){hpBekliyor={sesli:(hpBekliyor&&hpBekliyor.sesli)||!!sesli};return;}
-      hpBekliyor=null;hpCiz();
+      if(!elle&&!hpAcik()&&(ertelenmis()||!yeniHatirlatmaVar())){hpBekliyor=null;return;}
+      /* Kayıt penceresi/görsel büyütme açıkken, kullanıcı bir alana yazarken ya da sekme arka plandayken ertelenir
+         (ertelenen ve henüz gösterilmeyen pencere "gösterildi" sayılmaz). */
+      if(!elle&&(acikPencereVar()||yaziyor(document.activeElement)||document.hidden)){hpBekliyor={sesli:(hpBekliyor&&hpBekliyor.sesli)||!!sesli};return;}
+      hpBekliyor=null;var liste=hpCiz();gosterildiIsaretle(liste);
       if(!hpAcik()){hpOnceki=document.activeElement;hp.classList.remove('gizli');hp.setAttribute('aria-hidden','false');document.body.classList.add('hatirlatma-acik');var ilk=hp.querySelector('[data-hp-ac]')||hp.querySelector('button');if(ilk)ilk.focus();}
       if(sesli)sesCal(true);
     }
@@ -522,7 +533,7 @@ window.Panel = (function () {
         if(t.closest('[data-hp-sonra]')){hpKapat(true);return;}
         if(t.closest('[data-hp-kapat]')){hpKapat(false);return;}
         var o=t.closest('[data-hp-okundu]');if(o){var ids=hatirlatmalar().map(bildirimAnahtari);if(!ids.length){hpKapat(false);return;}o.disabled=true;
-          postBildirim({ids:ids},{id:ids[0]}).then(function(){var b={};ids.forEach(function(x){b[x]=1;});sonListe=sonListe.filter(function(n){return !b[bildirimAnahtari(n)];});kartTemizle(sonListe);hpKapat(false);toast(ids.length+' hatırlatma okundu sayıldı.');api.poll(true);}).catch(function(err){toast(err.message,true);}).then(function(){o.disabled=false;});return;}
+          postBildirim({ids:ids},{id:ids[0]}).then(function(){var b={};ids.forEach(function(x){b[x]=1;});sonListe=sonListe.filter(function(n){return !b[bildirimAnahtari(n)];});kartTemizle(sonListe);hpDugmeGuncelle();hpKapat(false);toast(ids.length+' hatırlatma okundu sayıldı.');api.poll(true);}).catch(function(err){toast(err.message,true);}).then(function(){o.disabled=false;});return;}
         if(t===hp)hpKapat(false);
       });
       /* Odak tuzağı: Tab pencere içinde döner, Esc kapatır; tuşlar alttaki sayfa kısayollarına ulaşmaz. */
@@ -532,6 +543,7 @@ window.Panel = (function () {
         e.stopPropagation();
       });
       /* Kayıt penceresi ya da görsel büyütme kapanınca bekleyen hatırlatma penceresi açılır. */
+      if(hpDugme)hpDugme.addEventListener('click',function(){api.openBox(false);var z=document.getElementById('zil');if(z)z.focus();hpAc(false,true);});
       if(window.MutationObserver)['modal','lightbox'].forEach(function(id){var el=document.getElementById(id);if(el)new MutationObserver(function(){if(hpBekliyor&&!acikPencereVar())setTimeout(bekleyeniDene,150);}).observe(el,{attributes:true,attributeFilter:['class']});});
     }
 
@@ -555,9 +567,11 @@ window.Panel = (function () {
         if(document.hidden)bekleyenKartlar=bekleyenKartlar.concat(yeniler);else kartGoster(yeniler);
         if(hatYeni)hpAc(false);
       }
-      if(ilk){var h=hatirlatmalar();if(h.length&&!ertelenmis(h))hpAc(true);}
-      else if(hpAcik()){if(!hpCiz().length)hpKapat(false);}
+      /* Sayfa ilk yüklenişte: yalnız bugün henüz gösterilmemiş bir hatırlatma varsa (ve "Daha sonra" denmediyse) açılır. */
+      if(ilk)hpAc(true);
+      else if(hpAcik()){var acik=hpCiz();if(!acik.length)hpKapat(false);else gosterildiIsaretle(acik);}
       else bekleyeniDene();
+      hpDugmeGuncelle();
     }
     /* Arka planda biriken kartlar sekme öne gelince gösterilir (düşürülmez; bu arada okunanlar atlanır). */
     function gorunur(){if(bekleyenKartlar.length){var b={};sonListe.forEach(function(n){b[bildirimAnahtari(n)]=1;});var liste=bekleyenKartlar.filter(function(n){return b[bildirimAnahtari(n)];});bekleyenKartlar=[];kartGoster(liste);}bekleyeniDene();}

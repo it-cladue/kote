@@ -42,7 +42,7 @@ def test_base_sablonu_kapsayicilar_ve_ses_anahtari(web):
     html = c.get('/').get_data(as_text=True)
     for parca in ('id="bildirim-popuplar"', 'aria-live="polite"', 'id="hatirlatma-popup"', 'role="dialog" aria-modal="true" aria-labelledby="hp-baslik"',
                   'Bekleyen kontroller hatırlatması', 'data-hp-sonra', 'Daha sonra', 'data-hp-okundu', 'data-hp-kapat', 'id="bildirim-ses"',
-                  'role="switch"', '> Ses</label>', 'id="bildirim-izin-btn"', 'Masaüstü bildirimlerini aç', 'okundu=0&amp;tur=hatirlatma'):
+                  'role="switch"', '> Ses</label>', 'id="bildirim-hp-ac"', 'id="bildirim-izin-btn"', 'Masaüstü bildirimlerini aç', 'okundu=0&amp;tur=hatirlatma'):
         assert parca in html, parca
     # Pop-up kapsayıcısı açılır listeden sonra gelir (CSS kardeş seçicisi buna dayanır); liste artık ayrıca canlı bölge değil.
     assert html.index('id="bildirim-kutu"') < html.index('id="bildirim-popuplar"')
@@ -65,7 +65,7 @@ def test_panel_js_sozdizimi_ve_tost_kullanmaz():
     blok = _blok()
     assert 'toast(' not in blok.replace("toast(ids.length+' hatırlatma okundu sayıldı.')", '').replace('toast(err.message,true)', '')
     for parca in ('AudioContext', 'webkitAudioContext', "state!=='running'", '.resume()', "'pointerdown','keydown','touchstart'",
-                  "localStorage.getItem(SES_ANAHTAR)!=='0'", 'EN_COK=4', 'SURE=15000', 'kanit-hatirlatma-sonra:', 'bugunTarih()',
+                  "localStorage.getItem(SES_ANAHTAR)!=='0'", 'EN_COK=4', 'SURE=15000', 'kanit-hatirlatma-sonra:', 'kp.hpGosterildi.', 'hpAc(false,true)', 'bugunTarih()',
                   'acikPencereVar()', 'yaziyor(document.activeElement)', 'bn.onclick', 'window.focus()', 'MutationObserver',
                   "' yeni bildirim'", "' hatırlatma'", 'Bildirimleri aç', 'Tümünü gör', '/bildirimler?okundu=0', 'data-bp-ac', 'data-bp-okundu'):
         assert parca in blok, parca

@@ -55,7 +55,7 @@
   <button type="button" class="menu-dugme" data-menu-dugme aria-expanded="false" aria-controls="ana-menu" aria-label="Menüyü aç"><span></span><span></span><span></span></button>
 </header>
 <div id="bildirim-kutu" class="bildirim-kutu gizli" role="dialog" aria-label="Son bildirimler">
-  <div class="bildirim-baslik"><b>Bildirimler <span id="bildirim-kutu-sayi" class="kucukyazi"></span></b><span class="bildirim-ayar"><span id="bildirim-izin" class="gizli"><button type="button" class="btn kucuk" id="bildirim-izin-btn">Masaüstü bildirimlerini aç</button></span><label class="ses-anahtar" for="bildirim-ses" title="Yeni bildirimde kısa ses çal (bu tarayıcı için)"><input type="checkbox" id="bildirim-ses" role="switch" checked> Ses</label></span></div>
+  <div class="bildirim-baslik"><b>Bildirimler <span id="bildirim-kutu-sayi" class="kucukyazi"></span></b><span class="bildirim-ayar"><button type="button" class="btn kucuk gizli" id="bildirim-hp-ac" title="Bekleyen kontroller hatırlatması penceresini aç">Hatırlatmalar (0)</button><span id="bildirim-izin" class="gizli"><button type="button" class="btn kucuk" id="bildirim-izin-btn">Masaüstü bildirimlerini aç</button></span><label class="ses-anahtar" for="bildirim-ses" title="Yeni bildirimde kısa ses çal (bu tarayıcı için)"><input type="checkbox" id="bildirim-ses" role="switch" checked> Ses</label></span></div>
   <ul id="bildirim-liste"><li class="bos">Yükleniyor…</li></ul>
   <div class="bildirim-alt"><a href="{{ url_for('bildirim_sayfasi') }}" class="btn kucuk hayalet">Tüm bildirimler</a><button type="button" class="btn kucuk" id="bildirim-temizle">Tümünü okundu say</button></div>
 </div>
@@ -79,7 +79,7 @@
     <div class="hp-ust"><div><h2 id="hp-baslik">Bekleyen kontroller hatırlatması</h2><span id="hp-sayi" class="kucukyazi"></span></div><button type="button" class="btn kucuk hayalet" data-hp-kapat>Kapat</button></div>
     <p id="hp-aciklama" class="hp-aciklama">Aşağıdaki kayıtların kontrolü bekliyor. Kayda gitmek için “Aç”a basın.</p>
     <ul id="hp-liste" class="hp-liste"></ul>
-    <div class="hp-alt"><a class="btn kucuk hayalet" href="{{ url_for('bildirim_sayfasi', okundu='0', tur='hatirlatma') }}">Tüm hatırlatmalar</a><span class="hp-alt-sag"><button type="button" class="btn kucuk" data-hp-sonra title="Bugün bu hatırlatmalar için pencere yeniden açılmaz">Daha sonra</button><button type="button" class="btn kucuk birincil" data-hp-okundu>Tümünü okundu say</button></span></div>
+    <div class="hp-alt"><a class="btn kucuk hayalet" href="{{ url_for('bildirim_sayfasi', okundu='0', tur='hatirlatma') }}">Tüm hatırlatmalar</a><span class="hp-alt-sag"><button type="button" class="btn kucuk" data-hp-sonra title="Bugün pencere bir daha kendiliğinden açılmaz; yeni hatırlatmalar kart ve zil olarak gelir">Daha sonra</button><button type="button" class="btn kucuk birincil" data-hp-okundu>Tümünü okundu say</button></span></div>
   </div>
 </div>
 <div id="degisiklik-serit" class="degisiklik-serit gizli" role="status">Yeni kayıt veya değişiklik var. <button type="button" class="serit-dugme" id="degisiklik-yenile">Sonuçları yenile</button></div>

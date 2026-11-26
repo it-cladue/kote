@@ -47,6 +47,18 @@ Düzeltme: Kayıtlar ve API'deki **başlangıç tarihi** süzgeci artık saatsiz
 
 İnceleme düzeltmeleri (baskı, telefon, klavye): yazdırılan / PDF raporda sütun başlıkları (Personel, Toplam, Onaylı, Bekleyen, kategori adları) her sayfada yazılı tekrarlanır (önceden 3. sayfadan itibaren yalnız renkli noktalar çıkıyordu); tablo kartı sayfalara bölünür, ilk sayfa boş kalmaz, satır ortadan bölünmez, toplam satırı yalnız sonda bir kez basılır; kâğıtta personel adları kısaltılmaz, gerekirse alt satıra sarılır. 480 px'ten dar telefonda "İlk 3" kartları alt alta dizilir ve adlar tam görünür. Dönem / Grupla / Sütun düğmelerinde ok tuşları her basışta sayfayı yenilemez: seçim Enter / Boşluk ile, gruptan çıkınca ya da son ok tuşundan yaklaşık 0,6 saniye sonra uygulanır; fare ve dokunmayla seçim eskisi gibi hemen uygulanır.
 
+## Hatırlatma penceresi artık her sayfada açılmaz
+
+Önceden "Bekleyen kontroller hatırlatması" penceresi **Kapat** ya da Esc ile kapatılsa bile her sayfa geçişinde (Kayıtlar → Ana sayfa …) yeniden açılıyordu. Artık:
+
+- Pencere her hatırlatma için günde en çok **bir kez** kendiliğinden açılır. Hangi hatırlatmaların gösterildiği o tarayıcıda, kişiye ve güne göre saklanır.
+- **Kapat** (ya da Esc, pencere dışına tıklamak, satırdaki **Aç**, **Tümünü okundu say**): bu hatırlatmalar için pencere bir daha kendiliğinden açılmaz; yeni hatırlatma gelirse açılır (o zaman tüm okunmamış hatırlatmalar listelenir).
+- **Daha sonra**: bugün pencere bir daha kendiliğinden açılmaz; yeni hatırlatmalar kart ve zil olarak gelir (hatırlatma kartı ekranda kalır, ses çalar, zil sayısı artar).
+- Ertesi gün okunmamış kalan hatırlatmalar için pencere bir kez daha açılır.
+- Pencereyi istediğiniz zaman açmak için: zil (Bildirimler) → listenin üst satırındaki **Hatırlatmalar (N)** düğmesi. Yalnız okunmamış hatırlatma varken görünür; "Daha sonra" denmiş olsa da pencereyi açar.
+- Kayıt penceresi / görsel büyütme açıkken, bir alana yazılırken ya da sekme arka plandayken pencere eskisi gibi bekletilir; bekletilip hiç gösterilmeyen pencere "gösterildi" sayılmaz.
+- Değişen dosyalar: `panel.js`, `base.html`. Sunucu tarafı ve veritabanı değişmedi.
+
 ## API
 
 `GET /api/v1/personel-ozet` — aynı tablo JSON olarak (parametreler `proje`, `donem`, `durum`, `grup`, `sutun`, `tarih1`, `tarih2`). Anahtarın proje kapsamı uygulanır; "yalnız onaylı" anahtarda durum her zaman `onayli`. Geçersiz parametre 400, kapsam dışı proje 403. Hız sınırı ve API günlüğü diğer uçlarla aynı. Ayrıntı ve örnek: `API_KULLANIM.md` §3.6.

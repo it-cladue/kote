@@ -127,14 +127,35 @@ async function bekle(ms) { await new Promise((r) => setTimeout(r, ms)); }
     dogrula(ses.tonlar.slice(tonOnce).length === 3 && ses.tonlar[tonOnce] === 659.25, 'hatırlatma üç tonlu olmalı: ' + JSON.stringify(ses.tonlar.slice(tonOnce)));
     await ekran(page, 'hatirlatma_popup_acik');
 
-    adim('sayfa yüklenince bekleyen hatırlatma penceresi açılır (koyu tema)');
-    await page.evaluate(() => localStorage.setItem('kanit-panel-tema', 'dark'));
+    adim('Kapat → sayfa değiştirince pencere yeniden açılmaz (2.3.4)');
+    await page.click('#hatirlatma-popup [data-hp-kapat]');
+    dogrula(!(await popupAcik(page)), 'Kapat pencereyi kapatmalı');
+    await page.goto(PANEL + '/kayitlar'); await bekle(1200);
+    dogrula(!(await popupAcik(page)), 'Kapat sonrası /kayitlar sayfasında pencere açılmamalı');
+    await page.goto(PANEL + '/'); await bekle(1200);
+    dogrula(!(await popupAcik(page)), 'Kapat sonrası ana sayfaya dönünce pencere açılmamalı');
+    await page.reload(); await bekle(1000);
+    dogrula(!(await popupAcik(page)), 'Kapat sonrası sayfa yenilenince pencere açılmamalı');
+
+    adim('ertesi gün gösterildi kaydı sıfırlanır (koyu tema)');
+    await page.evaluate(() => { Object.keys(localStorage).filter((k) => k.indexOf('kp.hpGosterildi.') === 0).forEach((k) => { const d = JSON.parse(localStorage.getItem(k)); d.gun = '2000-01-01'; localStorage.setItem(k, JSON.stringify(d)); }); localStorage.setItem('kanit-panel-tema', 'dark'); });
     await page.reload();
     await page.waitForSelector('#hatirlatma-popup:not(.gizli)', { timeout: 2500 });
     await ekran(page, 'hatirlatma_popup_koyu');
     await page.evaluate(() => localStorage.setItem('kanit-panel-tema', 'light'));
-    await page.reload();
+    await page.keyboard.press('Escape');
+    dogrula(!(await popupAcik(page)), 'Esc pencereyi kapatmalı');
+    await page.reload(); await bekle(1200);
+    dogrula(!(await popupAcik(page)), 'Esc sonrası sayfa yenilenince pencere açılmamalı');
+
+    adim('zil başlığındaki Hatırlatmalar düğmesi pencereyi açar');
+    await page.click('#zil');
+    const hpDugme = page.locator('#bildirim-hp-ac');
+    dogrula(await hpDugme.isVisible(), 'okunmamış hatırlatma varken zil başlığında düğme görünmeli');
+    dogrula((await hpDugme.innerText()).includes('Hatırlatmalar (3)'), 'düğme metni: ' + await hpDugme.innerText());
+    await hpDugme.click();
     await page.waitForSelector('#hatirlatma-popup:not(.gizli)', { timeout: 2500 });
+    dogrula((await page.getAttribute('#bildirim-kutu', 'class')).includes('gizli'), 'düğme zil listesini kapatmalı');
 
     adim('Daha sonra');
     await page.click('#hatirlatma-popup [data-hp-sonra]');
@@ -144,19 +165,29 @@ async function bekle(ms) { await new Promise((r) => setTimeout(r, ms)); }
     await page.reload(); await bekle(1500);
     dogrula(!(await popupAcik(page)), 'aynı gün sayfa yenilenince açılmamalı');
 
-    adim('yeni hatırlatma yeniden açar + Esc');
+    adim('Daha sonra sonrası yeni hatırlatma pencere açmaz, kart + ses + zil gelir');
     await hareket(page);
+    tonOnce = (await sesDurumu(page)).tonlar.length;
     const hat2 = await islem('hatirlatma', { adet: 1 });
+    await page.locator('.bp-kart.hatirlatma[data-bp-key="mesaj:' + hat2.idler[0] + '"]').waitFor({ timeout: 2500 });
+    await bekle(1200);
+    dogrula(!(await popupAcik(page)), 'Daha sonra denmişken yeni hatırlatma pencereyi açmamalı');
+    dogrula((await sesDurumu(page)).tonlar.slice(tonOnce).length === 3, 'yeni hatırlatmada zil sesi çalmalı');
+    await page.click('#zil');
+    dogrula((await page.locator('#bildirim-hp-ac').innerText()).includes('Hatırlatmalar (4)'), 'düğme yeni sayıyı göstermeli');
+    await page.click('#bildirim-hp-ac');
     await page.waitForSelector('#hatirlatma-popup:not(.gizli)', { timeout: 2500 });
     dogrula((await page.locator('#hp-liste li').count()) === 4, 'pencere tüm okunmamış hatırlatmaları listelemeli');
-    dogrula(await page.locator('.bp-kart.hatirlatma[data-bp-key="mesaj:' + hat2.idler[0] + '"]').count() === 1, 'hatırlatma kartı da çıkmalı');
     await page.keyboard.press('Escape');
     dogrula(!(await popupAcik(page)), 'Esc pencereyi kapatmalı');
+    await page.evaluate(() => Object.keys(localStorage).filter((k) => k.indexOf('kanit-hatirlatma-sonra:') === 0).forEach((k) => localStorage.removeItem(k)));
     await page.reload(); await bekle(1200);
-    dogrula(await popupAcik(page), 'Kapat/Esc gün boyu ertelemez; yeni sayfada pencere yine açılır');
+    dogrula(!(await popupAcik(page)), 'gösterilmiş hatırlatmalar için pencere yeniden açılmamalı');
 
     adim('Tümünü okundu say (özet hatırlatma kartı da kalkar)');
+    await hareket(page);
     await islem('hatirlatma', { adet: 3 });
+    await page.waitForSelector('#hatirlatma-popup:not(.gizli)', { timeout: 2500 });
     await page.locator('.bp-kart.ozet.hatirlatma').waitFor({ timeout: 2500 });
     dogrula((await page.locator('#hp-liste li').count()) === 7, 'pencere yeni gelen hatırlatmaları da listelemeli');
     await page.click('#hatirlatma-popup [data-hp-okundu]');
@@ -186,9 +217,10 @@ async function bekle(ms) { await new Promise((r) => setTimeout(r, ms)); }
     await page.goto(PANEL + '/kayitlar?durum=hepsi&ac=' + bir.kayit_id);
     await page.waitForSelector('#modal:not(.gizli)');
     await bekle(800);
-    await islem('hatirlatma', { adet: 1 });
+    const ert = await islem('hatirlatma', { adet: 1 });
     await bekle(1800);
     dogrula(!(await popupAcik(page)), 'kayıt penceresi açıkken hatırlatma penceresi açılmamalı');
+    dogrula(await page.evaluate((k) => !Object.keys(localStorage).some((a) => a.indexOf('kp.hpGosterildi.') === 0 && (JSON.parse(localStorage.getItem(a)).anahtarlar || []).includes(k)), 'mesaj:' + ert.idler[0]), 'ertelenen pencere gösterildi sayılmamalı');
     await page.click('#modal .modal-kapat');
     await page.waitForSelector('#hatirlatma-popup:not(.gizli)', { timeout: 2500 });
     await page.click('#hatirlatma-popup [data-hp-okundu]');

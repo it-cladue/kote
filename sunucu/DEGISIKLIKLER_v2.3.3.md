@@ -26,13 +26,14 @@
 ### Hatırlatma penceresi
 
 - Onay bekleyen kayıtlar için okunmamış hatırlatma varsa ekranın ortasında **"Bekleyen kontroller hatırlatması"** penceresi açılır. Listede kayıt başına bir satır (ekranda "**Kayıt #id · personel** Bu ID'nin kontrolü N gündür bekliyor.") ve proje özetleri ("**OF · Proje özeti** …") vardır. Kayıt satırındaki **Aç** kayda gider; proje özeti satırındaki **Bekleyenleri aç** projenin bekleyen listesini açar. İkisi de o hatırlatmayı okundu sayar.
-- Ne zaman açılır: (a) panel sayfası açıldığında okunmamış hatırlatma varsa (tarayıcı kuralı gereği sayfa açılışında henüz tıklama olmadığı için bu açılış sessizdir); (b) panel açıkken yeni hatırlatma gelince (hatırlatma sesiyle birlikte).
+- Ne zaman açılır (2.3.4 ile güncellendi): her hatırlatma için günde en çok **bir kez** kendiliğinden açılır. (a) Panel sayfası açıldığında bugün henüz pencerede gösterilmemiş okunmamış bir hatırlatma varsa (tarayıcı kuralı gereği sayfa açılışında henüz tıklama olmadığı için bu açılış sessizdir); (b) panel açıkken yeni hatırlatma gelince (hatırlatma sesiyle birlikte). Pencere açılınca listedeki tüm okunmamış hatırlatmalar görünür. Sayfadan sayfaya geçerken aynı hatırlatmalar için pencere yeniden açılmaz. Ertesi gün okunmamış kalan hatırlatmalar bir kez daha gösterilir.
 - Alt düğmeler:
-  - **Daha sonra**: pencereyi kapatır ve **o gün** aynı hatırlatmalar için yeniden açmaz (sayfa yenilense de). Gün içinde **yeni** bir hatırlatma gelirse yine açılır. Ertesi gün okunmamış hatırlatma kaldıysa yeniden açılır. Seçim o tarayıcıda, kişiye göre saklanır.
+  - **Daha sonra**: bugün pencere bir daha kendiliğinden açılmaz; yeni hatırlatmalar kart ve zil olarak gelir (ses de çalar). Ertesi gün okunmamış hatırlatma kaldıysa pencere yeniden açılır. Seçim o tarayıcıda, kişiye göre saklanır.
   - **Tümünü okundu say**: listedeki hatırlatmaları okundu sayar ve pencereyi kapatır (kayıtların onay durumu değişmez).
-  - **Kapat** (ya da Esc): yalnız bu sayfada kapatır; başka bir sayfaya geçince okunmamış hatırlatma varsa yeniden açılır.
+  - **Kapat** (ya da Esc, pencere dışına tıklamak): bu hatırlatmalar için pencere bir daha kendiliğinden açılmaz; yeni hatırlatma gelirse açılır.
   - **Tüm hatırlatmalar**: Bildirimler sayfasını okunmamış hatırlatmalar süzgeciyle açar.
 - Kayıt ayrıntı penceresi ya da görsel büyütme açıkken veya kullanıcı bir alana (arama kutusu, yorum, düzenleme) yazarken pencere **açılmaz**; kayıt penceresi kapanınca ya da yazma alanından çıkıldıktan sonraki yoklamada (en geç 10 sn) açılır. Yazı yazan kişinin imleci alınmaz.
+- Pencereyi istediğiniz zaman açmak için: zil (Bildirimler) → listenin üst satırındaki **Hatırlatmalar (N)** düğmesi (yalnız okunmamış hatırlatma varken görünür; "Daha sonra" denmiş olsa da açar).
 - Klavye: pencere açılınca odak ilk "Aç" düğmesine gelir, Tab pencere içinde döner, Esc kapatır ve odak önceki yere döner.
 
 ### Arka plandaki sekme
