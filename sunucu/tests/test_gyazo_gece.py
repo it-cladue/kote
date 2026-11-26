@@ -134,3 +134,316 @@ def test_gyazo_arizasinda_hizli_gecis_ve_t_gyazo_izinli(ortam):
     assert all("503" in sebep for sebep in sebepler if "aynı bağlantı" not in sebep)
     # t.gyazo.com Gyazo ve Teamzone için izinli
     assert "t.gyazo.com" in gorsel.GYAZO_HOSTLAR and "t.gyazo.com" in gorsel.DIS_GORSEL_HOSTLAR["teamzone"]
+
+
+# ---- Gyazo arızası: ağ hatası da sayılır, art arda 25'te servis bu çalıştırmada bırakılır (26 Kasım) ----
+import csv  # noqa: E402
+
+import requests  # noqa: E402
+
+
+class _AsiliOturum(SahteOturum):
+    """Planda olmayan her kimlik için bağlantı okuma zaman aşımına düşer (asılı kalan Gyazo sunucusu)."""
+
+    def get(self, url, **kw):
+        kim = url.rsplit("/", 1)[-1].split(".")[0]
+        if self.plan.get(kim):
+            return super().get(url, **kw)
+        assert kw.get("stream") is True and kw.get("allow_redirects") is False
+        self.istekler.append(url)
+        raise requests.exceptions.ReadTimeout("okuma zaman aşımı (sahte)")
+
+
+def _gyazo_kayitlari_ekle(conn, araliklar):
+    for n in araliklar:
+        conn.execute("INSERT INTO kayitlar(anahtar,proje,personel,link,link_turu) VALUES(?,?,?,?,?)",
+                     (f"z{n}", "GA", "1", "https://i.gyazo.com/%s.jpg" % kimlik(n), "gyazo"))
+    conn.commit()
+
+
+def test_gyazo_asili_kalinca_hizli_gecer_ve_25te_birakir(ortam):
+    conn, c, ayar = ortam
+    _gyazo_kayitlari_ekle(conn, range(10, 40))  # fikstürdeki 4 kimlik + 30 = 34 ayrı kimlik (+ "b" aynı kimlik)
+    c._http = _AsiliOturum({})
+    uykular = []; loglar = []
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=uykular.append, log=loglar.append, bekleme_sn=0.15)
+    # ilk 10 bağlantı yeniden denenir (2 istek), sonraki 15 tek istek; 25'ten sonra hiç istek yok
+    assert len(c._http.istekler) == 10 * 2 + 15
+    assert uykular.count(1) == 10
+    assert r["bitis_nedeni"] == "tamam" and r["kalan"] == 0 and r["denenen"] == 25
+    assert r["ariza"] == ["Gyazo"] and r["ariza_denenmedi"] == {"Gyazo": 9}
+    assert r["acilamayan"] == 35 and r["turler"]["gyazo"]["acilamayan"] == 35
+    assert any("art arda 10" in m and "son durum: ağ hatası" in m for m in loglar)
+    assert any("art arda 25" in m and "denenmeyecek" in m for m in loglar)
+    satirlar = list(csv.reader(Path(r["rapor"]).read_text(encoding="utf-8-sig").splitlines(), delimiter=";"))[1:]
+    denenmedi = [s for s in satirlar if "Gyazo arızası sürüyor" in s[4]]
+    assert len(denenmedi) == 9 and all("bu çalıştırmada denenmedi" in s[4] and "sonraki çalıştırmada" in s[4] for s in denenmedi)
+    assert all(kimlik(n) not in u for n in range(31, 40) for u in c._http.istekler)
+    # denenmeyen bağlantılar gecelik yeni indirme sınırını tüketmez
+    c._http = _AsiliOturum({})
+    r2 = gorsel.gyazo_toplu_indir(conn, c, ayar, yeni_en_cok=26, uyku=lambda s: None)
+    assert r2["bitis_nedeni"] == "tamam" and r2["denenen"] == 25 and r2["kalan"] == 0 and r2["ariza_denenmedi"] == {"Gyazo": 9}
+
+
+def test_gyazo_arizasinda_basari_sayaci_sifirlar(ortam):
+    conn, c, ayar = ortam
+    _gyazo_kayitlari_ekle(conn, range(10, 40))
+    # 9 hata (k1-k4, k10-k14), k15 iner, sonra 24 hata: 10'da hızlı geçiş, sıfırlandığı için 25'e ulaşmaz
+    c._http = _AsiliOturum({kimlik(15): [SahteYanit(200, jpeg())]})
+    uykular = []
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=uykular.append, bekleme_sn=0)
+    assert uykular.count(1) == 9 + 10
+    assert len(c._http.istekler) == 9 * 2 + 1 + 10 * 2 + 14
+    assert r["indirilen"] == 1 and r["ariza"] == ["Gyazo"] and not r.get("ariza_denenmedi")
+    assert r["bitis_nedeni"] == "tamam" and r["denenen"] == 34
+    assert not any("denenmedi" in s[4] for s in r["acilamayan_ornek"])
+
+
+def test_snappark_arizasi_gyazoyu_etkilemez(tmp_path):
+    from app import db
+    from test_dis_gorsel_232 import URLOturum, ayar_yap
+    a = ayar_yap(tmp_path)
+    conn = db.baglan(a["DB"])
+    plan = {}
+    for i in range(30):
+        conn.execute("INSERT INTO kayitlar(anahtar,proje,personel,link) VALUES(?,?,?,?)",
+                     ("s%d" % i, "OF", str(i), "https://snappark.net/s/Ar%02d" % i))
+        plan["https://img.snappark.net/s/Ar%02d/raw/" % i] = [requests.exceptions.ReadTimeout("asılı"), requests.exceptions.ReadTimeout("asılı")]
+        if i % 6 == 5:  # aralara Gyazo bağlantıları
+            conn.execute("INSERT INTO kayitlar(anahtar,proje,personel,link) VALUES(?,?,?,?)",
+                         ("g%d" % i, "OF", str(i), "https://i.gyazo.com/%s.jpg" % kimlik(100 + i)))
+            plan["https://i.gyazo.com/%s.jpg" % kimlik(100 + i)] = [SahteYanit(200, jpeg())]
+    conn.commit()
+    c = gorsel.GorselCozucu(a, a["ONBELLEK"])
+    c._http = URLOturum(plan)
+    loglar = []
+    r = gorsel.gyazo_toplu_indir(conn, c, a, uyku=lambda s: None, bekleme_sn=0, log=loglar.append)
+    sp = [u for u in c._http.istekler if "snappark" in u]
+    assert len(sp) == 10 * 2 + 15 and all("Ar%02d" % i not in u for i in range(25, 30) for u in sp)
+    assert r["turler"]["gyazo"]["indirilen"] == 5 and r["turler"]["gyazo"]["acilamayan"] == 0
+    assert r["ariza"] == ["Snappark"] and r["ariza_denenmedi"] == {"Snappark": 5} and r["bitis_nedeni"] == "tamam"
+    assert r["turler"]["snappark"]["acilamayan"] == 30
+    assert any("Snappark art arda 10" in m and "ağ hatası" in m for m in loglar)
+
+
+def test_cli_ariza_satiri(tmp_path):
+    env = {"PATH": "/usr/bin:/bin", "PANEL_VERI": str(tmp_path), "HOME": str(tmp_path)}
+    kod = ("import sys\n"
+           "from app import gorsel, cli\n"
+           "gorsel.gyazo_toplu_indir = lambda *a, **k: {'bitis_nedeni': 'tamam', 'kalan': 0, 'ariza': ['Gyazo'],\n"
+           "    'ariza_denenmedi': {'Gyazo': 700}, 'turler': {'gyazo': {'baglanti': 900, 'acilamayan': 880}}}\n"
+           "sys.argv = ['app.cli', 'gyazo-onbellekle', '--on-kontrol-atla']\n"
+           "cli.main()\n")
+    r = subprocess.run([sys.executable, "-c", kod], cwd=ROOT, capture_output=True, text=True, env=env, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    satirlar = r.stdout.splitlines()
+    beklenen = ("ARIZA: Gyazo yanıt vermiyor (muhtemelen Gyazo arızası); 180 bağlantı açılamadı, 700 bağlantı denenmedi. "
+                "Sonraki çalıştırmada (gece planı kuruluysa kendiliğinden) yeniden denenir.")
+    assert beklenen in satirlar and satirlar[-1] == "GYAZO_ONBELLEK_TAMAM"
+    assert satirlar.index(beklenen) < satirlar.index("GYAZO_ONBELLEK_TAMAM")
+
+
+def _cli_calistir(tmp_path, sonuc):
+    env = {"PATH": "/usr/bin:/bin", "PANEL_VERI": str(tmp_path), "HOME": str(tmp_path)}
+    kod = ("import sys\n"
+           "from app import gorsel, cli\n"
+           "gorsel.gyazo_toplu_indir = lambda *a, **k: %r\n"
+           "sys.argv = ['app.cli', 'gyazo-onbellekle', '--on-kontrol-atla']\n"
+           "cli.main()\n" % (sonuc,))
+    return subprocess.run([sys.executable, "-c", kod], cwd=ROOT, capture_output=True, text=True, env=env, timeout=120)
+
+
+def test_cli_ariza_satiri_coklu_servis_ve_arizasiz(tmp_path):
+    r = _cli_calistir(tmp_path, {"bitis_nedeni": "sinir", "kalan": 5, "ariza": ["Gyazo", "Snappark"], "ariza_denenmedi": {"Snappark": 3},
+                                 "turler": {"gyazo": {"acilamayan": 12}, "snappark": {"acilamayan": 13}}})
+    assert r.returncode == 0, r.stdout + r.stderr
+    satirlar = r.stdout.splitlines()
+    assert ("ARIZA: Gyazo yanıt vermiyor (muhtemelen Gyazo arızası); 12 bağlantı açılamadı · Snappark yanıt vermiyor "
+            "(muhtemelen Snappark arızası); 10 bağlantı açılamadı, 3 bağlantı denenmedi. "
+            "Sonraki çalıştırmada (gece planı kuruluysa kendiliğinden) yeniden denenir.") in satirlar
+    assert satirlar[-1].startswith("GYAZO_ONBELLEK_DEVAM")
+    r = _cli_calistir(tmp_path, {"bitis_nedeni": "tamam", "kalan": 0, "turler": {"gyazo": {"acilamayan": 4}}})
+    assert r.returncode == 0 and not any(s.startswith("ARIZA:") for s in r.stdout.splitlines()) and r.stdout.splitlines()[-1] == "GYAZO_ONBELLEK_TAMAM"
+
+
+class _SabitOturum(SahteOturum):
+    """Planda olmayan kimlikler için sabit sonuç: bir yanıt (ör. 503) ya da yükseltilecek bir istisna."""
+
+    def __init__(self, plan, varsayilan):
+        super().__init__(plan)
+        self.varsayilan = varsayilan
+
+    def get(self, url, **kw):
+        kim = url.rsplit("/", 1)[-1].split(".")[0]
+        if self.plan.get(kim):
+            return super().get(url, **kw)
+        assert kw.get("stream") is True and kw.get("allow_redirects") is False
+        self.istekler.append(url)
+        if isinstance(self.varsayilan, BaseException):
+            raise self.varsayilan
+        return SahteYanit(self.varsayilan)
+
+
+def test_baglanti_kurulamayan_gyazo_da_sayilir_ve_birakilir(ortam):
+    # Gyazo yolunda ConnectTimeout da "hata" olarak raporlanır; arıza sayılır, ön kontrolde ise sunucu erişimi sorunu sayılır.
+    conn, c, ayar = ortam
+    _gyazo_kayitlari_ekle(conn, range(10, 40))
+    c._http = _SabitOturum({}, requests.exceptions.ConnectTimeout("bağlantı zaman aşımı (sahte)"))
+    uykular = []
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=uykular.append, bekleme_sn=0)
+    assert len(c._http.istekler) == 10 * 2 + 15 and uykular.count(1) == 10
+    assert r["ariza"] == ["Gyazo"] and r["ariza_denenmedi"] == {"Gyazo": 9} and r["bitis_nedeni"] == "tamam"
+    # ön kontrolde bağlantı hiç kurulamıyorsa (sunucunun dış erişimi) eskisi gibi hemen durur
+    c._http = _SabitOturum({}, requests.exceptions.ConnectTimeout("bağlantı zaman aşımı (sahte)"))
+    r2 = gorsel.gyazo_toplu_indir(conn, c, ayar, on_kontrol=True, uyku=lambda s: None)
+    assert r2["bitis_nedeni"] == "erisim" and len(c._http.istekler) == 2 and "ulaşılamıyor" in r2["durduruldu"]
+
+
+def test_on_kontrol_asili_kalirsa_durur_ve_iki_ihtimali_soyler(ortam):
+    # Ön kontrolde okuma zaman aşımı hem asılı Gyazo hem de TLS'yi kesen bir güvenlik duvarı (dış erişim sorunu) olabilir:
+    # komut "tamam" ile bitip sorunu gizlemez; bir kez daha dener, sonra GYAZO_ONBELLEK_YARIM (çıkış 1) ile durur.
+    conn, c, ayar = ortam
+    _gyazo_kayitlari_ekle(conn, range(10, 40))
+    c._http = _SabitOturum({}, requests.exceptions.ReadTimeout("okuma zaman aşımı (sahte)"))
+    loglar = []
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, on_kontrol=True, uyku=lambda s: None, log=loglar.append, bekleme_sn=0.15)
+    assert r["bitis_nedeni"] == "erisim" and r["denenen"] == 0 and len(c._http.istekler) == 2
+    assert not r.get("ariza") and "ulaşılamıyor" in r["durduruldu"] and "curl" in r["durduruldu"]
+    assert "Gyazo arızalı" in r["durduruldu"] and "dış HTTPS erişimi" in r["durduruldu"]
+    # tek seferlik bir zaman aşımı çalıştırmayı durdurmaz ve Gyazo'yu "arızalı" işaretlemez
+
+    class _Oturum(SahteOturum):
+        def get(self, url, **kw):
+            kim = url.rsplit("/", 1)[-1].split(".")[0]
+            if kim == "0" * 32 and self.plan.get(kim) and isinstance(self.plan[kim][0], BaseException):
+                self.istekler.append(url)
+                raise self.plan[kim].pop(0)
+            return super().get(url, **kw)
+
+    plan = {kimlik(n): [SahteYanit(200, jpeg())] for n in list(range(1, 5)) + list(range(10, 40))}
+    plan["0" * 32] = [requests.exceptions.ReadTimeout("geçici"), SahteYanit(404)]
+    c._http = _Oturum(plan)
+    r2 = gorsel.gyazo_toplu_indir(conn, c, ayar, on_kontrol=True, uyku=lambda s: None, bekleme_sn=0)
+    assert r2["bitis_nedeni"] == "tamam" and r2["indirilen"] == 34 and not r2.get("ariza")
+
+
+@pytest.mark.parametrize("hizli_yanit", [503, 404])
+def test_karisik_arizada_asililar_gyazoyu_birakir(ortam, hizli_yanit):
+    # Kaynak arızasında bağlantıların bir kısmı asılı kalır, bir kısmı hızlı 503/404 alır. Hızlı yanıtlar yanıtsız sayacını
+    # sıfırlamaz (yalnız başarılı indirme sıfırlar): 25. asılı bağlantıdan sonra kalan Gyazo bağlantıları denenmez.
+    conn, c, ayar = ortam
+    _gyazo_kayitlari_ekle(conn, range(10, 110))
+    c._http = _AsiliOturum({kimlik(n): [SahteYanit(hizli_yanit), SahteYanit(hizli_yanit)] for n in range(11, 110, 2)})
+    loglar = []
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=lambda s: None, log=loglar.append, bekleme_sn=0)
+    # asılılar: k1-k4 ve çift kimlikler; 25. asılı = k50 → k51-k109 (59 bağlantı) hiç istenmez
+    assert r["ariza_denenmedi"] == {"Gyazo": 59} and r["bitis_nedeni"] == "tamam" and r["kalan"] == 0
+    assert not any(kimlik(n) in u for n in range(51, 110) for u in c._http.istekler)
+    assert any("art arda 25" in m and "denenmeyecek" in m for m in loglar)
+
+
+def test_ariza_satiri_servis_basina_bir_kez(ortam):
+    conn, c, ayar = ortam
+    _gyazo_kayitlari_ekle(conn, range(10, 40))
+    # 14 asılı → hızlı geçiş; k20 iner (sayaç sıfırlanır); 19 asılı → yeniden 10'a varır ama ikinci kez eklenmez
+    c._http = _AsiliOturum({kimlik(20): [SahteYanit(200, jpeg())]})
+    loglar = []
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=lambda s: None, log=loglar.append, bekleme_sn=0)
+    assert r["ariza"] == ["Gyazo"] and not r.get("ariza_denenmedi") and r["indirilen"] == 1
+    assert sum("art arda 10" in m for m in loglar) == 1
+
+
+def test_cli_gece_gunlugunde_baglanti_basina_503_satiri_yok(tmp_path):
+    # Gece planı (--ayrintili yok) yalnız özet/arıza satırlarını yazar; bağlantı başına 503 satırları günlüğü doldurmaz.
+    env = {"PATH": "/usr/bin:/bin", "PANEL_VERI": str(tmp_path), "HOME": str(tmp_path)}
+    kod = ("import sys\n"
+           "from app import gorsel, cli\n"
+           "def sahte(*a, **k):\n"
+           "    log = k['log']\n"
+           "    log('1/60 00000000… geçici hata (%s); 1 sn sonra bir kez daha' % gorsel._GYAZO_SEBEP[503])\n"
+           "    log('2/60 00000000… açılamadı: %s' % gorsel._GYAZO_SEBEP[503])\n"
+           "    log('Gyazo art arda 10 bağlantıda yanıt veremedi (son durum: HTTP 503); muhtemelen Gyazo arızası. Kalan bağlantılar beklemeden geçilir.')\n"
+           "    log('Gyazo art arda 25 bağlantıda yanıt vermedi (muhtemelen Gyazo arızası); kalan Gyazo bağlantıları bu çalıştırmada denenmeyecek.')\n"
+           "    return {'bitis_nedeni': 'tamam', 'kalan': 0, 'ariza': ['Gyazo'], 'turler': {'gyazo': {'acilamayan': 60}}}\n"
+           "gorsel.gyazo_toplu_indir = sahte\n"
+           "sys.argv = ['app.cli', 'gyazo-onbellekle', '--yeni-en-cok', '900', '--on-kontrol-atla']\n"
+           "cli.main()\n")
+    r = subprocess.run([sys.executable, "-c", kod], cwd=ROOT, capture_output=True, text=True, env=env, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "açılamadı: Gyazo yanıt" not in r.stdout and "geçici hata" not in r.stdout
+    assert "Gyazo art arda 10 bağlantıda yanıt veremedi" in r.stdout and "Gyazo art arda 25 bağlantıda yanıt vermedi" in r.stdout
+
+
+def test_silinmis_503ler_saglam_gyazoyu_birakmaz_gece_gece(ortam):
+    conn, c, ayar = ortam
+    # 34 ölü kimlik (fikstürdeki 4 + 30; hepsi 503 = silinmiş görsel), aralarda 404, sonra 5 canlı
+    _gyazo_kayitlari_ekle(conn, range(10, 45))
+    canli = {kimlik(n): [SahteYanit(200, jpeg())] for n in range(40, 45)}
+    plan = dict(canli)
+    plan.update({kimlik(n): [SahteYanit(404)] for n in range(12, 40, 5)})
+    c._http = _SabitOturum(plan, 503)
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=lambda s: None, bekleme_sn=0)
+    assert r["indirilen"] == 5 and not r.get("ariza_denenmedi") and r["ariza"] == ["Gyazo"] and r["bitis_nedeni"] == "tamam"
+    # ikinci gece: aynı ölüler yine önde, 5 yeni canlı bağlantı sonda → hepsi denenir ve iner
+    _gyazo_kayitlari_ekle(conn, range(45, 50))
+    c._http = _SabitOturum({kimlik(n): [SahteYanit(200, jpeg())] for n in range(45, 50)}, 503)
+    r2 = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=lambda s: None, bekleme_sn=0)
+    assert r2["indirilen"] == 5 and r2["zaten_var"] == 5 and not r2.get("ariza_denenmedi")
+    assert not any("denenmedi" in s[4] for s in r2["acilamayan_ornek"])
+
+
+def test_429_sonrasi_basari_sayaci_sifirlar(ortam):
+    conn, c, ayar = ortam
+    _gyazo_kayitlari_ekle(conn, range(10, 33))
+    # 21 asılı (k1-k4, k10-k26), k27 önce 429 sonra iner, 4 asılı (k28-k31), k32 canlı: sayaç 25'e varmamalı
+    c._http = _AsiliOturum({kimlik(27): [SahteYanit(429), SahteYanit(200, jpeg())], kimlik(32): [SahteYanit(200, jpeg())]})
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=lambda s: None, bekleme_sn=0)
+    assert r["indirilen"] == 2 and not r.get("ariza_denenmedi") and any(kimlik(32) in u for u in c._http.istekler)
+
+
+def test_zaman_asimi_da_arizaya_sayilir(ortam, monkeypatch):
+    conn, c, ayar = ortam
+    _gyazo_kayitlari_ekle(conn, range(10, 40))
+    cagrilar = []
+
+    def yavas(k):
+        cagrilar.append(k)
+        c._gyazo_son_durum = "zaman_asimi"
+        return None
+
+    monkeypatch.setattr(c, "gyazo_indir", yavas)
+    uykular = []
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=uykular.append, bekleme_sn=0.15)
+    assert len(cagrilar) == 25 and r["ariza"] == ["Gyazo"] and r["ariza_denenmedi"] == {"Gyazo": 9}
+    assert uykular.count(0.15) == 9  # 10. hatadan sonra bekleme yok
+
+
+def test_birakildiktan_sonra_onbellektekiler_zaten_var(ortam):
+    conn, c, ayar = ortam
+    _gyazo_kayitlari_ekle(conn, range(10, 40))
+    c._http = _SabitOturum({kimlik(39): [SahteYanit(200, jpeg())]}, 404)
+    assert gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=lambda s: None, bekleme_sn=0)["indirilen"] == 1
+    c._http = _AsiliOturum({})
+    r = gorsel.gyazo_toplu_indir(conn, c, ayar, uyku=lambda s: None, bekleme_sn=0)
+    assert r["zaten_var"] == 1 and r["ariza_denenmedi"] == {"Gyazo": 8} and not any(kimlik(39) in u for u in c._http.istekler)
+
+
+def test_dis_serviste_erisim_de_arizaya_sayilir(tmp_path):
+    # Gyazo yolu her istisnayı 'hata' sayar; 'erisim' yalnız dış servislerde görülür. Bağlantı kurulamayan (erisim) ile
+    # asılı kalan (hata) bağlantılar sırayla gelince "art arda 3 erisim" atlaması devreye girmez; ikisi de arıza sayılmalı.
+    from app import db
+    from test_dis_gorsel_232 import URLOturum, ayar_yap
+    a = ayar_yap(tmp_path)
+    conn = db.baglan(a["DB"])
+    plan = {}
+    for i in range(30):
+        conn.execute("INSERT INTO kayitlar(anahtar,proje,personel,link) VALUES(?,?,?,?)",
+                     ("s%d" % i, "OF", str(i), "https://snappark.net/s/Er%02d" % i))
+        hata = requests.exceptions.ConnectTimeout if i % 2 == 0 else requests.exceptions.ReadTimeout
+        plan["https://img.snappark.net/s/Er%02d/raw/" % i] = [hata("sahte"), hata("sahte")]
+    conn.commit()
+    c = gorsel.GorselCozucu(a, a["ONBELLEK"])
+    c._http = URLOturum(plan)
+    r = gorsel.gyazo_toplu_indir(conn, c, a, uyku=lambda s: None, bekleme_sn=0)
+    assert not r.get("dis_erisim_yok")
+    assert len(c._http.istekler) == 10 * 2 + 15 and r["ariza"] == ["Snappark"] and r["ariza_denenmedi"] == {"Snappark": 5}
