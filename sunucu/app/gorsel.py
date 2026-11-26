@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+from collections import deque
 import warnings
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, urlsplit
@@ -1296,12 +1297,17 @@ _GYAZO_SEBEP = {404: "Gyazo'da görsel yok (404)", 410: "Gyazo görseli kaldırm
                 "erisim": "bağlantı kurulamadı (DNS / bağlantı reddi / zaman aşımı)", "ic_adres": "iç ağ adresine çözülüyor (güvenlik nedeniyle indirilmedi)",
                 "izinsiz": "izin verilmeyen adrese yönlendirme (güvenlik nedeniyle izlenmedi)", "zaman_asimi": "indirme 30 sn'de bitmedi"}
 GYAZO_TOPLU_429_BEKLEME = (30, 60, 120, 300)
-GYAZO_ARIZA_ESIGI = 10  # art arda bu kadar 5xx / ağ hatası: servis arızalı sayılır, kalan bağlantılar yeniden denenmeden/beklenmeden geçilir
-GYAZO_ARIZA_DURDUR = 25  # arada başarılı indirme olmadan bu kadar bağlantı HİÇ yanıt vermezse (zaman aşımı / bağlantı hatası) o servisin
-#                          kalan bağlantıları bu çalıştırmada hiç denenmez. HTTP yanıtları (503, 404 ...) bu sayacı ne artırır ne sıfırlar:
-#                          Gyazo silinmiş görsellere de 503 verdiği için düz 503'ler servisi bırakmaz (yalnız hızlı geçiş), ama asılı
-#                          bağlantıların arasına karışan hızlı 503/404'ler de arızanın sürdüğünü gizlemez. Yalnız başarı sıfırlar.
-_ARIZA_AG = ("hata", "erisim", "zaman_asimi")  # yanıt alınamayan (ağ düzeyi) sonuçlar
+GYAZO_ARIZA_ESIGI = 10  # hızlı geçiş: art arda bu kadar 5xx / ağ hatası olursa o servisin kalan bağlantılarında 1 sn'lik
+#                         "geçici hata" yeniden denemesi yapılmaz. Arıza ilan edilmez (Gyazo silinmiş görsellere de 503 verir) ve
+#                         bağlantılar arası bekleme (bekleme_sn) sürer: 800 silinmiş bağlantılık 503 birikiminde 429'a düşmemek için.
+GYAZO_ARIZA_PENCERE = 30  # arıza (bırakma) kararı için bakılan son denenen bağlantı sayısı (servis başına kayan pencere)
+GYAZO_ARIZA_DURDUR = 25  # son GYAZO_ARIZA_PENCERE denemenin en az bu kadarında HİÇ yanıt alınamazsa (zaman aşımı / bağlantı hatası)
+#                          servis arızalı sayılır ve kalan bağlantıları bu çalıştırmada denenmez. HTTP yanıtları (503, 404 ...) pencereye
+#                          "yanıt var" diye girer; başarılı indirme pencereyi boşaltır. Silinmiş 503'lerin arasındaki seyrek, tek seferlik
+#                          zaman aşımları bu yüzden sağlam Gyazo'yu bırakmaz; tamamen asılı Gyazo ise 25 bağlantıda bırakılır.
+_ARIZA_AG = ("hata", "erisim", "zaman_asimi")  # hızlı geçiş sayacına giren ağ düzeyi sonuçlar (5xx ile birlikte)
+_YANITSIZ = ("hata", "erisim")  # hiç yanıt alınamadı: bırakma penceresine "yanıtsız" diye girer. 'zaman_asimi' (yanıt başlığı geldi
+#                                 ama gövde 30 sn'de bitmedi) yanıt sayılır, bırakmaya sayılmaz.
 
 
 _SERVIS_EKI = {"Gyazo": "'da", "Snappark": "'ta", "Teamzone": "'da"}
@@ -1340,10 +1346,12 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
     bitis: bu zamana (datetime) gelince durur. log(metin): isteğe bağlı ayrıntılı satır çıktısı.
     on_kontrol: başta Gyazo'ya tek bir deneme isteği atar; ulaşılamıyorsa hiçbir bağlantı denenmeden döner.
     Dönüşteki bitis_nedeni: tamam | sinir | sure | hiz_siniri | erisim.
-    Arıza: bir servis art arda GYAZO_ARIZA_ESIGI bağlantıda 5xx ya da ağ hatası verirse yeniden deneme/bekleme yapılmaz
-    (``ariza`` listesi). Arada başarılı indirme olmadan GYAZO_ARIZA_DURDUR bağlantı hiç yanıt vermezse (zaman aşımı /
-    bağlantı hatası; aradaki HTTP yanıtları sayacı sıfırlamaz) o servisin kalan bağlantıları istek atılmadan geçilir
-    (``ariza_denenmedi`` = {servis: sayı}); bitis_nedeni yine 'tamam' olur, gece planı sonraki çalıştırmada yeniden dener.
+    Hızlı geçiş: bir servis art arda GYAZO_ARIZA_ESIGI bağlantıda 5xx ya da ağ hatası verirse o servisin kalan bağlantılarında
+    1 sn'lik yeniden deneme yapılmaz (``hizli_gecis`` listesi); bekleme sürer, arıza ilan edilmez (silinmiş görsel de 503 verir).
+    Arıza: son GYAZO_ARIZA_PENCERE denenen bağlantının en az GYAZO_ARIZA_DURDUR'ünde hiç yanıt alınamazsa (zaman aşımı /
+    bağlantı hatası; HTTP yanıtı "yanıt var" sayılır, başarılı indirme pencereyi boşaltır) servis ``ariza`` listesine girer ve
+    kalan bağlantıları istek atılmadan geçilir (``ariza_denenmedi`` = {servis: sayı}); bitis_nedeni yine 'tamam' olur,
+    gece planı sonraki çalıştırmada yeniden dener.
     Ön kontrol bir kez yeniden denenir; ikisi de yanıtsızsa (Gyazo arızası ya da dış HTTPS erişimi sorunu ayırt edilemez)
     bitis_nedeni 'erisim' ile durur.
 
@@ -1365,8 +1373,8 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
     turler = {t: {"baglanti": 0, "indirilen": 0, "zaten_var": 0, "acilamayan": 0, "taninmayan": 0} for t in ("gyazo", "snappark", "teamzone")}
     acilamayan = []
     gorulen = {}
-    ariza_sayac = {}  # servis -> art arda 5xx / ağ hatası sayısı; GYAZO_ARIZA_ESIGI aşılınca o servis için hızlı geçiş (yeniden deneme/bekleme yok)
-    yanitsiz_sayac = {}  # servis -> art arda hiç yanıt alınamayan (ağ düzeyi) bağlantı sayısı; GYAZO_ARIZA_DURDUR'da servis bırakılır
+    ariza_sayac = {}  # servis -> art arda 5xx / ağ hatası sayısı; GYAZO_ARIZA_ESIGI'de o servis için hızlı geçiş (yeniden deneme yok)
+    yanitsiz_pencere = {}  # servis -> deque(son GYAZO_ARIZA_PENCERE denenen bağlantı: True = hiç yanıt yok); GYAZO_ARIZA_DURDUR'da bırakılır
     if on_kontrol and gyazo_acik:
         hata = None
         for deneme in range(2):  # tek seferlik bir zaman aşımı çalıştırmayı durdurmasın: bir kez daha denenir
@@ -1393,7 +1401,9 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
             sayac["bitis_nedeni"] = "erisim"
             sayac["durduruldu"] = ("Gyazo'ya ulaşılamıyor (%s: %s). Sunucunun dış HTTPS erişimi engelli ya da Gyazo arızalı olabilir; kontrol edin: "
                                    "curl -sS -o /dev/null -w '%%{http_code}\\n' --max-time 20 https://i.gyazo.com/ "
-                                   "(bir HTTP kodu yazarsa erişim var, Gyazo arızalıdır; sonraki çalıştırmada yeniden denenir)"
+                                   "— çıktı 000 ise sunucu Gyazo'dan hiç yanıt alamadı (dış erişim engelli ya da Gyazo asılı); "
+                                   "200/403/503 gibi üç basamaklı başka bir sayı yazarsa erişim var, Gyazo arızalıdır. "
+                                   "Sonraki çalıştırmada yeniden denenir."
                                    % (type(hata).__name__, str(hata)[:160]))
             log(sayac["durduruldu"])
             sonuc = dict(sayac)
@@ -1452,8 +1462,9 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
         return yol, cozucu._dis_son_durum
 
     toplam = len(adaylar)
-    ariza_atla = set()     # art arda GYAZO_ARIZA_DURDUR bağlantı yanıt vermeyen türler (kalan bağlantıları bu çalıştırmada istek atılmadan geçilir)
+    ariza_atla = set()     # son GYAZO_ARIZA_PENCERE denemenin GYAZO_ARIZA_DURDUR'ünde yanıt vermeyen türler (kalanı istek atılmadan geçilir)
     ariza_denenmedi = {}   # servis -> arıza sürdüğü için hiç denenmeyen bağlantı sayısı
+    atlanan = {}           # kimlik -> (sebep, arıza mı) — istek atılmadan geçilen kimliklerin tekrar satırları aynı sebebi taşır
     log("%d bağlantı taranıyor (Gyazo %d, Snappark %d, Teamzone %d)%s" % (
         toplam, turler["gyazo"]["baglanti"], turler["snappark"]["baglanti"], turler["teamzone"]["baglanti"],
         "; bu çalıştırmada en çok %d yeni indirme" % yeni_en_cok if yeni_en_cok else ""))
@@ -1483,9 +1494,10 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
             elif tur in hiz_siniri:
                 sebep = "%s hız sınırı sürüyor (bu çalıştırmada denenmedi)" % servis
             else:
-                sebep = ("%s arızası sürüyor (art arda %d bağlantı yanıt vermedi; bu çalıştırmada denenmedi, sonraki çalıştırmada yeniden denenir)"
-                         % (servis, GYAZO_ARIZA_DURDUR))
+                sebep = ("%s arızası sürüyor (son bağlantıların çoğunda hiç yanıt alınamadı; bu çalıştırmada denenmedi, "
+                         "sonraki çalıştırmada yeniden denenir)" % servis)
                 ariza_denenmedi[servis] = ariza_denenmedi.get(servis, 0) + 1
+            atlanan[kimlik] = (sebep, tur in ariza_atla and tur not in erisim_yok and tur not in hiz_siniri)
             acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, sebep))
             if ilerleme and (i % 100 == 0 or i == toplam):
                 ilerleme(i, toplam, dict(sayac))
@@ -1510,7 +1522,10 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
             else:
                 sayac["acilamayan"] += 1
                 t["acilamayan"] += 1
-                acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, "aynı bağlantı bu çalıştırmada açılamadı"))
+                sebep, ariza_ile = atlanan.get(kimlik, ("aynı bağlantı bu çalıştırmada açılamadı", False))
+                if ariza_ile:  # ilk satırı arıza yüzünden denenmediyse tekrarı da "denenmedi" sayılır (CLI açılamadı sayısını şişirmez)
+                    ariza_denenmedi[servis] = ariza_denenmedi.get(servis, 0) + 1
+                acilamayan.append((r["id"], r["proje"], r.get("personel") or "", link, sebep))
         elif onbellekte:
             sayac["kimlik"] += 1
             gorulen[kimlik] = True
@@ -1539,26 +1554,33 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
                 _yok_sil(kimlik, tur)
                 yol, durum = _dene(k, tur)
             # Arıza sayaçları 429 beklemesinden SONRA güncellenir: bekleme sonrası başarı da sayaçları sıfırlar.
+            pencere = yanitsiz_pencere.setdefault(servis, deque(maxlen=GYAZO_ARIZA_PENCERE))
             if yol:
                 ariza_sayac[servis] = 0
-                yanitsiz_sayac[servis] = 0
-            elif durum in _ARIZA_AG or (isinstance(durum, int) and durum >= 500):
-                # Sunucu hatası (5xx) ya da ağ hatası (okuma/bağlantı zaman aşımı, DNS, bağlantı reddi, 30 sn toplam süre) arıza sayılır;
-                # 404/410/4xx, 429, iç adres, yönlendirme ve gövde hataları sayılmaz (hızlı geçiş sayacı olduğu gibi kalır).
+                pencere.clear()
+            else:
+                # Arıza penceresi: her denenen bağlantı bir kez girer (yeniden deneme ve 429 beklemesinden sonraki son durumuyla).
+                pencere.append(durum in _YANITSIZ)
+            if not yol and (durum in _ARIZA_AG or (isinstance(durum, int) and durum >= 500)):
+                # Hızlı geçiş: sunucu hatası (5xx) ya da ağ hatası (okuma/bağlantı zaman aşımı, DNS, bağlantı reddi, 30 sn toplam süre);
+                # 404/410/4xx, 429, iç adres, yönlendirme ve gövde hataları sayılmaz (sayaç olduğu gibi kalır).
                 ariza_sayac[servis] = ariza_sayac.get(servis, 0) + 1
-                if ariza_sayac[servis] == GYAZO_ARIZA_ESIGI and servis not in sayac.get("ariza", []):
+                if ariza_sayac[servis] == GYAZO_ARIZA_ESIGI and servis not in sayac.get("hizli_gecis", []):
                     son = "HTTP %d" % durum if isinstance(durum, int) else _gyazo_sebep(durum, servis)
-                    log("%s art arda %d bağlantıda yanıt veremedi (son durum: %s); muhtemelen %s arızası. "
-                        "Kalan bağlantılar beklemeden geçilir, sonraki çalıştırmada yeniden denenir." % (servis, GYAZO_ARIZA_ESIGI, son, servis))
+                    log("%s art arda %d bağlantıda hata verdi (son durum: %s); kalan %s bağlantıları bir kez daha denenmeden geçilir. "
+                        "Silinmiş görseller de HTTP 503 verir, %s arızası da olabilir; açılamayanlar sonraki çalıştırmada yeniden denenir."
+                        % (servis, GYAZO_ARIZA_ESIGI, son, servis, servis))
+                    sayac.setdefault("hizli_gecis", []).append(servis)
+            yanitsiz = sum(pencere)
+            if not yol and yanitsiz >= GYAZO_ARIZA_DURDUR and tur not in ariza_atla:
+                # Arıza: son denemelerin çoğunda hiç yanıt yok (asılı / kopuk sunucu). Aradaki hızlı 503/404'ler bunu gizlemez,
+                # silinmiş 503'lerin arasındaki seyrek, tek seferlik zaman aşımları da servisi bırakmaz.
+                ariza_atla.add(tur)
+                log("%s art arda %d bağlantının %d'inde hiç yanıt alınamadı (zaman aşımı / bağlantı hatası); muhtemelen %s arızası. "
+                    "Kalan %s bağlantıları bu çalıştırmada denenmeyecek, sonraki çalıştırmada yeniden denenir; diğer servisler sürüyor."
+                    % (servis, len(pencere), yanitsiz, servis, servis))
+                if servis not in sayac.get("ariza", []):
                     sayac.setdefault("ariza", []).append(servis)
-            if not yol and durum in _ARIZA_AG:
-                # Hiç yanıt yok (asılı / kopuk sunucu). Aradaki HTTP yanıtları (503/404: silinmiş görsel) sayacı ne artırır ne
-                # sıfırlar; yalnız başarılı indirme sıfırlar (karışık arızada asılılar yine birikir).
-                yanitsiz_sayac[servis] = yanitsiz_sayac.get(servis, 0) + 1
-                if yanitsiz_sayac[servis] == GYAZO_ARIZA_DURDUR:
-                    ariza_atla.add(tur)
-                    log("%s art arda %d bağlantıda yanıt vermedi (muhtemelen %s arızası); kalan %s bağlantıları bu çalıştırmada denenmeyecek, "
-                        "diğer servisler sürüyor." % (servis, GYAZO_ARIZA_DURDUR, servis, servis))
             if tur != "gyazo":
                 ardisik[tur] = ardisik.get(tur, 0) + 1 if (not yol and durum == "erisim") else 0
             if yol:
@@ -1592,7 +1614,7 @@ def gyazo_toplu_indir(conn, cozucu, ayar=None, *, en_cok=0, yeni_en_cok=0, bitis
                     sayac["bitis_nedeni"] = "hiz_siniri"
                     sayac["durduruldu"] = ("%s hız sınırı sürüyor; %d/%d bağlantı işlendi. 15 dakika sonra aynı komutu yeniden çalıştırın "
                                            "(kaldığı yerden devam eder)." % (servis, i, toplam))
-            if bekleme_sn and i < toplam and not sayac["durduruldu"] and ariza_sayac.get(servis, 0) < GYAZO_ARIZA_ESIGI:
+            if bekleme_sn and i < toplam and not sayac["durduruldu"]:  # hızlı geçişte de beklenir (429'a düşmemek için)
                 uyku(bekleme_sn)
         if ilerleme and (i % 100 == 0 or i == toplam):
             ilerleme(i, toplam, dict(sayac))
