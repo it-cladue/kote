@@ -147,9 +147,11 @@ window.Panel = (function () {
       modal.classList.add('gizli');modal.setAttribute('aria-hidden','true');document.body.style.overflow='';
       if(!odakVerme&&acan&&typeof acan.focus==='function'){try{acan.focus({preventScroll:true});}catch(_){acan.focus();}}
     }
+    var yineDe=false;  /* 2.4.0: mükerrer uyarısı onaylanınca ikinci gönderim yine_de=1 taşır */
     function gonderVeri(){
       var veri={};
       Array.prototype.forEach.call(form.elements,function(el){if(!el.name||el.name==='csrf'||el.disabled)return;if(el.type==='checkbox'){if(el.checked)veri[el.name]=el.value;return;}veri[el.name]=el.value;});
+      if(yineDe){veri.yine_de='1';yineDe=false;}
       if(onayAlan&&onayAlan.classList.contains('gizli'))delete veri.onayli;
       mesgul(true);temizle();
       kayitPost('/kayit/yeni',veri).then(function(r){
@@ -158,6 +160,7 @@ window.Panel = (function () {
       }).catch(function(err){
         if(oturumKontrol(err))return;
         var d=err.veri||{};if(d.jeton)alan('jeton').value=d.jeton;
+        if(d.hatalar&&d.hatalar.mukerrer){genelYaz(d.hata);if(window.confirm(d.hatalar.mukerrer.replace(' Yine de kaydetmek için yeniden gönderin.','')+'\n\nYine de kaydedilsin mi?')){yineDe=true;setTimeout(gonderVeri,0);}return;}
         if(d.hatalar&&Object.keys(d.hatalar).length)hatalariGoster(d.hatalar,d.hata);else{genelYaz(err.message);toast(err.message,true);}
       }).then(function(){mesgul(false);});
     }
@@ -342,9 +345,9 @@ window.Panel = (function () {
       document.getElementById('m-konum').textContent=n.i>=0?(n.i+1)+' / '+n.ids.length:'';
       modal.querySelector('.modal-onceki').disabled=!n.prev;modal.querySelector('.modal-sonraki').disabled=!n.next;
       yf.classList.toggle('gizli',!k.izin_yorum);yf.elements.alici.disabled=false;document.getElementById('m-yanit-ozet').textContent='';document.getElementById('m-yanit-vazgec').classList.add('gizli');
-      yf.elements.alici.innerHTML='<option value="">Tüm ilgili proje sorumluları</option>'+(k.yorum_alicilari||[]).map(function(u){return '<option value="'+esc(u.kullanici_adi)+'">'+esc(u.ad)+' ('+esc(u.kullanici_adi)+')</option>';}).join('');loadDraft(k.id);
+      yf.elements.alici.innerHTML='<option value="">Tüm ilgili proje sorumluları</option>'+(k.tg_ekleyen?'<option value="tg">Ekleyene sor (Telegram)</option>':'')+(k.yorum_alicilari||[]).map(function(u){return '<option value="'+esc(u.kullanici_adi)+'">'+esc(u.ad)+' ('+esc(u.kullanici_adi)+')</option>';}).join('');loadDraft(k.id);
       var comments=k.yorumlar||[];document.getElementById('m-yorum-sayi').textContent=comments.length;
-      document.getElementById('m-yorumlar').innerHTML=comments.map(function(x){var type={soru:'Soru',yanit:'Yanıt',yorum:'Yorum'}[x.tur]||'Yorum';return '<li id="yorum-'+x.id+'"><div class="yorum-baslik"><b>'+esc(x.kullanici)+'</b><span class="etiket-kucuk">'+type+'</span><small>'+esc(x.zaman)+(x.alici?' · Alıcı: '+esc(x.alici):'')+'</small></div>'+(x.yanit_id?'<small>Yanıt: <a href="#yorum-'+x.yanit_id+'">#'+x.yanit_id+'</a></small>':'')+'<p>'+esc(x.metin)+'</p>'+(k.izin_yorum?'<button class="btn kucuk" type="button" data-yanit="'+x.id+'">Yanıtla</button>':'')+'</li>';}).join('')||'<li class="bos">Henüz yorum yok.'+(k.izin_yorum?' İlk notu aşağıdan ekleyebilirsiniz.':'')+'</li>';
+      document.getElementById('m-yorumlar').innerHTML=comments.map(function(x){var type={soru:'Soru',yanit:'Yanıt',yorum:'Yorum'}[x.tur]||'Yorum';return '<li id="yorum-'+x.id+'"><div class="yorum-baslik"><b>'+esc(x.kullanici)+'</b><span class="etiket-kucuk">'+type+'</span><small>'+esc(x.zaman)+(x.alici?' · Alıcı: '+(String(x.alici).indexOf('tg:')===0?'Ekleyen (Telegram)':esc(x.alici)):'')+'</small></div>'+(x.yanit_id?'<small>Yanıt: <a href="#yorum-'+x.yanit_id+'">#'+x.yanit_id+'</a></small>':'')+'<p>'+esc(x.metin)+'</p>'+(k.izin_yorum?'<button class="btn kucuk" type="button" data-yanit="'+x.id+'">Yanıtla</button>':'')+'</li>';}).join('')||'<li class="bos">Henüz yorum yok.'+(k.izin_yorum?' İlk notu aşağıdan ekleyebilirsiniz.':'')+'</li>';
       var p=document.getElementById('m-proje');p.textContent=k.proje||'—';p.style.background=k.renk||'#64748b';p.style.color=yaziRengi(k.renk);
       var mk=document.getElementById('m-kategori');mk.textContent=k.kategori||'';mk.classList.toggle('kategori-rozet',k.kaynak==='panel'&&!!k.kategori);
       document.getElementById('m-kt').classList.toggle('gizli',!k.kt);document.getElementById('m-bekliyor').classList.toggle('gizli',!!k.kt||!!k.silindi);

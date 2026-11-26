@@ -33,6 +33,7 @@ import requests
 from PIL import Image, UnidentifiedImageError
 
 from . import db
+from . import bot_bildirim
 from . import donusum_isleri
 from .guvenli_log import text as _guvenli_metin
 
@@ -57,6 +58,32 @@ _DEVAM_NOTU = "… (devamı var)"
 _KISALTMA_NOTU = "… (çıktı kısaltıldı)"
 _HTML_ATOM = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)(?:\s[^<>]*)?>|&[A-Za-z0-9#]+;|.", re.S)
 _HTML_ETIKET = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)(?:\s[^<>]*)?>")
+# 2.4.0: aynı albümün (media_group_id) fotoğrafları bu süre içinde tek kanıt sayılır.
+_ALBUM_SANIYE = 120
+_YANIT_KOMUTU = re.compile(r"^/yan[iı]t(?:@\w+)?\s+#?(\d{1,12})\s+(.+)$", re.S | re.I)
+_DUZELT_ALANLARI = ("personel", "uye_id", "ana_uye_id", "lead_id", "tip")
+# Telegram komut menüsü (setMyCommands); her başlangıçta yeniden yazılması zararsızdır.
+KOMUT_MENUSU = [
+    {"command": "start", "description": "Başla / yarım kalan işleme dön"},
+    {"command": "son", "description": "Son 10 kaydım ve durumları"},
+    {"command": "yanit", "description": "Soruya yanıt: /yanit 1203 metin"},
+    {"command": "gyazo", "description": "Gyazo bağlantısını aç/kapat"},
+    {"command": "iptal", "description": "Mevcut işlemi iptal et"},
+    {"command": "yardim", "description": "Kısa kullanım rehberi"},
+]
+YARDIM_METNI = (
+    "<b>KANIT BOTU — KISA REHBER</b>\n"
+    "1) Fotoğrafı gönderin (en çok 2 görsel; albüm olarak da gönderebilirsiniz) ya da Lead ID yazın.\n"
+    "2) Projeyi ve kategoriyi seçin. Daha önce kayıt girdiyseniz <b>⚡ Son kullanılan</b> düğmesi ikisini tek dokunuşla seçer.\n"
+    "3) Bilgileri yazın ve <b>SON KONTROL</b> ekranında <b>Onayla</b>'ya basın. Kayıt numaranız hemen gelir.\n"
+    "Kanıtınız onaylanınca ya da silinince size buradan haber verilir.\n\n"
+    "<b>Komutlar</b>\n"
+    "/son — son 10 kaydınız (⏳ bekliyor / ✅ onaylı / ❌ silindi); onay bekleyen kaydın bilgilerini düzeltebilirsiniz\n"
+    "/yanit 1203 metin — takım liderinin sorusuna yanıt (soru mesajına Reply ile de yanıtlayabilirsiniz)\n"
+    "/gyazo — görseli ayrıca Gyazo bağlantısına dönüştürmeyi aç/kapat (varsayılan: yalnız sunucu)\n"
+    "/iptal — yarım kalan işlemi iptal eder\n"
+    "/kimim — Telegram ID'nizi gösterir"
+)
 
 
 def _env_int(name: str, default: int, lo: int, hi: int) -> int:
@@ -515,6 +542,8 @@ class KanitBot:
                 if name not in columns:
                     conn.execute(f"ALTER TABLE tg_giden ADD COLUMN {name} {kind}")
             donusum_isleri.ensure_schema(conn)
+            with db.transaction(conn):
+                bot_bildirim.ensure_schema(conn)
             # Katalog ajanı henüz ortak dosyayı teslim etmemiş eski deploylarda bot
             # dört legacy modu korur; dosya geldiğinde public API otomatik kullanılır.
             try:
@@ -923,6 +952,50 @@ class KanitBot:
                 sent += 1
         return sent
 
+    def process_bildirimler(self, limit: int = 30) -> int:
+        """2.4.0: Panelin yazdığı bot_giden kuyruğunu gönderir (onay/silme/soru).
+
+        Geçici hatalar artan bekleme ile yeniden denenir (BOT_BILDIRIM_MAX_DENEME, varsayılan 5);
+        kalıcı hatalar (bot engellendi, sohbet yok) ve üst sınırı aşanlar 'olu' olur ve
+        botun günlüğüne yazılır. 429'da yalnız ilgili sohbet duraklatılır.
+        """
+        if not self.api or self._outbox_duraklama() > 0:
+            return 0
+        conn = self._conn()
+        try:
+            rows = bot_bildirim.talep_et(conn, self.bot_id, limit)
+        finally:
+            conn.close()
+        sent = 0
+        for row in rows:
+            conn = self._conn()
+            try:
+                wait_chat = self._outbox_duraklama(row["chat_id"])
+                if wait_chat > 0:
+                    bot_bildirim.sonuclandir(conn, row, hata="sohbet hız sınırında", bekle=int(wait_chat) + 1)
+                    continue
+                try:
+                    keyboard = json.loads(row["keyboard_json"]) if row.get("keyboard_json") else None
+                    message_id = self.api.send_message(str(row["chat_id"]), str(row["metin"] or ""), keyboard)
+                except Exception as exc:
+                    retry_after = getattr(exc, "retry_after", None)
+                    if retry_after:
+                        wait = max(1, min(int(retry_after), 300))
+                        self._hiz_siniri_kaydet(str(row["chat_id"]), wait)
+                        bot_bildirim.sonuclandir(conn, row, hata=_redact(exc), bekle=wait)
+                        continue
+                    state = bot_bildirim.sonuclandir(conn, row, hata=_redact(exc), kalici=bool(getattr(exc, "kalici", False)))
+                    level = logging.ERROR if state == "olu" else logging.WARNING
+                    self._log(level, f"Panel bildirimi ({row['tur']}, kayıt {row.get('kayit_id')}) teslim edilemedi; "
+                                     f"{'vazgeçildi' if state == 'olu' else 'yeniden denenecek'} "
+                                     f"(deneme {int(row.get('deneme') or 0) + 1}): {exc}")
+                else:
+                    bot_bildirim.sonuclandir(conn, row, message_id=message_id)
+                    sent += 1
+            finally:
+                conn.close()
+        return sent
+
     # ---- kullanıcı ve oturum ------------------------------------------------------------
     def _touch_user(self, conn, user: dict) -> dict:
         uid = str(user.get("id") or "")
@@ -977,14 +1050,15 @@ class KanitBot:
             pass
 
     def _remove_pending(self, session: Optional[dict]) -> None:
-        """Pending silme işlemini DB commit'inden sonrasına erteler."""
-        pending_path = session.get("pending_path") if session else None
-        if not pending_path:
-            return
-        if self._post_commit is not None:
-            self._post_commit.append(("remove_pending", str(pending_path)))
-        else:
-            self._remove_pending_now(pending_path)
+        """Pending silme işlemini DB commit'inden sonrasına erteler (albümün 2. görseli dahil)."""
+        for key in ("pending_path", "pending2_path"):
+            pending_path = session.get(key) if session else None
+            if not pending_path:
+                continue
+            if self._post_commit is not None:
+                self._post_commit.append(("remove_pending", str(pending_path)))
+            else:
+                self._remove_pending_now(pending_path)
 
     def _maintenance(self, conn) -> bool:
         return db.ayar_al(conn, "bakim_modu", "0") == "1"
@@ -1246,11 +1320,11 @@ class KanitBot:
             for raw in row:
                 button = dict(raw)
                 data = str(button.get("callback_data") or "")
-                if data.startswith(("p:", "k:", "storage:", "t:", "q:")) or data == "lead:change":
+                if data.startswith(("p:", "k:", "storage:", "t:", "q:", "son:")) or data in {"lead:change", "yarim:devam", "duzelt:ayni"}:
                     button["style"] = "primary"
-                elif data in {"confirm", "lead:ok"}:
+                elif data in {"confirm", "lead:ok", "dup:evet", "duzelt:kaydet"}:
                     button["style"] = "success"
-                elif data in {"cancel", "lead:exit", "cancel:start"}:
+                elif data in {"cancel", "lead:exit", "cancel:start", "yarim:yeni", "dup:vazgec", "duzelt:iptal"}:
                     button["style"] = "danger"
                 # Other buttons deliberately omit style and use Telegram defaults.
                 out.append(button)
@@ -1311,10 +1385,33 @@ class KanitBot:
     def _project_codes(self, conn) -> set[str]:
         return {str(row.get("code") or "").upper() for row in self._project_rows(conn)}
 
-    def _project_keyboard(self, conn):
+    def _project_keyboard(self, conn, uid: Optional[str] = None):
         rows = self._project_rows(conn)
-        return [[self._button(str(row.get("label") or row.get("code")), f"p:{str(row.get('code')).upper()}")
+        keys = [[self._button(str(row.get("label") or row.get("code")), f"p:{str(row.get('code')).upper()}")
                  for row in rows[i:i + 3]] for i in range(0, len(rows), 3)]
+        last = self._son_kullanilan(conn, uid) if uid else None
+        if last:
+            # 2.4.0: önceki kaydın proje + kategorisi tek dokunuşla.
+            keys.insert(0, [self._button(f"⚡ Son kullanılan: {last['project']} / {last['label']}", "son:kullan")])
+        return keys
+
+    def _son_kullanilan(self, conn, uid: Optional[str]) -> Optional[dict]:
+        """Kullanıcının son Telegram kaydının proje+kategorisi; ikisi de hâlâ etkinse."""
+        if not uid:
+            return None
+        row = conn.execute(
+            "SELECT proje,kategori_code FROM kayitlar WHERE ekleyen_id=? AND anahtar LIKE 'tg:%' "
+            "AND COALESCE(kategori_code,'')<>'' ORDER BY id DESC LIMIT 1", (str(uid),)
+        ).fetchone()
+        if not row:
+            return None
+        project = str(row["proje"] or "").upper()
+        if project not in self._project_codes(conn):
+            return None
+        category = self._category_snapshot(conn, str(row["kategori_code"]).lower(), project)
+        if not category:
+            return None
+        return {"project": project, "code": str(category["code"]), "label": str(category.get("label") or category["code"])}
 
     def _category_rows(self, conn, project: str) -> list[dict]:
         catalog = self._catalog()
@@ -1383,10 +1480,23 @@ class KanitBot:
             if 0 <= index < len(questions):
                 question = questions[index]
                 required = " (zorunlu)" if question.get("required") else " (isteğe bağlı)"
-                return (f"<b>Proje:</b> {_h(session.get('project'))} | <b>Kategori:</b> {_h(session.get('category_label'))}\n\n"
+                head = f"<b>✏️ Düzelt #{_h(session.get('duzelt_kayit'))}</b>\n" if session.get("duzelt_kayit") else ""
+                current = ""
+                if session.get("duzelt_kayit"):
+                    old = (session.get("duzelt_eski") or {}).get(str(question.get("key")), "")
+                    current = f"\nŞu anki değer: <code>{_h(old or '-')}</code>"
+                return (head + f"<b>Proje:</b> {_h(session.get('project'))} | <b>Kategori:</b> {_h(session.get('category_label'))}\n\n"
                         f"<b>{index + 1}/{len(questions)} — {_h(question.get('label'))}</b>{required}\n"
-                        + ("Bir seçenek belirleyin." if question.get("type") == "select" else "Yanıtı yazın."))
+                        + ("Bir seçenek belirleyin." if question.get("type") == "select" else "Yanıtı yazın.") + current)
             return "Kategori soruları yeniden seçilmeli."
+        if step == "yarim":
+            return ("<b>Yarım kalan kanıt işlemi var.</b>\n"
+                    f"Yazdığınız metin: <code>{_h(session.get('bekleyen_metin'))}</code>\n\n"
+                    "Kaldığınız yerden devam edebilir ya da yarım işlemi iptal edip bu metinle yeni bir Lead ID kaydı başlatabilirsiniz.")
+        if step == "dup_warn":
+            return f"⚠️ {html.escape(str(session.get('dup_metin') or ''), quote=False)} Yine de kaydet?"
+        if step == "duzelt_ozet":
+            return self._duzelt_ozet(session)
         if step == "personel":
             return f"<b>Proje:</b> {_h(session.get('project'))} | <b>Kategori:</b> {_h(session.get('category_label'))}\n\n<b>Personel kodunu</b> yazın."
         if step == "member":
@@ -1426,10 +1536,13 @@ class KanitBot:
         if session.get("source_type") == "yazili":
             lines.append(f"<b>Lead ID:</b> <code>{_h(session.get('lead_id'))}</code>")
         else:
+            count = "2 görsel" if session.get("pending2_path") else "Görsel"
             if session.get("save_mode") == "gyazo" and session.get("gyazo_url"):
-                lines.append("<b>Görsel:</b> Gyazo bağlantısı ve sunucu kopyası hazır")
+                lines.append(f"<b>{count}:</b> Gyazo bağlantısı ve sunucu kopyası hazır")
+            elif session.get("save_mode") == "gyazo":
+                lines.append(f"<b>{count}:</b> sunucuda saklanacak; Gyazo bağlantısı arka planda eklenecek")
             else:
-                lines.append("<b>Görsel:</b> sunucuda saklanacak")
+                lines.append(f"<b>{count}:</b> sunucuda saklanacak")
         lines += ["────────────────", "Bilgiler doğruysa <b>Onayla</b>'ya basın; düzeltmek için <b>İptal</b>'i seçin."]
         return "\n".join(lines)
 
@@ -1593,19 +1706,59 @@ class KanitBot:
         path = (self.media_root / str(pending or "")).resolve()
         if not pending or not ext or self.media_root not in path.parents or path.parent.name != "pending" or not path.is_file():
             raise TelegramHatasi("İndirilmiş görsel bulunamadı; lütfen görseli yeniden gönderin")
+        uid = str(user["id"])
+        group = str(message.get("media_group_id") or "")
+        if (group and old_session and old_session.get("media_group_id") == group and old_session.get("source_type") == "resim"
+                and not old_session.get("duzelt_kayit")
+                and time.time() - float(old_session.get("media_group_zaman") or 0) <= _ALBUM_SANIYE):
+            # 2.4.0: aynı albümün fotoğrafı yeni kanıt başlatmaz; 2. görsel aynı kayda eklenir.
+            if old_session.get("pending2_path"):
+                self._remove_pending({"pending_path": pending})
+                if not old_session.get("album_uyari"):
+                    old_session["album_uyari"] = 1
+                    self._save_session(conn, uid, old_session)
+                    self._resume_ui(conn, uid, old_session, chat_id, "En çok 2 görsel; fazlası alınmadı.")
+                return
+            old_session.update({
+                "pending2_path": pending, "extension2": ext, "file2_id": image["file_id"],
+                "file2_unique_id": image.get("file_unique_id") or "", "source2_message_id": int(message["message_id"]),
+            })
+            self._save_session(conn, uid, old_session)
+            self._resume_ui(conn, uid, old_session, chat_id, "2. görsel de bu kanıta eklendi.")
+            return
         self._cancel_conversion(conn, old_session)
         self._remove_pending(old_session)
         session = {
-            "step": "storage", "chat_id": str(chat_id), "source_type": "resim", "source_message_id": int(message["message_id"]),
+            "step": "project", "chat_id": str(chat_id), "source_type": "resim", "source_message_id": int(message["message_id"]),
             "file_id": image["file_id"], "file_unique_id": image.get("file_unique_id") or "", "pending_path": pending, "extension": ext,
-            # Varsayılan yereldir; kullanıcı yine de açıkça saklama seçimini yapar.
+            # 2.4.0: varsayılan sunucuda saklama; saklama sorusu yalnız BOT_GYAZO_SOR=1 ile sorulur.
             "save_mode": "local", "username": str(user.get("username") or user.get("first_name") or ""),
         }
+        if group:
+            session.update({"media_group_id": group, "media_group_zaman": time.time()})
         # Yönetici oturumu akış başlatınca sessizce düşmesin.
         if old_session and old_session.get("admin_until"):
             session["admin_until"] = old_session["admin_until"]
-        self._save_session(conn, str(user["id"]), session)
-        self._show(conn, str(user["id"]), session, chat_id, self._screen(session), self._storage_keyboard())
+        if bot_bildirim.gyazo_sor():
+            session["step"] = "storage"
+            self._save_session(conn, uid, session)
+            self._show(conn, uid, session, chat_id, self._screen(session), self._storage_keyboard())
+            return
+        if os.environ.get("GYAZO_TOKEN", "").strip() and bot_bildirim.gyazo_tercihi(conn, uid):
+            self._gyazo_kuyruga(conn, uid, chat_id, session)
+        self._save_session(conn, uid, session)
+        self._show(conn, uid, session, chat_id, "<b>Görsel alındı.</b>\n\n" + self._screen(session), self._project_keyboard(conn, uid))
+
+    def _gyazo_kuyruga(self, conn, uid: str, chat_id: str, session: dict) -> None:
+        """Gyazo dönüşümü için yalnız kalıcı iş satırı; yükleme bot döngüsünde, transaction dışında yapılır."""
+        job = donusum_isleri.enqueue(
+            conn, None, uid, bot_id=self.bot_id, chat_id=chat_id,
+            source_message_id=int(session["source_message_id"]), user_id=uid,
+            local_path=str((self.media_root / str(session.get("pending_path") or "")).resolve()),
+        )
+        session.update({"save_mode": "gyazo", "conversion_job_key": job["job_key"]})
+        session.pop("gyazo_url", None)
+        session.pop("gyazo_error", None)
 
     # ---- metin ve callback işleme -------------------------------------------------------
     def _block(self, conn, user_id: str, reason: str) -> None:
@@ -1661,7 +1814,7 @@ class KanitBot:
             self._save_session(conn, user_id, session)
             self._delete_typed_message(chat_id, message_id)
             if session["step"] == "summary":
-                self._show(conn, user_id, session, chat_id, self._summary(session), self._summary_keyboard())
+                self._to_summary(conn, user_id, session, chat_id)
             elif session["step"] == "tip":
                 self._show(conn, user_id, session, chat_id, self._screen(session), self._tip_keyboard())
             else:
@@ -1672,7 +1825,7 @@ class KanitBot:
             session["step"] = "summary"
             self._save_session(conn, user_id, session)
             self._delete_typed_message(chat_id, message_id)
-            self._show(conn, user_id, session, chat_id, self._summary(session), self._summary_keyboard())
+            self._to_summary(conn, user_id, session, chat_id)
             return True
         return False
 
@@ -1687,6 +1840,8 @@ class KanitBot:
             options = [str(value) for value in question.get("options") or []]
             keys.extend([[self._button(value, f"q:{index}:{position}") for position, value in enumerate(options[i:i + 3], i)]
                          for i in range(0, len(options), 3)])
+        if session.get("duzelt_kayit") and (session.get("duzelt_eski") or {}).get(str(question.get("key"))):
+            keys.append([self._button("= Aynı kalsın", "duzelt:ayni")])
         keys.append([self._button("← Geri", "back:question")])
         return keys
 
@@ -1714,14 +1869,203 @@ class KanitBot:
         session["answers"] = answers
         session["question_index"] = index + 1
         self._rebuild_question_presets(session)
-        if session["question_index"] >= len(questions):
+        if session["question_index"] >= len(questions) and session.get("duzelt_kayit"):
+            session["step"] = "duzelt_ozet"
+            self._save_session(conn, uid, session)
+            self._show(conn, uid, session, chat_id, self._duzelt_ozet(session), self._duzelt_keyboard())
+        elif session["question_index"] >= len(questions):
             session["step"] = "summary"
             self._save_session(conn, uid, session)
-            self._show(conn, uid, session, chat_id, self._summary(session), self._summary_keyboard())
+            self._to_summary(conn, uid, session, chat_id)
         else:
             session["step"] = "question"
             self._save_session(conn, uid, session)
             self._show(conn, uid, session, chat_id, self._screen(session), self._question_keyboard(session))
+
+    # ---- 2.4.0: özet öncesi mükerrer uyarısı ----------------------------------------------
+    def _to_summary(self, conn, uid: str, session: dict, chat_id: str) -> None:
+        """SON KONTROL'den önce son 30 günde aynı proje+kategori+üye ID ya da aynı görsel var mı bakar."""
+        found = None
+        try:
+            found = bot_bildirim.mukerrer_bul(
+                conn, session.get("project"), session.get("category_code"),
+                uye_id=session.get("uye_id") or None, ana_uye_id=session.get("ana_uye_id") or None,
+                file_unique_id=(session.get("file_unique_id") or None) if session.get("source_type") == "resim" else None,
+            )
+        except Exception as exc:
+            self._log(logging.WARNING, f"Mükerrer denetimi yapılamadı: {exc}")
+        if found and int(session.get("dup_ok") or 0) != int(found["id"]):
+            session.update({"step": "dup_warn", "dup_id": int(found["id"]), "dup_metin": bot_bildirim.mukerrer_metni(found)})
+            self._save_session(conn, uid, session)
+            self._show(conn, uid, session, chat_id, self._screen(session), self._dup_keyboard())
+            return
+        session["step"] = "summary"
+        self._save_session(conn, uid, session)
+        self._show(conn, uid, session, chat_id, self._summary(session), self._summary_keyboard())
+
+    def _dup_keyboard(self):
+        return [[self._button("Evet, kaydet", "dup:evet"), self._button("Vazgeç", "dup:vazgec")]]
+
+    def _yarim_keyboard(self):
+        return [[self._button("Devam et", "yarim:devam")], [self._button("İptal et ve yeni başla", "yarim:yeni")]]
+
+    def _duzelt_keyboard(self):
+        return [[self._button("Kaydet", "duzelt:kaydet"), self._button("Vazgeç", "duzelt:iptal")]]
+
+    # ---- 2.4.0: /son ve düzeltme --------------------------------------------------------
+    def _son_kayitlar(self, conn, chat_id: str, uid: str) -> None:
+        rows = conn.execute(
+            "SELECT id,proje,kategori,uye_id,ana_uye_id,lead_id,tarih,kt,silindi FROM kayitlar "
+            "WHERE ekleyen_id=? AND anahtar LIKE 'tg:%' ORDER BY id DESC LIMIT 10", (str(uid),)
+        ).fetchall()
+        if not rows:
+            self._say(chat_id, "Henüz Telegram ile girdiğiniz kayıt yok. Başlamak için görsel gönderin veya Lead ID yazın.")
+            return
+        lines = ["<b>SON KAYITLARINIZ</b>"]
+        buttons = []
+        for row in rows:
+            state = "❌ silindi" if row["silindi"] else ("✅ onaylı" if row["kt"] else "⏳ bekliyor")
+            uye = row["uye_id"] or row["ana_uye_id"] or row["lead_id"] or ""
+            lines.append(f"#{int(row['id'])} · {_h(bot_bildirim.tarih_kisa(row['tarih']))} · {_h(row['proje'])} / {_h(row['kategori'])}"
+                         + (f" · {_h(uye)}" if uye else "") + f" · {state}")
+            if not row["silindi"] and not row["kt"]:
+                buttons.append(self._button(f"Düzelt #{int(row['id'])}", f"duzelt:{int(row['id'])}"))
+        if buttons:
+            lines.append("\nOnay bekleyen kaydın yazılı bilgilerini düzeltmek için düğmeye basın.")
+        keyboard = [buttons[i:i + 2] for i in range(0, len(buttons), 2)] or None
+        self._say(chat_id, "\n".join(lines), keyboard)
+
+    def _duzelt_sorulari(self, record: dict) -> list[dict]:
+        """Kaydın soru anlık görüntüsü; yoksa eski dört modun sabit soruları."""
+        try:
+            snapshot = json.loads(record.get("soru_anlik_json") or "{}") or {}
+        except (TypeError, ValueError):
+            snapshot = {}
+        questions = [dict(q) for q in (snapshot.get("questions") or []) if isinstance(q, dict) and q.get("key")]
+        if questions:
+            return questions
+        mode = str(record.get("kategori_mode") or "")
+        qs = [{"key": "personel", "label": "Personel Kodu", "preset": "personel", "type": "text", "required": True}]
+        if mode == "ark_ana":
+            qs += [{"key": "uye_id", "label": "Arkadaş Üye ID", "preset": "uye_id", "type": "text", "required": True},
+                   {"key": "ana_uye_id", "label": "Ana Üye ID", "preset": "ana_uye_id", "type": "text", "required": True}]
+        elif mode == "ana_only":
+            qs.append({"key": "ana_uye_id", "label": "Ana Üye ID", "preset": "ana_uye_id", "type": "text", "required": True})
+        else:
+            qs.append({"key": "uye_id", "label": "Üye ID", "preset": "uye_id", "type": "text", "required": True})
+        if mode == "sessiz_tip":
+            qs.append({"key": "tip", "label": "Sessiz / Telesekreter", "preset": "tip", "type": "select",
+                       "options": ["sessiz", "telesekreter"], "required": True})
+        if record.get("giris_tipi") == "yazili":
+            qs.append({"key": "lead_id", "label": "Lead ID", "preset": "lead_id", "type": "text", "required": True})
+        return qs
+
+    def _duzeltilebilir(self, conn, uid: str, kid: int) -> Optional[dict]:
+        row = conn.execute("SELECT * FROM kayitlar WHERE id=?", (int(kid),)).fetchone()
+        if not row:
+            return None
+        row = dict(row)
+        if (str(row.get("ekleyen_id") or "") != str(uid) or not str(row.get("anahtar") or "").startswith("tg:")
+                or row.get("kt") or row.get("silindi")):
+            return None
+        return row
+
+    def _duzelt_baslat(self, conn, uid: str, chat_id: str, kid: int, old_session: Optional[dict]) -> None:
+        record = self._duzeltilebilir(conn, uid, kid)
+        if not record:
+            self._say(chat_id, f"#{int(kid)} düzeltilemez: kayıt size ait değil, onaylanmış ya da silinmiş.")
+            return
+        questions = self._duzelt_sorulari(record)
+        try:
+            answers = json.loads(record.get("cevaplar_json") or "{}") or {}
+        except (TypeError, ValueError):
+            answers = {}
+        old = {}
+        for question in questions:
+            key, preset = str(question.get("key")), str(question.get("preset") or "")
+            value = answers.get(key)
+            if value in (None, "") and preset in _DUZELT_ALANLARI:
+                value = record.get(preset)
+            old[key] = "" if value is None else str(value)
+        session = {"step": "question", "chat_id": str(chat_id), "duzelt_kayit": int(kid), "questions": questions,
+                   "answers": {}, "question_index": 0, "duzelt_eski": old, "project": record.get("proje"),
+                   "category_label": record.get("kategori"), "duzelt_surum": int(record.get("surum") or 1)}
+        if old_session and old_session.get("admin_until"):
+            session["admin_until"] = old_session["admin_until"]
+        self._save_session(conn, uid, session)
+        self._show(conn, uid, session, chat_id, self._screen(session), self._question_keyboard(session))
+
+    def _duzelt_ozet(self, session: dict) -> str:
+        lines = [f"<b>✏️ Düzelt #{_h(session.get('duzelt_kayit'))} — KONTROL</b>"]
+        old, new = session.get("duzelt_eski") or {}, session.get("answers") or {}
+        for question in session.get("questions") or []:
+            key = str(question.get("key"))
+            before, after = old.get(key, ""), new.get(key, "")
+            mark = " (değişti)" if before != after else ""
+            lines.append(f"<b>{_h(question.get('label'))}:</b> {_h(after or '-')}{mark}")
+        lines.append("\nDeğişiklikleri kaydetmek için <b>Kaydet</b>'e basın.")
+        return "\n".join(lines)
+
+    def _duzelt_kaydet(self, conn, uid: str, session: dict) -> tuple[bool, str]:
+        kid = int(session["duzelt_kayit"])
+        record = self._duzeltilebilir(conn, uid, kid)
+        if not record:
+            return False, f"#{kid} artık düzeltilemez (onaylanmış, silinmiş ya da size ait değil); değişiklik kaydedilmedi."
+        answers = dict(session.get("answers") or {})
+        try:
+            stored = json.loads(record.get("cevaplar_json") or "{}") or {}
+        except (TypeError, ValueError):
+            stored = {}
+        before = {}
+        after = {}
+        columns = {}
+        for question in session.get("questions") or []:
+            key, preset = str(question.get("key")), str(question.get("preset") or "")
+            if key not in answers:
+                continue
+            old = (session.get("duzelt_eski") or {}).get(key, "")
+            if answers[key] == old:
+                continue
+            before[key], after[key] = old, answers[key]
+            stored[key] = answers[key]
+            if preset in _DUZELT_ALANLARI:
+                columns[preset] = answers[key] or None
+        if not after:
+            return True, f"#{kid} için değişiklik yok; kayıt olduğu gibi bırakıldı."
+        available = {row["name"] for row in conn.execute("PRAGMA table_info(kayitlar)")}
+        sets, values = [], []
+        for name, value in columns.items():
+            sets.append(f"{name}=?"); values.append(value)
+        if "cevaplar_json" in available:
+            sets.append("cevaplar_json=?"); values.append(json.dumps(stored, ensure_ascii=False, separators=(",", ":")))
+        sets += ["surum=surum+1", "guncelleme=?"]
+        values.append(_simdi())
+        conn.execute(f"UPDATE kayitlar SET {','.join(sets)} WHERE id=? AND kt=0 AND COALESCE(silindi,0)=0", (*values, kid))
+        db.denetim_yaz(conn, uid, "tg_duzeltme", record.get("proje"), record.get("anahtar"), eski=before, yeni=after,
+                       aciklama="Ekleyen kaydın bilgilerini Telegram'dan düzeltti.")
+        db.degisti(conn)
+        return True, f"✏️ #{kid} güncellendi, teşekkürler."
+
+    # ---- 2.4.0: ekleyenin soruya Telegram yanıtı ----------------------------------------
+    def _yanit_kaydet(self, conn, chat_id: str, user: dict, question_row, text: str) -> None:
+        from . import discussion
+        kid = int(question_row["kayit_id"])
+        if not question_row["yorum_id"]:
+            self._say(chat_id, "Bu soru panelde bulunamadı; yanıt kaydedilmedi.")
+            return
+        ad = str(user.get("first_name") or user.get("username") or user.get("id"))
+        try:
+            discussion.telegram_yanit(conn, int(question_row["yorum_id"]), ad, text)
+        except ValueError as exc:
+            self._say(chat_id, f"Yanıt kaydedilemedi: {_h(exc)}")
+            return
+        self._say(chat_id, f"✅ Yanıtınız #{kid} kaydına eklendi ve takım liderine iletildi.")
+
+    def _ikinci_oturum(self, session: dict) -> dict:
+        """Albümün 2. görseli için _final_path/_prepare_final_file'a verilecek görünüm."""
+        return {**session, "pending_path": session.get("pending2_path"), "extension": session.get("extension2"),
+                "file_id": session.get("file2_id"), "file_unique_id": session.get("file2_unique_id"),
+                "source_message_id": session.get("source2_message_id")}
 
     def _final_path(self, session: dict) -> tuple[Path, str]:
         """Tüm kaynak kimliklerini görünen ad + sabit hash sonekiyle namespace'e ayırır."""
@@ -1799,6 +2143,20 @@ class KanitBot:
             if prepared_gorsel != expected or self.media_root not in final.parents or not final.is_file():
                 raise TelegramHatasi("Görsel onay için hazır değil; lütfen tekrar onaylayın")
             gorsel = expected
+        gorsel2 = None
+        if session.get("source_type") == "resim" and session.get("pending2_path"):
+            second = self._ikinci_oturum(session)
+            _, expected2 = self._final_path({**second, "user_id": uid, "username": session.get("username") or user.get("username") or user.get("first_name") or ""})
+            final2 = (self.media_root / expected2).resolve()
+            prepared2 = (self._outbox_context or {}).get("prepared_final2")
+            pending2 = (self.media_root / str(session.get("pending2_path") or "")).resolve()
+            if prepared2 == expected2 and self.media_root in final2.parents and final2.is_file():
+                gorsel2 = expected2
+            elif pending2.is_file():
+                raise TelegramHatasi("İkinci görsel onay için hazır değil; lütfen tekrar onaylayın")
+            else:
+                # 2. görselin geçici kopyası kaybolmuş: ana kanıt yine kaydedilir, akış kilitlenmez.
+                self._log(logging.WARNING, "Albümün 2. görseli bulunamadı; kayıt tek görselle oluşturuldu.")
         # The durable job is intentionally still pending here.  Empty strings
         # are neither a Gyazo URL nor a local-link value; preserve NULL until a
         # verified worker result atomically updates this exact image snapshot.
@@ -1821,6 +2179,8 @@ class KanitBot:
             "soru_anlik_json": json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")),
             "cevaplar_json": json.dumps(answers, ensure_ascii=False, separators=(",", ":")),
         }
+        if gorsel2:
+            extras["gorsel2_dosya"] = gorsel2
         for name, value in extras.items():
             if name in available:
                 columns.append(name); values.append(value)
@@ -1829,10 +2189,12 @@ class KanitBot:
         # A conversion may already have verified before user confirmation. Binding
         # the exact source key atomically updates only this newly committed record.
         if gorsel and session.get("conversion_job_key"):
+            # 2.4.0: kayıt numarası onayda hemen gönderilir ve eski ekranı o siler;
+            # Gyazo sonucu ayrı, kısa bir bilgi mesajı olarak gelir.
             donusum_isleri.bind_record(
                 conn, str(session["conversion_job_key"]), kid,
                 str((self.media_root / gorsel).resolve()),
-                notice_replace_message_id=int(session["ui_message_id"]) if session.get("ui_message_id") else None,
+                notice_replace_message_id=None,
             )
         conn.execute("UPDATE tg_kullanicilar SET kayit_sayisi=kayit_sayisi+1,last_seen=? WHERE id=?", (now, uid))
         self._delete_session(conn, uid)
@@ -1841,6 +2203,8 @@ class KanitBot:
         db.degisti(conn)
         if gorsel and self._post_commit is not None:
             self._post_commit.append(("commit_media", str(session.get("pending_path") or "")))
+        if gorsel2 and self._post_commit is not None:
+            self._post_commit.append(("commit_media", str(session.get("pending2_path") or "")))
         return kid, True
 
     def _cleanup_committed_media(self, pending_path: str) -> None:
@@ -1928,8 +2292,9 @@ class KanitBot:
                     value = json.loads(row["veri"])
                 except (TypeError, ValueError):
                     continue
-                if isinstance(value, dict) and value.get("pending_path"):
-                    protected.add(self._pending_abs(value["pending_path"]) or "")
+                for key in ("pending_path", "pending2_path"):
+                    if isinstance(value, dict) and value.get(key):
+                        protected.add(self._pending_abs(value[key]) or "")
             for row in conn.execute(
                 "SELECT local_path,source_path FROM donusum_isleri WHERE durum NOT IN ('tamam','hata','belirsiz','iptal')"
             ).fetchall():
@@ -2001,7 +2366,7 @@ class KanitBot:
         step=session.get('step')
         keyboard={
             'storage':self._storage_keyboard(),
-            'project':self._project_keyboard(conn),
+            'project':self._project_keyboard(conn, uid),
             'category':self._category_keyboard(conn, str(session.get('project') or '')),
             'question':self._question_keyboard(session),'personel':[[self._button('← Geri','back:category')]],
             'member':[[self._button('← Geri','back:personel')]],
@@ -2010,6 +2375,9 @@ class KanitBot:
             'cancel_menu':self._cancel_keyboard(),
             'lead_confirm':[[self._button('Onayla','lead:ok'),self._button('Değiştir','lead:change')],[self._button('Çık','lead:exit')]],
             'lead_write':None,
+            'yarim':self._yarim_keyboard(),
+            'dup_warn':self._dup_keyboard(),
+            'duzelt_ozet':self._duzelt_keyboard(),
         }
         if step not in keyboard:
             self._say(chat_id,'Başlamak için görsel veya Lead ID gönderin.');return
@@ -2039,6 +2407,14 @@ class KanitBot:
             return
         if self._maintenance(conn) and not self._admin_yetkili(uid, session):
             self._say(chat_id, "Bot şu anda bakım modunda.");return
+        data = str(callback.get("data") or "")
+        if re.fullmatch(r"duzelt:\d{1,12}", data):
+            # /son listesindeki düğme: etkin UI değildir; yarım işlem varsa onu bozmaz.
+            if session and session.get("step") not in (None, "idle"):
+                self._resume_ui(conn, uid, session, chat_id, "Önce yarım kalan işlemi bitirin ya da /iptal yazın.")
+                return
+            self._duzelt_baslat(conn, uid, chat_id, int(data.split(":", 1)[1]), session)
+            return
         if not session:
             self._say(chat_id,"Bu işlem tamamlanmış veya iptal edilmiş. Yeni görsel ya da Lead ID gönderebilirsiniz.");return
         # Eski düğme kaydı değiştirmez; yeni ekran teslim edilirken eski UI de
@@ -2051,32 +2427,74 @@ class KanitBot:
         if int(session.get("ui_message_id") or -1) != int(message.get("message_id") or -2):
             db.denetim_yaz(conn,uid,'telegram_eski_buton',yeni=str(session.get('step')))
             self._resume_ui(conn,uid,session,chat_id,'Bu düğme eski seçim ekranına ait. Güncel adımdan devam edin.');return
-        data = str(callback.get("data") or "")
         step = session.get("step")
+        if data == "yarim:devam" and step == "yarim":
+            session["step"] = session.pop("yarim_onceki", None) or "idle"
+            session.pop("bekleyen_metin", None)
+            session.pop("bekleyen_mesaj_id", None)
+            self._save_session(conn, uid, session)
+            self._resume_ui(conn, uid, session, chat_id, "Kaldığınız yerden devam ediyorsunuz.")
+            return
+        if data == "yarim:yeni" and step == "yarim":
+            text_waiting = str(session.get("bekleyen_metin") or "")
+            message_waiting = int(session.get("bekleyen_mesaj_id") or message.get("message_id") or 0)
+            # _start_lead eski oturumun dönüşümünü iptal eder ve pending görsellerini siler.
+            self._start_lead(conn, chat_id, uid, text_waiting, message_waiting, session)
+            return
+        if data == "dup:evet" and step == "dup_warn":
+            session["dup_ok"] = int(session.get("dup_id") or 0)
+            session["step"] = "summary"
+            self._save_session(conn, uid, session)
+            self._show(conn, uid, session, chat_id, self._summary(session), self._summary_keyboard())
+            return
+        if data == "dup:vazgec" and step == "dup_warn":
+            session["step"] = "cancel_menu"
+            self._save_session(conn, uid, session)
+            self._show(conn, uid, session, chat_id, "Nereye dönmek istersiniz?", self._cancel_keyboard())
+            return
+        if session.get("duzelt_kayit"):
+            if data == "duzelt:ayni" and step == "question":
+                questions = session.get("questions") or []
+                index = int(session.get("question_index") or 0)
+                if 0 <= index < len(questions):
+                    old = (session.get("duzelt_eski") or {}).get(str(questions[index].get("key")), "")
+                    self._set_question_answer(conn, uid, session, chat_id, old)
+                    return
+            elif data == "duzelt:kaydet" and step == "duzelt_ozet":
+                ok, text_out = self._duzelt_kaydet(conn, uid, session)
+                self._delete_session(conn, uid)
+                self._terminal(conn, chat_id, int(message["message_id"]), text_out)
+                return
+            elif data == "duzelt:iptal" or (data == "back:question" and step == "question" and int(session.get("question_index") or 0) <= 0):
+                self._delete_session(conn, uid)
+                self._terminal(conn, chat_id, int(message["message_id"]), f"#{_h(session.get('duzelt_kayit'))} düzeltmesi iptal edildi; kayıt değişmedi.")
+                return
+        if data == "son:kullan" and step == "project":
+            last = self._son_kullanilan(conn, uid)
+            if not last:
+                self._show(conn, uid, session, chat_id, "Son kullanılan proje/kategori artık etkin değil; yeniden seçim yapın.", self._project_keyboard(conn, uid))
+                return
+            session.update({"project": last["project"], "step": "category"})
+            self._select_category(conn, uid, session, chat_id, last["code"])
+            return
         if data == "storage:local" and step == "storage":
             session["save_mode"] = "local"
             session.pop("gyazo_url", None)
             session.pop("gyazo_error", None)
             session["step"] = "project"
             self._save_session(conn, uid, session)
-            self._show(conn, uid, session, chat_id, self._screen(session), self._project_keyboard(conn))
+            self._show(conn, uid, session, chat_id, self._screen(session), self._project_keyboard(conn, uid))
         elif data == "storage:gyazo" and step == "storage":
             # Only a durable DB row is created here. Upload/verify run later on
             # this bot process' worker loop, never in callback or transaction.
-            job = donusum_isleri.enqueue(
-                conn, None, uid, bot_id=self.bot_id, chat_id=chat_id,
-                source_message_id=int(session["source_message_id"]), user_id=uid,
-                local_path=str((self.media_root / str(session.get("pending_path") or "")).resolve()),
-            )
-            session.update({"save_mode": "gyazo", "conversion_job_key": job["job_key"], "step": "project"})
-            session.pop("gyazo_url", None)
-            session.pop("gyazo_error", None)
+            self._gyazo_kuyruga(conn, uid, chat_id, session)
+            session["step"] = "project"
             self._save_session(conn, uid, session)
-            self._show(conn, uid, session, chat_id, self._screen(session), self._project_keyboard(conn))
+            self._show(conn, uid, session, chat_id, self._screen(session), self._project_keyboard(conn, uid))
         elif data == "lead:ok" and step == "lead_confirm":
             session["step"] = "project"
             self._save_session(conn, uid, session)
-            self._show(conn, uid, session, chat_id, self._screen(session), self._project_keyboard(conn))
+            self._show(conn, uid, session, chat_id, self._screen(session), self._project_keyboard(conn, uid))
         elif data == "lead:change" and step == "lead_confirm":
             session["step"] = "lead_write"
             self._save_session(conn, uid, session)
@@ -2087,33 +2505,13 @@ class KanitBot:
         elif data.startswith("p:") and step == "project":
             project = data[2:].upper()
             if project not in self._project_codes(conn):
-                self._show(conn, uid, session, chat_id, "Bu proje artık etkin değil; yeniden seçim yapın.", self._project_keyboard(conn))
+                self._show(conn, uid, session, chat_id, "Bu proje artık etkin değil; yeniden seçim yapın.", self._project_keyboard(conn, uid))
                 return
             session.update({"project": project, "step": "category"})
             self._save_session(conn, uid, session)
             self._show(conn, uid, session, chat_id, self._screen(session), self._category_keyboard(conn, project))
         elif data.startswith("k:") and step == "category":
-            code = data[2:].lower()
-            row = self._category_snapshot(conn, code, str(session.get("project") or ""))
-            if not row:
-                self._show(conn, uid, session, chat_id, "Bu kategori bu projede artık etkin değil; yeniden seçim yapın.", self._category_keyboard(conn, str(session.get("project") or "")))
-                return
-            snapshot_questions = [dict(q) for q in row.get("questions") or []]
-            mode = str(row.get("mode") or "custom")
-            # Catalog exposes generated snapshots for legacy presets too. Keep
-            # the established four-step wizard for those modes, while retaining
-            # that snapshot for the eventual record.
-            questions = [] if mode in _GECERLI_MODLAR else snapshot_questions
-            if not questions and mode not in _GECERLI_MODLAR:
-                self._show(conn, uid, session, chat_id, "Kategori soru tanımı geçersiz; yeniden seçim yapın.", self._category_keyboard(conn, str(session.get("project") or "")))
-                return
-            session.update({"category_code": row["code"], "category_label": row["label"], "category_mode": mode,
-                            "category_revision": row.get("revision"), "questions": questions,
-                            "question_snapshot": snapshot_questions, "answers": {}, "question_index": 0,
-                            "step": "question" if questions else "personel"})
-            self._save_session(conn, uid, session)
-            keyboard = self._question_keyboard(session) if questions else [[self._button("← Geri", "back:category")]]
-            self._show(conn, uid, session, chat_id, self._screen(session), keyboard)
+            self._select_category(conn, uid, session, chat_id, data[2:].lower())
         elif data.startswith("q:") and step == "question":
             try:
                 _, raw_index, raw_option = data.split(":", 2)
@@ -2148,7 +2546,7 @@ class KanitBot:
                 session.pop(key, None)
             session["step"] = "project"
             self._save_session(conn, uid, session)
-            self._show(conn, uid, session, chat_id, self._screen(session), self._project_keyboard(conn))
+            self._show(conn, uid, session, chat_id, self._screen(session), self._project_keyboard(conn, uid))
         elif data == "back:category" and step == "personel":
             for key in ("category_code", "category_label", "category_mode", "personel", "uye_id", "ana_uye_id", "tip"):
                 session.pop(key, None)
@@ -2171,21 +2569,22 @@ class KanitBot:
             session["tip"] = data[2:]
             session["step"] = "summary"
             self._save_session(conn, uid, session)
-            self._show(conn, uid, session, chat_id, self._summary(session), self._summary_keyboard())
+            self._to_summary(conn, uid, session, chat_id)
         elif data == "confirm" and step == "summary":
             prepared = (self._outbox_context or {}).get("prepared_final")
             kid, created = self._commit_record(conn, user, session, prepared)
             message_text = "<b>✅ Kanıtınız panele işlendi, teşekkürler.</b>" if created else "Bu kaynak mesaj zaten kaydedilmişti; tekrar kayıt oluşturulmadı."
-            # A Gyazo submission has one durable terminal source: its queue
-            # notice (success, honest failure, or ambiguity).  Sending this
-            # normal confirmation too would produce a second final message and
-            # falsely imply the remote conversion has already completed.
+            # 2.4.0: kayıt numarası her saklama yönteminde hemen gönderilir (geç gelince
+            # kullanıcılar görseli yeniden gönderiyordu). Gyazo bağlantısının sonucu ayrıca
+            # bildirilir; bu mesaj dönüşüm tamamlandı izlenimi vermez.
             waiting_for_gyazo = bool(
                 created and session.get("source_type") == "resim"
                 and session.get("save_mode") == "gyazo" and session.get("conversion_job_key")
             )
-            if not waiting_for_gyazo:
-                self._terminal(conn, chat_id, int(message["message_id"]), message_text + f"\nKayıt: <code>{kid}</code>")
+            if waiting_for_gyazo:
+                message_text = "<b>✅ Kanıtınız alındı, teşekkürler.</b>"
+            note = "\nGyazo bağlantısı arka planda ekleniyor; sonucu ayrıca bildirilecek." if waiting_for_gyazo else ""
+            self._terminal(conn, chat_id, int(message["message_id"]), message_text + f"\nKayıt: <code>{kid}</code>" + note)
         elif data == "cancel" and step == "summary":
             session["step"] = "cancel_menu"
             self._save_session(conn, uid, session)
@@ -2202,7 +2601,7 @@ class KanitBot:
                     session.pop(key, None)
                 session["step"] = "project"
                 self._save_session(conn, uid, session)
-                self._show(conn, uid, session, chat_id, self._screen(session), self._project_keyboard(conn))
+                self._show(conn, uid, session, chat_id, self._screen(session), self._project_keyboard(conn, uid))
             elif choice == "category":
                 for key in ("category_code", "category_label", "category_mode", "personel", "uye_id", "ana_uye_id", "tip"):
                     session.pop(key, None)
@@ -2218,6 +2617,32 @@ class KanitBot:
         else:
             db.denetim_yaz(conn,uid,'telegram_yanlis_adim_butonu',yeni=str(step))
             self._resume_ui(conn,uid,session,chat_id,'Bu seçenek mevcut adım için geçerli değil. Güncel ekran yenilendi.')
+
+    def _select_category(self, conn, uid: str, session: dict, chat_id: str, code: str) -> None:
+        row = self._category_snapshot(conn, code, str(session.get("project") or ""))
+        if not row:
+            session["step"] = "category"
+            self._save_session(conn, uid, session)
+            self._show(conn, uid, session, chat_id, "Bu kategori bu projede artık etkin değil; yeniden seçim yapın.", self._category_keyboard(conn, str(session.get("project") or "")))
+            return
+        snapshot_questions = [dict(q) for q in row.get("questions") or []]
+        mode = str(row.get("mode") or "custom")
+        # Catalog exposes generated snapshots for legacy presets too. Keep
+        # the established four-step wizard for those modes, while retaining
+        # that snapshot for the eventual record.
+        questions = [] if mode in _GECERLI_MODLAR else snapshot_questions
+        if not questions and mode not in _GECERLI_MODLAR:
+            session["step"] = "category"
+            self._save_session(conn, uid, session)
+            self._show(conn, uid, session, chat_id, "Kategori soru tanımı geçersiz; yeniden seçim yapın.", self._category_keyboard(conn, str(session.get("project") or "")))
+            return
+        session.update({"category_code": row["code"], "category_label": row["label"], "category_mode": mode,
+                        "category_revision": row.get("revision"), "questions": questions,
+                        "question_snapshot": snapshot_questions, "answers": {}, "question_index": 0,
+                        "step": "question" if questions else "personel"})
+        self._save_session(conn, uid, session)
+        keyboard = self._question_keyboard(session) if questions else [[self._button("← Geri", "back:category")]]
+        self._show(conn, uid, session, chat_id, self._screen(session), keyboard)
 
     def _message(self, conn, message: dict) -> None:
         chat = message.get("chat") or {}
@@ -2320,6 +2745,9 @@ class KanitBot:
 
         if text:
             command = text.split(" ", 1)[0].lower()
+            # Türkçe klavye: /yanıt, /yardım, /kayıtlarım da tanınır (yalnız bu komutlar için).
+            if command.split("@", 1)[0] in {"/yanıt", "/yardım", "/kayıtlarım"}:
+                command = command.replace("ı", "i")
             if command == "/tema":
                 self._say(chat_id, "Görünüm seçeneği kaldırıldı; Telegram'ın native düğme stilleri sabittir.")
                 return
@@ -2334,6 +2762,45 @@ class KanitBot:
                 self._remove_pending(session)
                 self._delete_session(conn, uid)
                 self._terminal(conn, chat_id, int(session.get("ui_message_id") or 0) if session else None, "Mevcut işlem iptal edildi.")
+                return
+            # 2.4.0 komutları: hiçbiri yarım kalan akışı bozmaz.
+            if command in {"/yardim", "/help"}:
+                self._say(chat_id, YARDIM_METNI)
+                return
+            if command in {"/son", "/kayitlarim"}:
+                self._son_kayitlar(conn, chat_id, uid)
+                return
+            if command == "/gyazo":
+                if bot_bildirim.gyazo_sor():
+                    self._say(chat_id, "Bu kurulumda saklama yöntemi her görselde soruluyor; ayrıca bir tercih gerekmez.")
+                    return
+                yeni = not bot_bildirim.gyazo_tercihi(conn, uid)
+                if yeni and not os.environ.get("GYAZO_TOKEN", "").strip():
+                    self._say(chat_id, "Gyazo bu kurulumda yapılandırılmamış; görselleriniz sunucuda saklanmaya devam eder.")
+                    return
+                bot_bildirim.gyazo_tercihi_yaz(conn, uid, yeni)
+                if yeni:
+                    self._say(chat_id, "Gyazo <b>açık</b>: yeni görselleriniz sunucuda saklanır ve ayrıca Gyazo bağlantısına dönüştürülür "
+                                       "(bağlantıyı bilen görebilir). Kapatmak için yeniden /gyazo yazın.")
+                else:
+                    self._say(chat_id, "Gyazo <b>kapalı</b>: görselleriniz yalnız sunucuda saklanır.")
+                return
+            if command.split("@", 1)[0] == "/yanit":
+                match = _YANIT_KOMUTU.match(text)
+                if not match:
+                    self._say(chat_id, "Kullanım: <code>/yanit 1203 yanıtınız</code> (soru mesajına Reply ile de yanıtlayabilirsiniz).")
+                    return
+                row = bot_bildirim.son_soru(conn, chat_id, int(match.group(1)))
+                if not row:
+                    self._say(chat_id, f"#{int(match.group(1))} için size yöneltilmiş bir soru bulunamadı.")
+                    return
+                self._yanit_kaydet(conn, chat_id, user, row, match.group(2))
+                return
+        reply_to = message.get("reply_to_message") if isinstance(message.get("reply_to_message"), dict) else None
+        if text and not text.startswith("/") and reply_to and reply_to.get("message_id") is not None:
+            row = bot_bildirim.soru_bul(conn, chat_id, reply_to.get("message_id"))
+            if row:
+                self._yanit_kaydet(conn, chat_id, user, row, text)
                 return
         if image:
             self._start_image(conn, chat_id, user, message, image, session)
@@ -2354,7 +2821,15 @@ class KanitBot:
         if _GYAZO_URL.fullmatch(text):
             self._say(chat_id, "Bu akışta Gyazo linkinden otomatik görsel çekmiyorum. Görseli Telegram’dan gönderin; yerel veya Gyazo kayıt biçimini seçebilirsiniz.")
             return
-        # Veri alanı beklenmiyorsa metin yeni bir Lead ID başlatır; yarım fotoğraf akışını sıfırlar.
+        if session and session.get("step") not in (None, "idle"):
+            # 2.4.0: düğme beklenirken yazılan metin yarım kanıtı silmez; kullanıcı açıkça seçer.
+            if session.get("step") != "yarim":
+                session["yarim_onceki"] = session.get("step")
+            session.update({"step": "yarim", "bekleyen_metin": text[:500], "bekleyen_mesaj_id": int(message["message_id"])})
+            self._save_session(conn, uid, session)
+            self._show(conn, uid, session, chat_id, self._screen(session), self._yarim_keyboard())
+            return
+        # Veri alanı beklenmiyorsa metin yeni bir Lead ID başlatır.
         self._start_lead(conn, chat_id, uid, text, int(message["message_id"]), session)
 
     def _preflight_confirmation(self, update: dict) -> Optional[str]:
@@ -2382,6 +2857,27 @@ class KanitBot:
             return None
         return self._prepare_final_file(user, session)
 
+    def _preflight_second(self, update: dict) -> Optional[str]:
+        """Albümün 2. görselinin final kopyası (yalnız onay callback'inde, transaction öncesi)."""
+        callback = update.get("callback_query") if isinstance(update, dict) else None
+        if not isinstance(callback, dict) or str(callback.get("data") or "") != "confirm":
+            return None
+        user, message = callback.get("from") or {}, callback.get("message") or {}
+        if not user.get("id") or str((message.get("chat") or {}).get("id")) != str(user.get("id")):
+            return None
+        conn = self._conn()
+        try:
+            session = self._get_session(conn, str(user["id"]))
+        finally:
+            conn.close()
+        if (not session or session.get("step") != "summary" or not session.get("pending2_path")
+                or int(session.get("ui_message_id") or -1) != int(message.get("message_id") or -2)):
+            return None
+        try:
+            return self._prepare_final_file(user, self._ikinci_oturum(session))
+        except TelegramHatasi:
+            return None
+
     def handle_update(self, update: dict, inbox_update_id: Optional[int] = None) -> None:
         """Bir update'in state geçişi, cevap outbox'ı ve inbox ack'ini tek commit yapar.
 
@@ -2393,13 +2889,15 @@ class KanitBot:
         update = self._prepare_update(update)
         update = self._preflight_storage_conversion(update)
         prepared_final = self._preflight_confirmation(update)
+        prepared_final2 = self._preflight_second(update)
         source_id = int(inbox_update_id if inbox_update_id is not None else update.get("update_id") or 0)
         conn = self._conn()
         post_commit: list[tuple[str, str]] = []
         old_context, old_post = self._outbox_context, self._post_commit
         try:
             with db.transaction(conn):
-                self._outbox_context = {"conn": conn, "update_id": source_id, "sequence": 0, "prepared_final": prepared_final}
+                self._outbox_context = {"conn": conn, "update_id": source_id, "sequence": 0, "prepared_final": prepared_final,
+                                        "prepared_final2": prepared_final2}
                 self._post_commit = post_commit
                 if isinstance(update.get("callback_query"), dict):
                     self._callback(conn, update["callback_query"])
@@ -2452,8 +2950,9 @@ class KanitBot:
             # crash. Unique action keys make this outbox handoff idempotent.
             for job in donusum_isleri.claim_notices(conn, limit=max(1, limit * 2), bot_id=self.bot_id):
                 if job.get("durum") == "tamam" and bool(job.get("record_applied")) and job.get("uygulama_durumu") == "uygulandi":
-                    # Ekleyene bağlantı gönderilmez (kullanıcı kararı): görsel panelde görünür, Telegram'da yalnız onay metni kalır.
-                    text = f"<b>✅ Kanıtınız panele işlendi, teşekkürler.</b>\nKayıt: <code>{int(job['record_id'])}</code>"
+                    # Ekleyene bağlantı gönderilmez (kullanıcı kararı): görsel panelde görünür. Kayıt numarası onayda
+                    # zaten gönderildi (2.4.0); burada yalnız Gyazo sonucunun kısa bilgisi kalır.
+                    text = f"<b>Gyazo bağlantısı kayda eklendi.</b>\nKayıt: <code>{int(job['record_id'])}</code>"
                 elif job.get("durum") == "tamam":
                     text = (f"<b>Görsel değişti; bağlantı kayda eklenmedi, yerel kanıt korunuyor.</b>\n"
                             f"Kayıt: <code>{int(job['record_id'])}</code>")
@@ -2529,6 +3028,7 @@ class KanitBot:
                     self._bekle(wait)
                     if self._stopped:
                         return True
+            self.komutlari_kaydet()
             while not self._stopped:
                 try:
                     # Site yönetimi duraklattığında ne polling ne stored-event
@@ -2546,10 +3046,12 @@ class KanitBot:
                     self.process_conversion_jobs()
                     self.process_pending()
                     self.process_outbox()
+                    self.process_bildirimler()
                     self.poll_once(poll_timeout)
                     self.process_pending()
                     self.process_conversion_jobs()
                     self.process_outbox()
+                    self.process_bildirimler()
                 except KeyboardInterrupt:
                     break
                 except Exception as exc:
@@ -2563,6 +3065,17 @@ class KanitBot:
             return True
         finally:
             lock.release()
+
+    def komutlari_kaydet(self) -> bool:
+        """Telegram komut menüsünü (setMyCommands) yazar; tekrar çağrılması zararsızdır, hata akışı durdurmaz."""
+        if not self.api:
+            return False
+        try:
+            self.api.call("setMyCommands", {"commands": KOMUT_MENUSU}, timeout=20)
+            return True
+        except Exception as exc:
+            self._log(logging.WARNING, f"Telegram komut menüsü yazılamadı (bot çalışmaya devam ediyor): {exc}")
+            return False
 
     def _bekle(self, saniye: float) -> bool:
         """Kesilebilir bekleme: stop() çağrılırsa (SIGTERM) hemen döner; dönüş True ise durduruldu."""

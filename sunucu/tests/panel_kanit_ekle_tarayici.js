@@ -32,6 +32,12 @@ async function oturum(browser, ayar) {
   const page = await context.newPage();
   const hatalar = [];
   page.on('pageerror', (e) => hatalar.push(String(e)));
+  // 2.4.0: yalnız mükerrer uyarısı (aynı bağlantı) onaylanır; beklenmeyen diyalog hata sayılır.
+  page.on('dialog', (d) => {
+    if (/Yine de kaydedilsin mi\?/.test(d.message())) return d.accept();
+    hatalar.push('Beklenmeyen diyalog: ' + d.message());
+    return d.dismiss();
+  });
   await page.goto(PANEL + '/giris');
   await page.fill('#giris-kullanici', ayar.kullanici || 'testadmin');
   await page.fill('#giris-sifre', SIFRE);

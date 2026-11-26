@@ -428,6 +428,7 @@ DENETIM_ADLARI={'giris':'Giriş','giris_hata':'Hatalı giriş','onayla':'Onay','
  'gyazo_link_guncelle':'Gyazo bağlantısı','gyazo_link_yerel_korundu':'Gyazo: yerel görsel korundu','hatirlatma_uret':'Hatırlatma bildirimi',
  'api_anahtar_olustur':'API anahtarı oluşturma','api_anahtar_iptal':'API anahtarı iptali','rapor_aktar':'Personel raporu çıktısı'}
 
+ISLEM_ADLARI['tg_duzeltme']='Telegram kaydını düzeltti';DENETIM_ADLARI['tg_duzeltme']='Telegram: kayıt düzeltme'  # 2.4.0 (Takım C)
 def islem_adi(code,adlar=None):
     """Sözlükte olmayan kod ham yazılmaz; alt çizgiler boşluğa çevrilir (kod ikinci kez basılmaz)."""
     code=str(code or '')
@@ -884,6 +885,7 @@ def kayit_json(kid):
         d['yorumlar']=[{k:_metin(v) for k,v in dict(x).items()} for x in baglanti().execute('SELECT id,kullanici,metin,zaman,yanit_id,alici,tur FROM yorumlar WHERE kayit_id=? ORDER BY id',(kid,))]
         try: d['yorum_alicilari']=discussion.recipients(baglanti(),r['proje'],g.k['kullanici_adi']) if d['izin_yorum'] else []
         except Exception: d['yorum_alicilari']=[]
+        from . import bot_bildirim; d['tg_ekleyen']=bool(d['izin_yorum'] and bot_bildirim.tg_hedef(r) and bot_bildirim.soru_acik())  # 2.4.0: "Ekleyene sor (Telegram)"
         from .guvenli_log import log_row
         d['soru_cevaplar']=_question_answers(r)
         d['gyazo_hazir']=bool(os.environ.get('GYAZO_TOKEN','').strip())
@@ -930,6 +932,7 @@ def _kt_uygula(c,r,v):
     c.execute('UPDATE kayitlar SET kt=?,kt_kaynak=\'panel\',kt_kim=?,kt_zaman=?,surum=surum+1,guncelleme=? WHERE id=?',(v,g.k['kullanici_adi'],simdi(),simdi(),r['id']))
     if v: _hatirlatmalari_kapat(c,r['id'])
     discussion.approval_notice(c,r,g.k['kullanici_adi'],v,r['surum']+1)
+    from . import bot_bildirim; bot_bildirim.onay_kuyruga(c,r,v)  # 2.4.0 (Takım C): Telegram ekleyene onay bildirimi
     db.denetim_yaz(c,g.k['kullanici_adi'],'onayla' if v else 'onay_kaldir',r['proje'],r['anahtar'],r['kt'],v,ip())
 
 @app.route('/kayit/<int:kid>/kt',methods=['POST'])
@@ -1225,6 +1228,8 @@ def kayit_yeni():
     for q in sorular:
         if q.get('required') and q.get('preset')!='personel':q['required']=False
     cevaplar={q['key']:degerler[q['preset']] for q in sorular if q.get('preset') in degerler and degerler.get(q['preset'])}
+    from . import bot_bildirim; uyari=None if request.form.get('yine_de')=='1' else bot_bildirim.panel_mukerrer(c,proje,kat['code'],degerler)  # 2.4.0 (Takım C)
+    if uyari:return _ekleme_hata(409,uyari,dict(degerler,yine_de='1'),{'mukerrer':uyari})
     an=simdi()
     with db.transaction(c):
         var=c.execute('SELECT id,proje,ekleyen_id FROM kayitlar WHERE anahtar=?',(anahtar,)).fetchone()
@@ -1275,6 +1280,7 @@ def _delete_state(kid,value):
         reason=db.metin_temizle(request.form.get('sebep') or '',300).strip()
         c.execute('UPDATE kayitlar SET silindi=?,silen=?,silme_zamani=?,surum=surum+1,guncelleme=? WHERE id=?',(value,g.k['kullanici_adi'] if value else None,simdi() if value else None,simdi(),kid))
         if value: _hatirlatmalari_kapat(c,kid)
+        if value: from . import bot_bildirim; bot_bildirim.silme_kuyruga(c,r,reason)  # 2.4.0 (Takım C)
         db.denetim_yaz(c,g.k['kullanici_adi'],'sil' if value else 'geri_al',r['proje'],r['anahtar'],r['silindi'],value,ip(),aciklama=reason or None); db.degisti(c)
     return jsonify(ok=True,degisiklik=True,damga=_degisiklik_damgasi())
 

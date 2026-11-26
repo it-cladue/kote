@@ -121,6 +121,8 @@ def zip_bytes():
 @pytest.fixture
 def env(monkeypatch):
     monkeypatch.setenv("BOT_PASSWORD", "parola")
+    # 2.4.0: bu dosyadaki akış testleri eski "saklama yöntemi sorulur" davranışını (BOT_GYAZO_SOR=1) kapsar.
+    monkeypatch.setenv("BOT_GYAZO_SOR", "1")
     monkeypatch.setenv("ADMIN_PASSWORD", "yonetici")
     monkeypatch.setenv("ADMIN_IDS", "1")
     for key in ("MAX_DENEME", "BOT_YETKISIZ_GORSEL_POLITIKA", "BOT_OUTBOX_MAX_DENEME", "BOT_GUNLUK_SAKLAMA_GUN",

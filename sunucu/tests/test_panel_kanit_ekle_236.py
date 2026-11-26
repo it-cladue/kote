@@ -60,7 +60,7 @@ def jeton(c):
 
 
 def gonder(c, json_mu=True, jeton_degeri=None, **alanlar):
-    veri = dict(proje='OF', link=GYAZO, personel='AYŞE.K', uye_id='445566', tip='sessiz')
+    veri = dict(proje='OF', link=GYAZO, personel='AYŞE.K', uye_id='445566', tip='sessiz', yine_de='1')  # 2.4.0: mükerrer uyarısı ayrı sınanır (test_v240_bot)
     veri.update(alanlar)
     veri = {k: v for k, v in veri.items() if v is not None}
     veri['csrf'] = csrf(c)
@@ -106,7 +106,7 @@ def test_yetki_matrisi_gorunum_ve_gonderim(web):
         assert k.get('/kayit/yeni').status_code == (200 if olur else 403), ad
         r = k.get('/kayit/yeni.json', headers=XHR)
         assert r.status_code == (200 if olur else 403), ad
-        r = k.post('/kayit/yeni', data=dict(csrf=csrf(k), jeton=jeton(k) if olur else 'a' * 32, proje='OF', link=GYAZO, personel='X'), headers=XHR)
+        r = k.post('/kayit/yeni', data=dict(csrf=csrf(k), jeton=jeton(k) if olur else 'a' * 32, proje='OF', link=GYAZO, personel='X', yine_de='1'), headers=XHR)
         assert r.status_code == (200 if olur else 403), (ad, r.json)
         if olur:
             assert r.json['ok'] and r.json['id']
@@ -213,13 +213,13 @@ def test_jeton_ve_duz_sayfa_hatalari(web):
     # Düz sayfa başarı: kayda yönlendirir, flash iletisi gösterilir.
     sayfa = k.get('/kayit/yeni').get_data(as_text=True)
     j = re.search(r'name="jeton" value="([0-9a-f]{32})"', sayfa).group(1)
-    r = k.post('/kayit/yeni', data=dict(csrf=csrf(k), jeton=j, proje='OF', link=GYAZO, personel='DUZ.SAYFA'))
+    r = k.post('/kayit/yeni', data=dict(csrf=csrf(k), jeton=j, proje='OF', link=GYAZO, personel='DUZ.SAYFA', yine_de='1'))
     assert r.status_code == 302
     kid = int(re.search(r'ac=(\d+)', r.headers['Location']).group(1))
     assert '/kayitlar?' in r.headers['Location'] and 'durum=hepsi' in r.headers['Location']
     assert 'Kayıt #%d eklendi' % kid in k.get(r.headers['Location']).get_data(as_text=True)
     # Aynı jeton tekrar (yenile → yeniden gönder): yeni kayıt yok, aynı kayda gider.
-    r = k.post('/kayit/yeni', data=dict(csrf=csrf(k), jeton=j, proje='OF', link=GYAZO, personel='DUZ.SAYFA'))
+    r = k.post('/kayit/yeni', data=dict(csrf=csrf(k), jeton=j, proje='OF', link=GYAZO, personel='DUZ.SAYFA', yine_de='1'))
     assert r.status_code == 302 and 'ac=%d' % kid in r.headers['Location'] and kayit_sayisi(a) == 1
 
 
@@ -309,7 +309,7 @@ def test_onaysiz_ekleme_bildirim_ve_yetki(web):
         assert r.json['acilabilir'] is False and 'Onaylanınca listede görünür' in r.json['mesaj']
         sayfa = d.get('/kayit/yeni').get_data(as_text=True)
         jj = re.search(r'name="jeton" value="([0-9a-f]{32})"', sayfa).group(1)
-        r = d.post('/kayit/yeni', data=dict(csrf=csrf(d), jeton=jj, proje='OF', link=GYAZO, personel='GIZLI'))
+        r = d.post('/kayit/yeni', data=dict(csrf=csrf(d), jeton=jj, proje='OF', link=GYAZO, personel='GIZLI', yine_de='1'))
         assert r.status_code == 302 and 'ac=' not in r.headers['Location']
         assert gonder(k, link=GYAZO2).json['acilabilir'] is True  # onay yetkili ekleyen görür
     finally:

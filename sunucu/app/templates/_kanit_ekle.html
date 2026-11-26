@@ -7,6 +7,7 @@
       data-kt-projeler="{{ e.ekleme_projeleri|selectattr('kt')|map(attribute='code')|list|join(',') }}" data-hostlar="{{ e.ekleme_hostlari|join(',') }}">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <input type="hidden" name="jeton" value="{{ e.jeton }}" data-ekle-jeton>
+  {% if e.degerler and e.degerler.yine_de %}<input type="hidden" name="yine_de" value="1">{% endif %}{# 2.4.0: mükerrer uyarısından sonraki gönderim kaydeder #}
   <p class="form-hata{{ '' if e.genel_hata else ' gizli' }}" id="ekle-hata" role="alert">{{ e.genel_hata or '' }}</p>
   <div class="ekle-izgara">
     <label class="ekle-alan" for="ekle-proje">Proje <span class="zorunlu" aria-hidden="true">*</span>
