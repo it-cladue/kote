@@ -14,8 +14,18 @@ from . import durum, yedek
 bp = Blueprint('isletim', __name__)
 
 
+_PANEL = None  # kaydet() ile verilen panel modülü (servis 'python -m app.panel' ile __main__ olarak çalışır; sys.modules'ta 'app.panel' olmayabilir)
+
+
 def _panel():
-    return sys.modules['app.panel']
+    if _PANEL is not None:
+        return _PANEL
+    m = sys.modules.get('app.panel')
+    if m is None:
+        m = sys.modules.get('__main__')
+        if m is None or not hasattr(m, 'ISLEM_ADLARI'):
+            raise RuntimeError('panel modülü kayıtlı değil; isletim.kaydet(app, panel) çağrılmalı')
+    return m
 
 
 def _sahip_mi():
@@ -161,8 +171,12 @@ def ayarlar():
     return render_template('ayarlar.html', gruplar=gruplar, hatalar=hatalar, girilen=girilen, duzenleyebilir=duzenleyebilir), (400 if hatalar else 200)
 
 
-def kaydet(app):
-    """panel.py'den çağrılır: blueprint + İşlem Geçmişi adları + bildirim türü/hedefi."""
+def kaydet(app, panel_modulu=None):
+    """panel.py'den çağrılır: blueprint + İşlem Geçmişi adları + bildirim türü/hedefi.
+    panel_modulu: çağıran modülün kendisi (servis 'python -m app.panel' ile __main__ olarak çalışınca gerekir)."""
+    global _PANEL
+    if panel_modulu is not None:
+        _PANEL = panel_modulu
     panel = _panel()
     app.register_blueprint(bp)
     for sozluk, adlar in ((panel.ISLEM_ADLARI, {'ayar_degistir': 'Çalışma ayarını değiştirdi', 'ayar_varsayilan': 'Çalışma ayarını varsayılana döndürdü'}),

@@ -593,3 +593,17 @@ def test_ayar_tablosu_env_degerini_okuyucunun_kullandigi_gibi_gosterir(web, monk
         assert 'GYAZO_PROXY' in t['DIS_GORSEL_PROXY']['ortam_uyari'] and ca.deger('DIS_GORSEL_PROXY', conn=con) == '0'
     finally:
         con.close()
+
+
+def test_panel_main_olarak_calisinca_isletim_kaydi_calisir(monkeypatch):
+    """Servis 'python -m app.panel' ile başlar: modül __main__ adıyla çalışır, sys.modules'ta 'app.panel' yoktur.
+    2.4.0 provasında bu yüzden KeyError('app.panel') ile web servisi açılamamıştı; kaydet(app, modül) bunu önler."""
+    import runpy, sys
+    from app import isletim
+    eski = sys.modules.pop('app.panel', None); eski_panel = isletim._PANEL
+    try:
+        ad = runpy.run_module('app.panel', run_name='kanit_prova_main')  # calistir() çağrılmaz (ad __main__ değil)
+        assert 'app' in ad and isletim._PANEL is not None and isletim._PANEL.ISLEM_ADLARI['ayar_degistir']
+    finally:
+        if eski is not None: sys.modules['app.panel'] = eski
+        isletim._PANEL = eski_panel
