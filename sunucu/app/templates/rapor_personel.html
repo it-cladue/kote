@@ -9,7 +9,7 @@
     <div>
       <p class="ust-etiket">Rapor</p>
       <h1>Personel bazında kanıtlar</h1>
-      <p class="rapor-alt-baslik">{{ po.proje_etiketi }} · {{ po.donem.etiket }}{% if po.kategori_adi %} · Kategori: {{ po.kategori_adi }}{% endif %} · Durum: {{ po.durum_adi }} · Gruplama: {{ po.grup_adi }} · Sütun: {{ po.sutun_adi }}</p>
+      <p class="rapor-alt-baslik">{{ po.proje_etiketi }} · {{ po.donem.etiket }}{% if po.kategori_adi %} · Kategori: {{ po.kategori_adi }}{% endif %} · Durum: {{ po.durum_adi }} · Gruplama: {{ po.grup_adi }} · Sütun: {{ po.sutun_adi }} · Durumlar eşiği: %{{ po.durum_ozeti.esik }}</p>
       <p class="kucukyazi rapor-zaman">Oluşturma: {{ po.olusturma }} · {{ k.ad or k.kullanici_adi }} · Yalnız silinmemiş kayıtlar sayılır.</p>
       {% if hatirlanan %}<p class="po-hatirlanan-not" data-po-hatirlanan-not role="status">Son kullandığınız süzgeçler uygulandı. <a href="{{ url_for('rapor_personel', sifirla='1') }}">Varsayılana dön</a><button type="button" class="po-not-kapat" data-po-not-kapat aria-label="Bu notu kapat">×</button></p>{% endif %}
       {% if sifirla %}<p class="po-hatirlanan-not" role="status">Hatırlanan süzgeçler silindi; varsayılan görünüm açıldı.</p>{% endif %}
@@ -24,6 +24,7 @@
     {{ poz.filtre_cubugu(po, url_for('rapor_personel'), rapor=True) }}
   </section>
   {{ poz.ozet_cipleri(po) }}
+  {{ poz.durumlar_bolumu(po) }}
   {{ poz.kisi_kartlari(po) }}
   <section class="kart po-kart po-rapor-tablo" aria-label="Tablo">
     <div class="kart-baslik"><div><h2>{{ po.grup_adi }} × {{ po.sutun_adi|lower }}{% if po.kategori_adi %} <small class="po-baslik-kategori">({{ po.kategori_adi }})</small>{% endif %}</h2><p class="kucukyazi" style="margin:0">Sütun başlığına tıklayarak sıralayın. Hücre rengi değer büyüdükçe koyulaşır; sayıya tıklayınca o kayıtlar listelenir.</p></div></div>

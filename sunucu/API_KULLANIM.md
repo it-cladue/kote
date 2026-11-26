@@ -225,6 +225,65 @@ curl -s -H "Authorization: Bearer kp_…" "https://panel.ornek/api/v1/personel-o
 - `satirlar`: toplam çoktan aza, eşitse ada göre. Personeli (ya da ekleyeni) boş kayıtlar `"personel": "(boş)"`, `"bos": true`.
 - "Bugün" ve dönem sınırları sunucunun takvim günüdür (panelle aynı). Tarih süzgeci kanıt tarihine (`tarih`) uygulanır; tarihsiz kayıtlar yalnız `donem=hepsi` ile sayılır.
 
+#### 3.6.1 Durumlar: `durumlar=1` (2.3.7)
+
+`durumlar=1` eklenirse yanıtta, panelin Rapor sayfasındaki **Durumlar** bölümüyle aynı hesapla bir `durumlar` nesnesi döner
+(aynı süzgeçler: `proje`, `donem`, `tarih1`/`tarih2`, `durum`, `grup`, `sutun`, `kategori`). Ek parametre:
+
+| Parametre | Değerler (varsayılan kalın) |
+|---|---|
+| `durumlar` | `1` (ya da `evet`, `true`) = ekle; boş, `0` (ya da `hayir`, `hayır`, `false`) = ekleme (yanıt 2.3.5 ile aynı). Başka değer → 400. |
+| `esik` | **`50`** \| `75` \| `100` — "ortalamanın altında" sınırı (ortalamanın yüzdesi). Başka değer → 400. `durumlar=1` ile `filtre.esik` de döner. |
+
+Kurallar (kişi = sonuçtaki satır; `grup=ekleyen` ise ekleyen):
+
+- **Ortalama**: sütun toplamı ÷ dönemde en az bir kaydı olan kişi sayısı; genel ortalama = kayıt sayısı ÷ kişi sayısı.
+- `ortalama_alti`: sütun ortalaması en az 2 iken `sayi < ortalama × esik/100`; en az 3 kişi ve birden çok dolu sütun varken toplamda da (`sutun: null`).
+- `hic_eklemedi`: sütun ortalaması en az 3 iken o sütunda 0 kayıt.
+- `dusus`: önceki dönemde en az 3 kayıt ve bu dönem en az %30 az; önceki dönemde kaydı olup bu dönem hiç olmayanlar (`sayi: 0`, `degisim_yuzde: -100`).
+  Önceki dönem: `bugun` → dün; `hafta` → geçen haftanın aynı günleri; `ay`, `son30`, `ozel` → başlangıçtan hemen önceki eşit uzunlukta pencere;
+  `hepsi` ve başlangıçsız özel aralıkta karşılaştırma yoktur (`onceki_donem: null`).
+- `bekleyen`: yalnız `durum=hepsi` iken; toplam en az 5 ve bekleyen oranı en az %30 (`yuzde` = bekleyen oranı).
+- `one_cikan`: toplam en az 5 ve genel ortalamanın 1,5 katı; ayrıca her sütunun en yükseği (en az 5 ve ortalamanın 2 katı).
+- Kişi sayısı 2'nin altındaysa kıyaslı gruplar (`ortalama_alti`, `hic_eklemedi`, `one_cikan`) boştur ve `kiyas_notu` dolar.
+- Personeli ya da kategorisi boş kayıtlar ortalamaya katılır ama ayrıca listelenmez. Sıralama en kötüden başlar.
+- `yuzde`: sayının ortalamaya oranı (yüzde, tam sayı); `degisim_yuzde`: önceki döneme göre değişim (yüzde, eksi = düşüş).
+- Bu liste bakılacak yerleri gösterir, bir performans değerlendirmesi değildir.
+
+```bash
+curl -s -H "Authorization: Bearer kp_…" "https://panel.ornek/api/v1/personel-ozet?proje=OF&donem=ay&durumlar=1&esik=50"
+```
+
+Örnek yanıt (yalnız `durumlar`; `donem=ozel` ile 10 günlük bir aralık, her grupta yalnız ilk öğe gösterildi, `sayi` ve `kisi_sayisi` gerçek değerdir):
+
+```json
+"durumlar": {
+  "esik": 50, "kisi_sayisi": 5, "kayit_sayisi": 75, "genel_ortalama": 15.0,
+  "ortalamalar": {"30gün": 0.0, "ARK": 2.0, "CVPS": 8.4, "DDS": 0.4, "DDT": 0.0, "HGST": 4.2, "LPST": 0.0, "PRCST": 0.0, "S.ARK": 0.0, "btagsz": 0.0},
+  "kiyas": true, "kiyas_notu": null,
+  "onceki_donem": {"tarih1": "2025-03-01", "tarih2": "2025-03-10", "kayit_sayisi": 102},
+  "gruplar": [
+    {"kod": "ortalama_alti", "baslik": "Ortalamanın altında", "sayi": 3, "kisi_sayisi": 2, "ogeler": [
+      {"kisi": "210", "sutun": "ARK", "sayi": 0, "ortalama": 2.0, "yuzde": 0, "onceki": null, "degisim_yuzde": null,
+       "aciklama": "210, ARK kategorisinde ortalamanın yarısından az kayıt ekledi (0 / ort. 2,0 · %0)"}, …]},
+    {"kod": "hic_eklemedi", "baslik": "Hiç eklemedi", "sayi": 1, "kisi_sayisi": 1, "ogeler": [
+      {"kisi": "273", "sutun": "HGST", "sayi": 0, "ortalama": 4.2, "yuzde": 0, "onceki": null, "degisim_yuzde": null,
+       "aciklama": "273 bu dönemde hiç HGST eklemedi (ort. 4,2)"}]},
+    {"kod": "dusus", "baslik": "Önceki döneme göre düşüş", "sayi": 4, "kisi_sayisi": 4, "ogeler": [
+      {"kisi": "190", "sutun": null, "sayi": 0, "ortalama": null, "yuzde": null, "onceki": 12, "degisim_yuzde": -100,
+       "aciklama": "190: bu dönem hiç kayıt yok (önceki dönem 12)"}, …]},
+    {"kod": "bekleyen", "baslik": "Onay bekleyeni yüksek", "sayi": 2, "kisi_sayisi": 2, "ogeler": [
+      {"kisi": "210", "sutun": null, "sayi": 3, "ortalama": null, "yuzde": 38, "onceki": null, "degisim_yuzde": null,
+       "aciklama": "210: onay bekleyen oranı yüksek (3 / 8 · %38)"}, …]},
+    {"kod": "one_cikan", "baslik": "Öne çıkanlar", "sayi": 2, "kisi_sayisi": 1, "ogeler": [
+      {"kisi": "280", "sutun": "CVPS", "sayi": 20, "ortalama": 8.4, "yuzde": 238, "onceki": null, "degisim_yuzde": null,
+       "aciklama": "280, CVPS kategorisinde en çok kaydı ekledi (20 / ort. 8,4 · %238)"}, …]}
+  ]
+}
+```
+
+Beş grup her zaman bu sırayla döner (boş grupta `ogeler: []`); bir grupta en çok 500 satır verilir, `sayi` tüm sayıdır. `ortalamalar` katalogdaki her kategoriyi içerir; dönemde kaydı olmayan kategoriler `0.0` ile döner.
+
 ## 4. Alan sözlüğü
 
 | Alan (`/kayitlar` JSON) | SQL sütunu | Anlamı |

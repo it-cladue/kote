@@ -20,7 +20,7 @@ from PIL import Image, UnidentifiedImageError
 from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari, personel_ozeti
 from .settings import AYAR, ROOT
 
-SURUM = '2.3.6'
+SURUM = '2.3.7'
 secret_path = Path(AYAR['BOT_KLASOR']) / 'session.key'
 secret = os.getenv('SESSION_SECRET')
 if not secret:
@@ -497,6 +497,7 @@ PO_SUZGEC_ADLARI=('proje','donem','durum','grup','sutun','kategori','tarih1','ta
 def _personel_ozet_url(endpoint,f,**ek):
     a={k:f[k] for k in ('proje','donem','durum','grup','sutun','kategori') if f.get(k)}
     if f.get('donem')=='ozel': a.update(tarih1=f.get('tarih1') or None,tarih2=f.get('tarih2') or None)
+    if f.get('esik') and f['esik']!=personel_ozeti.VARSAYILAN_ESIK: a['esik']=f['esik']  # 2.3.7: Durumlar eşiği (varsayılan %50 adrese yazılmaz)
     a.update(ek)
     return url_for(endpoint,**{k:v for k,v in a.items() if v not in (None,'')})
 
@@ -515,6 +516,18 @@ def _personel_ozet_kayit_url(f,satir=None,sutun=None):
             a['kategori']=personel_ozeti.BOS_DEGER if sutun['bos'] else sutun['deger']
         else: a['tip']=sutun['deger'] or personel_ozeti.BOS_DEGER
     return url_for('kayitlar',**a)
+
+def _po_durum_baglantilari(f,onceki_f,d):
+    """2.3.7: Durumlar satırlarının bağlantıları; kart kutularıyla aynı yardımcı (sayı ile açılan liste birebir tutar).
+    hucre → o kişinin o sütundaki kayıtları; kisi → kişinin dönemdeki tüm kayıtları; bekleyen → kişinin onay bekleyenleri;
+    onceki → kişinin önceki dönemdeki kayıtları (bu dönem hiç kaydı olmayanlar)."""
+    for grup in d['tum_gruplar']:
+        for o in grup['ogeler']:
+            satir=dict(deger=o['kisi_deger'])
+            if o['baglanti']=='hucre': o['url']=_personel_ozet_kayit_url(f,satir=satir,sutun=dict(deger=o['sutun_deger'],bos=o['sutun_bos']))
+            elif o['baglanti']=='bekleyen': o['url']=_personel_ozet_kayit_url(dict(f,durum='bekleyen'),satir=satir)
+            elif o['baglanti']=='onceki' and onceki_f: o['url']=_personel_ozet_kayit_url(onceki_f,satir=satir)
+            else: o['url']=_personel_ozet_kayit_url(f,satir=satir)
 
 PO_KART_ILK=6   # 2.3.5: kişi kartları — ilk 6 görünür, "Daha fazla göster" her basışta 12 kart daha açar
 PO_KART_ADIM=12
@@ -537,6 +550,11 @@ def _personel_ozet_hazirla(allowed,ana_sayfa=False):
         x['paylar']=[dict(ad=b['ad'],renk=b['renk'],n=x['sutunlar'].get(b['ad'],0),oran=round(x['sutunlar'].get(b['ad'],0)*100/x['toplam'],1)) for b in o['sutun_bilgi'] if x['toplam'] and x['sutunlar'].get(b['ad'])]
         x['cipler']=sorted((dict(ad=ad,n=n,renk=renkler.get(ad,'#94a3b8'),url=x['url_sutun'].get(ad)) for ad,n in x['sutunlar'].items() if n),
                            key=lambda c:(-c['n'],c['ad']==personel_ozeti.BOS,c['ad'].casefold()))
+    # 2.3.7: Durumlar — aynı süzgeçlerle önceki dönem de sayılır (hepsi / başlangıçsız özel aralıkta karşılaştırma yok).
+    onceki_f=personel_ozeti.onceki_filtre(f,datetime.now().date())
+    onceki_o=personel_ozeti.personel_ozeti(baglanti(),allowed,gizli,onceki_f) if onceki_f else None
+    durum_ozeti=personel_ozeti.durumlar(o,onceki_o,f.get('esik',personel_ozeti.VARSAYILAN_ESIK),f)
+    _po_durum_baglantilari(f,onceki_f,durum_ozeti)
     kart_endpoint='ana' if ana_sayfa else 'rapor_personel'
     # Ana sayfadaki "Tüm tablo ve rapor": süzgeç seçilmediyse yalın adres (rapor sayfası kişinin son süzgeçlerini uygulayabilsin).
     suzgecli=any(request.args.get(k) for k in PO_SUZGEC_ADLARI)
@@ -547,6 +565,8 @@ def _personel_ozet_hazirla(allowed,ana_sayfa=False):
              kategori_secenekleri=f['kategori_secenekleri'],
              kategori_secenekte=not f.get('kategori') or any(s['deger']==f['kategori'] for s in f['kategori_secenekleri']),
              kalan=max(0,len(o['satirlar'])-len(satirlar)),
+             durum_ozeti=durum_ozeti,ana_sayfa=ana_sayfa,esikler=personel_ozeti.ESIKLER,
+             durumlar_url=_personel_ozet_url('rapor_personel',f)+'#durumlar',
              proje_secenekleri=[p for p in _all_project_info() if p['code'] in allowed],
              donemler=personel_ozeti.DONEMLER,durumlar=personel_ozeti.DURUMLAR,gruplar=personel_ozeti.GRUPLAR,sutun_secenekleri=personel_ozeti.SUTUNLAR,
              rapor_url=(_personel_ozet_url('rapor_personel',f) if suzgecli or not ana_sayfa else url_for('rapor_personel')),xlsx_url=_personel_ozet_url('rapor_personel_xlsx',f),
@@ -585,6 +605,20 @@ def rapor_personel_xlsx():
     koyu=PatternFill('solid',fgColor='1F2937'); acik=PatternFill('solid',fgColor='E8EFFF'); cizgi=Side(style='thin',color='9CA3AF')
     for cell in ws[1]:
         cell.font=Font(bold=True,color='FFFFFF'); cell.fill=koyu; cell.alignment=Alignment(horizontal='center',vertical='center',wrap_text=True)
+    # 2.3.7: ikinci sayfa "Durumlar" — rapor sayfasındaki Durumlar bölümüyle aynı hesap (tüm satırlar, eşik Bilgi sayfasında).
+    d=po['durum_ozeti']
+    dbaslik,dsatirlar=personel_ozeti.durum_tablo_satirlari(d,po['sutun_adi'])
+    wd=wb.create_sheet('Durumlar')
+    wd.append(dbaslik)
+    for r in dsatirlar: wd.append(r)
+    if not dsatirlar: wd.append(['—','','','','','',d['kiyas_notu'] or 'Bu dönemde dikkat çeken bir durum yok.'])
+    for cell in wd[1]:
+        cell.font=Font(bold=True,color='FFFFFF'); cell.fill=koyu; cell.alignment=Alignment(horizontal='center',vertical='center',wrap_text=True)
+    for satir in wd.iter_rows(min_row=2):
+        satir[4].number_format='0.0'; satir[5].number_format='0%'
+    for harf,gen in zip('ABCDEFG',(26,24,18,8,10,14,70)): wd.column_dimensions[harf].width=gen
+    wd.freeze_panes='A2'
+    if dsatirlar: wd.auto_filter.ref='A1:G%d' % wd.max_row
     son=ws.max_row
     for cell in ws[son]:
         cell.font=Font(bold=True); cell.fill=acik; cell.border=Border(top=cizgi)
@@ -596,7 +630,10 @@ def rapor_personel_xlsx():
     bilgi=wb.create_sheet('Bilgi')
     for satir in (('Rapor','Personel bazında kanıtlar'),('Proje',po['proje_etiketi']),('Dönem',po['donem']['etiket']),
                   ('Durum',personel_ozeti.DURUM_ADLARI[f['durum']]),('Kategori',po['kategori_adi'] or 'Tüm kategoriler'),('Gruplama',po['grup_adi']),('Sütunlar',po['sutun_adi']),
-                  ('Kişi',po['kisi_sayisi']),('Kanıt',po['kayit_sayisi']),('Oluşturma',po['olusturma']),('Oluşturan',g.k['kullanici_adi']),
+                  ('Kişi',po['kisi_sayisi']),('Kanıt',po['kayit_sayisi']),
+                  ('Durumlar eşiği','%%%d (%s)' % (d['esik'],d['esik_aciklama'])),
+                  ('Ortalama','Kişi başına kayıt: %s' % d['genel_ortalama_tr']+(' · '+d['kiyas_notu'] if d['kiyas_notu'] else '')),
+                  ('Önceki dönem',d['onceki']['etiket'] if d['onceki'] else 'Karşılaştırma yok (Tümü ya da başlangıçsız aralık)'),('Oluşturma',po['olusturma']),('Oluşturan',g.k['kullanici_adi']),
                   ('Not','Yalnız silinmemiş kayıtlar sayılır.'+(' Onay yetkiniz olmayan projelerde onay bekleyenler sayılmaz.' if f['gizli_onaysiz'] else ''))):
         bilgi.append([personel_ozeti.guvenli_hucre(v) for v in satir])
     bilgi.column_dimensions['A'].width=14; bilgi.column_dimensions['B'].width=60

@@ -361,7 +361,10 @@ def personel_ozet():
     secili = _secili_projeler()
     if len(secili) > 1:
         raise _Red(400, 'proje tek bir proje kodu olmalı (boş = kapsamdaki tüm projeler).')
-    args = {k: request.args.get(k, '') for k in ('donem', 'durum', 'grup', 'sutun', 'tarih1', 'tarih2', 'kategori')}
+    args = {k: request.args.get(k, '') for k in ('donem', 'durum', 'grup', 'sutun', 'tarih1', 'tarih2', 'kategori', 'esik')}
+    durumlar_iste = (request.args.get('durumlar') or '').strip().lower()
+    if durumlar_iste not in ('', '0', '1', 'evet', 'hayir', 'hayır', 'true', 'false'):
+        raise _Red(400, 'durumlar için geçersiz değer (geçerli: 0, 1).')
     args['proje'] = secili[0] if secili else ''
     try:
         f, hatalar, uyarilar = po.filtre_coz(args, projeler, bugun=datetime.now().date())
@@ -380,6 +383,12 @@ def personel_ozet():
     ozet_ = po.personel_ozeti(_panel().baglanti(), projeler, None, f)
     g.api_satir = ozet_['kisi_sayisi']
     sonuc = dict(ok=True, **po.api_gorunumu(ozet_, f))
+    if durumlar_iste in ('1', 'evet', 'true'):
+        # 2.3.7: panelin Durumlar bölümüyle aynı hesap; önceki dönem aynı süzgeçlerle sayılır.
+        onceki_f = po.onceki_filtre(f, datetime.now().date())
+        onceki_o = po.personel_ozeti(_panel().baglanti(), projeler, None, onceki_f) if onceki_f else None
+        sonuc['durumlar'] = po.durumlar_api(po.durumlar(ozet_, onceki_o, f['esik'], f))
+        sonuc['filtre']['esik'] = f['esik']
     if uyarilar:
         sonuc['uyari'] = ' '.join(uyarilar)
     return jsonify(sonuc)

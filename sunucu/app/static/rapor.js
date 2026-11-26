@@ -1,15 +1,17 @@
 /* 2.3.4: personel bazında kanıt özeti — süzgeç çubuğu (değişince gönder), tablo sıralama ve yazdırma. Bağımlılık yok.
-   2.3.5: kişi kartları ("Daha fazla göster" / "Daha az göster") ve rapor sayfasında hatırlanan süzgeçler. */
+   2.3.5: kişi kartları ("Daha fazla göster" / "Daha az göster") ve rapor sayfasında hatırlanan süzgeçler.
+   2.3.7: Durumlar bölümü — Eşik düğmeleri (süzgeç formuna form="…" ile bağlı) ve grup başına "Daha fazla göster". */
 (function () {
   'use strict';
   function hepsi(sec, kok) { return Array.prototype.slice.call((kok || document).querySelectorAll(sec)); }
+  var OK_TUSLARI = { ArrowLeft: 1, ArrowRight: 1, ArrowUp: 1, ArrowDown: 1 };
 
   /* 2.3.5: hatırlanan süzgeçler. Rapor sayfasında Uygula / otomatik gönderimde süzgeçler bu kullanıcıya özel anahtarla
      (kp.raporSuzgec.<kullanıcı>) tarayıcıda saklanır. Adres hiç parametre taşımadan açılırsa saklanan süzgeçlerle aynı
      sayfaya bir kez yönlendirilir (&hatirlanan=1 notu gösterir). Döngü koruması: yönlendirmeden önce sessionStorage bayrağı
      konur, hedef sayfa bayrağı kaldırır; bayrak kalmışsa (hedefe ulaşılamadı) saklanan süzgeç silinir ve varsayılan kalır.
      Artık yetkisi olmayan proje saklanmışsa yönlendirilmez (sunucu 403 verirdi): varsayılan görünüm açılır. */
-  var HATIRLA_ADLAR = ['proje', 'donem', 'tarih1', 'tarih2', 'durum', 'grup', 'sutun', 'kategori'];
+  var HATIRLA_ADLAR = ['proje', 'donem', 'tarih1', 'tarih2', 'durum', 'grup', 'sutun', 'kategori', 'esik'];
   var BAYRAK = 'kp.raporSuzgec.yonlendirme';
   function depo(ad) { try { return window[ad] || null; } catch (_) { return null; } }
   function oku(d, k) { try { return d ? d.getItem(k) : null; } catch (_) { return null; } }
@@ -21,7 +23,8 @@
     return p;
   }
   function secenekVar(form, ad, deger) {
-    return hepsi('[name="' + ad + '"]', form).some(function (el) {
+    // 2.3.7: form.elements, formun dışında form="…" ile bağlı alanları (Durumlar → Eşik) da kapsar.
+    return Array.prototype.filter.call(form.elements, function (el) { return el.name === ad; }).some(function (el) {
       if (el.tagName === 'SELECT') return !el.disabled && hepsi('option', el).some(function (o) { return o.value === deger; });
       return el.type === 'radio' && el.value === deger;
     });
@@ -39,7 +42,9 @@
       if (ad === 'tarih1' || ad === 'tarih2') { if (/^\d{4}-\d{2}-\d{2}$/.test(v) && gelen.get('donem') === 'ozel') out.set(ad, v); return; }
       if (secenekVar(form, ad, v)) out.set(ad, v);
     });
-    var simdiki = formSuzgeci(form); simdiki.sort(); out.sort();
+    var simdiki = formSuzgeci(form);
+    if (!out.has('esik')) simdiki.delete('esik');  // 2.3.7 öncesi saklanan süzgeçte eşik yok: varsayılan eşik yeterli
+    simdiki.sort(); out.sort();
     return out.toString() === simdiki.toString() ? '' : out.toString();  // varsayılanla aynıysa yönlendirmeye gerek yok
   }
   var raporSayfa = document.getElementById('rapor-personel');
@@ -108,10 +113,56 @@
     guncelle();
   });
 
+  /* 2.3.7: Durumlar — her grupta ilk 8 satır görünür; "Daha fazla göster" kalanların hepsini açar ve odağı ilk yeni satıra
+     taşır, "Daha az göster" ilk 8'e döner. Eşik (%50 / %75 / %100) değişince süzgeç formu gönderilir ve sayfa #durumlar'a
+     açılır; klavyede ok tuşlarıyla gezinirken ~600 ms beklenir (dönem düğmeleriyle aynı davranış). */
+  hepsi('[data-po-durum-grup]').forEach(function (grup) {
+    var ogeler = hepsi('[data-po-durum-oge]', grup);
+    var dugmeler = grup.querySelector('[data-po-durum-dugmeler]');
+    if (!dugmeler) return;
+    var fazla = dugmeler.querySelector('[data-po-durum-fazla]'), az = dugmeler.querySelector('[data-po-durum-az]');
+    var baskiNot = grup.querySelector('.po-durum-baski-not');
+    var ilk = parseInt(grup.getAttribute('data-ilk'), 10) || 8;
+    function ayarla(acik) {
+      ogeler.forEach(function (li, i) { li.hidden = !acik && i >= ilk; });
+      fazla.hidden = acik; az.hidden = !acik;
+      fazla.setAttribute('aria-expanded', acik ? 'true' : 'false');
+      if (baskiNot) baskiNot.hidden = acik;
+    }
+    fazla.addEventListener('click', function () {
+      ayarla(true);
+      var hedef = ogeler[ilk] && ogeler[ilk].querySelector('a[href]');
+      if (hedef) hedef.focus();
+    });
+    az.addEventListener('click', function () { ayarla(false); fazla.focus(); });
+    dugmeler.hidden = false;
+  });
+  hepsi('[data-po-esik]').forEach(function (radyo) {
+    var form = radyo.form, okIle = false, bekleyen = null;
+    if (!form) return;
+    function gonder() {
+      if (bekleyen) { clearTimeout(bekleyen); bekleyen = null; }
+      var hedef = form.getAttribute('action') || location.pathname;
+      if (hedef.indexOf('#') < 0) form.setAttribute('action', hedef + '#durumlar');
+      form.classList.add('po-yukleniyor');
+      var bolum = radyo.closest('[data-po-durumlar]'); if (bolum) bolum.classList.add('po-yukleniyor');
+      if (form.requestSubmit) form.requestSubmit(); else form.submit();
+    }
+    radyo.addEventListener('keydown', function (e) {
+      if (OK_TUSLARI[e.key]) { okIle = true; return; }
+      if (e.key === 'Enter') { e.preventDefault(); gonder(); }
+    });
+    radyo.addEventListener('pointerdown', function () { okIle = false; });
+    radyo.addEventListener('change', function () {
+      if (bekleyen) { clearTimeout(bekleyen); bekleyen = null; }
+      if (okIle) { okIle = false; bekleyen = setTimeout(gonder, 600); return; }
+      gonder();
+    });
+  });
+
   /* 2.3.4: süzgeç değişince form gönderilir; "Özel aralık" seçilince önce tarih alanları açılır (Uygula ile gönderilir).
      Klavye: dönem/grup düğmelerinde ok tuşları her basışta sayfayı yenilemez; Enter/Boşluk, gruptan çıkış ya da
      son ok tuşundan ~600 ms sonra gönderilir. Fare/dokunma ile seçim hemen gönderilir. */
-  var OK_TUSLARI = { ArrowLeft: 1, ArrowRight: 1, ArrowUp: 1, ArrowDown: 1 };
   hepsi('[data-po-form]').forEach(function (form) {
     var tarihler = form.querySelector('[data-po-tarihler]');
     var okIle = false, bekleyen = null;

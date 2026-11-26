@@ -339,7 +339,7 @@ def test_excel_csv_ve_yazdir(web):
     ad = re.search(r'filename=([^;]+)', r.headers['Content-Disposition']).group(1).strip('"')
     assert ad == 'rapor-personel-of-hepsi-%s.xlsx' % BUGUN.isoformat()
     wb = openpyxl.load_workbook(io.BytesIO(r.data))
-    assert wb.sheetnames == ['Özet', 'Bilgi']
+    assert wb.sheetnames == ['Özet', 'Durumlar', 'Bilgi']  # 2.3.7: ikinci sayfa Durumlar
     ws = wb['Özet']
     con = db.baglan(a['DB'])
     f, _, _ = po.filtre_coz({'donem': 'hepsi', 'proje': 'OF'}, ['OF', 'PA', 'HI'])

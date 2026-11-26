@@ -1,9 +1,10 @@
 {# 2.3.4: personel bazında kanıt özeti — ana sayfa kartı ve /rapor/personel sayfasının ortak parçaları.
-   2.3.5: kategori süzgeci, tüm kişiler için kartlar (ilk 6 + "Daha fazla göster") ve kart içi kategori kutuları. #}
+   2.3.5: kategori süzgeci, tüm kişiler için kartlar (ilk 6 + "Daha fazla göster") ve kart içi kategori kutuları.
+   2.3.7: "Durumlar" bölümü (rapor sayfası) ve ana sayfa kartında tek satırlık Durumlar özeti. #}
 
 {% macro filtre_cubugu(po, action, rapor=False) -%}
 {% set f = po.f %}
-<form class="po-filtre" method="get" action="{{ action }}" data-po-form{% if not rapor %} data-po-otomatik{% endif %} aria-label="Personel özeti süzgeçleri">
+<form class="po-filtre" method="get" action="{{ action }}"{% if rapor %} id="po-filtre-form"{% endif %} data-po-form{% if not rapor %} data-po-otomatik{% endif %} aria-label="Personel özeti süzgeçleri">
   <label class="po-alan"><span>Proje</span>
     <select name="proje" data-po-degisim>
       <option value="">Tüm projeler</option>
@@ -55,6 +56,9 @@
   {% if po.kategori_adi %}<span class="po-cip po-cip-kategori" role="listitem" title="Kategori süzgeci"><i style="background:{{ (po.sutun_bilgi[0].renk if po.f.sutun == 'kategori' and po.sutun_bilgi else '#94a3b8') }}" aria-hidden="true"></i>Kategori: <b>{{ po.kategori_adi }}</b></span>{% endif %}
   <span class="po-donem kucukyazi">{{ po.donem.etiket }}{% if po.f.proje %} · {{ po.f.proje }}{% endif %}{% if po.kategori_adi %} · {{ po.kategori_adi }}{% endif %}{% if po.f.durum != 'hepsi' %} · {{ 'Onaylı' if po.f.durum == 'onayli' else 'Bekleyen' }}{% endif %}</span>
 </div>
+{% if po.ana_sayfa and po.durum_ozeti and po.durum_ozeti.ozet_parcalar %}
+<p class="po-durum-ozet" data-po-durum-ozet><span class="po-durum-ozet-etiket">Durumlar:</span> {% for p in po.durum_ozeti.ozet_parcalar %}<span class="po-durum-ozet-{{ p.kod }}">{{ p.metin }}</span>{{ ' · ' if not loop.last }}{% endfor %} <a class="metin-baglanti" href="{{ po.durumlar_url }}">Rapor <span aria-hidden="true">→</span></a></p>
+{% endif %}
 {% if po.f.gizli_onaysiz %}<p class="kucukyazi po-not">Onay yetkiniz olmayan projelerde onay bekleyen kayıtlar sayılmaz.</p>{% endif %}
 {% for u in po.uyarilar %}<p class="filtre-notu po-not" role="status">{{ u }}</p>{% endfor %}
 {%- endmacro %}
@@ -127,4 +131,51 @@
   {% endif %}
 </table>
 </div>
+{%- endmacro %}
+
+{% macro durumlar_bolumu(po) -%}
+{# 2.3.7: Durumlar — aynı süzgeçli sonuçtan dikkat çeken satırlar (personel_ozeti.durumlar). Her grupta ilk 8 satır görünür;
+   kalanlar "hidden" ile HTML'de hazırdır, rapor.js "Daha fazla göster" ile açar. Eşik düğmeleri süzgeç formuna bağlıdır
+   (form="po-filtre-form"): değişince sayfa aynı süzgeçlerle yeniden açılır ve eşik diğer süzgeçlerle birlikte hatırlanır. #}
+{% set d = po.durum_ozeti %}
+<section class="kart po-kart po-durumlar" id="durumlar" aria-labelledby="po-durumlar-baslik" data-po-durumlar>
+  <div class="po-durum-ust">
+    <div class="po-durum-baslik">
+      <h2 id="po-durumlar-baslik">Durumlar</h2>
+      <p class="kucukyazi po-durum-aciklama">Ortalama = dönemdeki {{ d.isim }} başına kayıt ({{ d.kayit_sayisi }} kayıt ÷ {{ d.kisi_sayisi }} {{ d.isim }} = {{ d.genel_ortalama_tr }}); eşik %{{ d.esik }}: {{ d.esik_aciklama }}.
+        {% if d.onceki %}Önceki dönem: {{ d.onceki.etiket }}.{% else %}Önceki dönemle karşılaştırma yok (Tümü ya da başlangıçsız aralık).{% endif %}
+        Bu liste bakılacak yerleri gösterir, bir değerlendirme değildir.</p>
+    </div>
+    <fieldset class="po-alan po-segmentler po-esik"><legend>Eşik</legend>
+      <div class="po-segment-grup">{% for e in po.esikler %}<label class="po-segment" title="{{ 'Ortalamanın yarısının altı' if e == 50 else ('Ortalamanın dörtte üçünün altı' if e == 75 else 'Ortalamanın altı') }}"><input type="radio" name="esik" value="{{ e }}" form="po-filtre-form" data-po-esik {{ 'checked' if d.esik == e }}><span>%{{ e }}</span></label>{% endfor %}</div>
+    </fieldset>
+  </div>
+  {% if d.kiyas_notu %}<p class="po-durum-not" role="status">{{ d.kiyas_notu }}</p>{% endif %}
+  {% if d.gruplar %}
+  {# JavaScript yoksa "Daha fazla göster" çalışmaz: tüm satırlar ekranda görünsün. #}
+  <noscript><style>@media screen { #durumlar .po-durum-liste > li[hidden] { display: block !important; } }</style></noscript>
+  <div class="po-durum-izgara">
+  {% for g in d.gruplar %}
+    <div class="po-durum-grup po-durum-{{ g.kod }}" data-po-durum-grup data-ilk="{{ d.ilk }}">
+      <h3 class="po-durum-grup-baslik"><span class="po-durum-isaret" aria-hidden="true"></span>{{ g.baslik }} <span class="po-rozet" title="{{ g.sayi }} satır · {{ g.kisi_sayisi }} {{ d.isim }}">{{ g.sayi }}</span></h3>
+      <ul class="po-durum-liste">
+      {% for o in g.ogeler %}
+        <li data-po-durum-oge{% if loop.index > d.ilk %} hidden{% endif %}><a href="{{ o.url }}" title="{{ o.aciklama }} — kayıtları aç">{% if o.renk %}<i class="po-durum-nokta" style="background:{{ o.renk }}" aria-hidden="true"></i>{% endif %}<b>{{ o.kisi }}</b>{{ o.metin }} <span class="po-durum-sayilar">({{ o.parantez }})</span></a></li>
+      {% endfor %}
+      </ul>
+      {% if g.kesildi %}<p class="kucukyazi po-durum-kesildi">İlk {{ g.ogeler|length }} satır listelendi; {{ g.kesildi }} satır daha var.</p>{% endif %}
+      {% if g.ogeler|length > d.ilk %}
+      <div class="po-durum-dugmeler" data-po-durum-dugmeler hidden>
+        <button type="button" class="btn kucuk" data-po-durum-fazla aria-expanded="false">Daha fazla göster ({{ g.ogeler|length - d.ilk }} satır daha)</button>
+        <button type="button" class="btn kucuk hayalet" data-po-durum-az hidden>Daha az göster</button>
+      </div>
+      <p class="kucukyazi po-durum-baski-not">… {{ g.ogeler|length - d.ilk }} satır daha (tümü Excel'in "Durumlar" sayfasında).</p>
+      {% endif %}
+    </div>
+  {% endfor %}
+  </div>
+  {% else %}
+  <p class="po-durum-bos">Bu dönemde dikkat çeken bir durum yok.</p>
+  {% endif %}
+</section>
 {%- endmacro %}
