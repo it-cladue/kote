@@ -169,6 +169,51 @@ FROM kayitlar k LEFT JOIN yorumlar y ON y.kayit_id = k.id
 GROUP BY k.proje
 ```
 
+### 3.6 `GET /api/v1/personel-ozet` (2.3.4)
+
+Panelin **Rapor** sayfasındaki "Personel bazında kanıtlar" tablosu: personel (ya da ekleyen) × kategori (ya da tip) sayıları.
+Silinmiş kayıtlar sayılmaz; anahtarın proje kapsamı uygulanır.
+
+| Parametre | Değerler (varsayılan kalın) |
+|---|---|
+| `proje` | Tek proje kodu; boş = anahtarın tüm projeleri. Kapsam dışı → 403, birden çok proje → 400. |
+| `donem` | `bugun` \| `hafta` (pazartesiden bugüne) \| **`ay`** (ayın 1'inden bugüne) \| `son30` \| `hepsi` \| `ozel` |
+| `tarih1`, `tarih2` | `donem=ozel` ile `YYYY-AA-GG` (biri boş olabilir; ters verilirse yer değiştirilir, `uyari` döner). `donem` yokken tarih verilirse `ozel` sayılır. |
+| `durum` | **`hepsi`** \| `onayli` \| `bekleyen`. "Yalnız onaylı" anahtarda her zaman `onayli` (başka değer istenirse `uyari` döner). |
+| `grup` | **`personel`** \| `ekleyen` (Telegram'dan ekleyen kişinin adı) |
+| `sutun` | **`kategori`** \| `tip` |
+
+Tanınmayan değer ya da hatalı tarih → 400 (`hata` alanında hangi parametre olduğu yazar).
+
+```bash
+curl -s -H "Authorization: Bearer kp_…" "https://panel.ornek/api/v1/personel-ozet?proje=OF&donem=ay&durum=hepsi&grup=personel&sutun=kategori"
+```
+
+Örnek yanıt (kısaltılmış):
+
+```json
+{
+  "ok": true,
+  "filtre": {"proje": "OF", "projeler": ["OF"], "donem": "ay", "durum": "hepsi", "grup": "personel", "sutun": "kategori",
+             "tarih1": "2026-11-01", "tarih2": "2026-11-26"},
+  "donem": {"kod": "ay", "ad": "Bu ay", "tarih1": "2026-11-01", "tarih2": "2026-11-26", "etiket": "Bu ay (01.11.2026 – 26.11.2026)"},
+  "sutunlar": ["ARK", "DDS", "DDT", "HGST", "PRCST", "LPST", "CVPS", "btagsz", "30gün", "S.ARK"],
+  "satirlar": [
+    {"personel": "ALI.K", "bos": false, "toplam": 14, "onayli": 10, "bekleyen": 4, "onay_orani": 71,
+     "sutunlar": {"ARK": 2, "DDS": 5, "DDT": 0, "HGST": 7, "PRCST": 0, "LPST": 0, "CVPS": 0, "btagsz": 0, "30gün": 0, "S.ARK": 0}},
+    {"personel": "(boş)", "bos": true, "toplam": 1, "onayli": 0, "bekleyen": 1, "onay_orani": 0, "sutunlar": {"ARK": 1, "DDS": 0, "…": 0}}
+  ],
+  "toplam": {"toplam": 15, "onayli": 10, "bekleyen": 5, "onay_orani": 67, "sutunlar": {"ARK": 3, "DDS": 5, "HGST": 7, "…": 0}},
+  "kisi_sayisi": 2,
+  "kayit_sayisi": 15
+}
+```
+
+- `sutunlar`: sütun adları; kategoride proje kataloğu sırası, katalogda olmayan eski adlar sonda, boş kategori `"(boş)"` en sonda
+  (büyük/küçük harf farkı olan adlar tek sütunda birleşir). Tipte en çok kullanılandan aza.
+- `satirlar`: toplam çoktan aza, eşitse ada göre. Personeli (ya da ekleyeni) boş kayıtlar `"personel": "(boş)"`, `"bos": true`.
+- "Bugün" ve dönem sınırları sunucunun takvim günüdür (panelle aynı). Tarih süzgeci kanıt tarihine (`tarih`) uygulanır; tarihsiz kayıtlar yalnız `donem=hepsi` ile sayılır.
+
 ## 4. Alan sözlüğü
 
 | Alan (`/kayitlar` JSON) | SQL sütunu | Anlamı |

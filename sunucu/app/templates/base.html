@@ -21,6 +21,7 @@
     <a href="{{ url_for('ana') }}" class="{{ 'aktif' if ep == 'ana' }}" {% if ep == 'ana' %}aria-current="page"{% endif %}>Ana sayfa</a>
     <a href="{{ url_for('kayitlar') }}" class="{{ 'aktif' if ep == 'kayitlar' }}" {% if ep == 'kayitlar' %}aria-current="page"{% endif %}>Kayıtlar</a>
     <a href="{{ url_for('disa_aktar_sayfasi') }}" class="{{ 'aktif' if ep == 'disa_aktar_sayfasi' }}" {% if ep == 'disa_aktar_sayfasi' %}aria-current="page"{% endif %}>Çıktı</a>
+    {% if projeler() %}<a href="{{ url_for('rapor_personel') }}" class="{{ 'aktif' if ep == 'rapor_personel' }}" {% if ep == 'rapor_personel' %}aria-current="page"{% endif %}>Rapor</a>{% endif %}
     <a href="{{ url_for('excel_kontrol') }}" class="{{ 'aktif' if ep == 'excel_kontrol' }}" {% if ep == 'excel_kontrol' %}aria-current="page"{% endif %}>Kanıt Kontrolü</a>
     <a href="{{ url_for('bildirim_sayfasi') }}" class="{{ 'aktif' if ep == 'bildirim_sayfasi' }}" {% if ep == 'bildirim_sayfasi' %}aria-current="page"{% endif %}>Bildirimler</a>
     <a href="{{ url_for('denetim') }}" class="{{ 'aktif' if ep == 'denetim' }}" {% if ep == 'denetim' %}aria-current="page"{% endif %}>İşlem Geçmişi</a>

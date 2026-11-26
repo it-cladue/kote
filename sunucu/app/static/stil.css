@@ -557,6 +557,14 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius
   .katalog-soru { grid-template-columns: 1fr 1fr; }
   .katalog-soru label[data-question-options-label], .katalog-soru > p { grid-column: 1 / -1; }
 }
+/* 2.3.4: "Rapor" eklenince menü 1280 px dizüstünde ikinci satıra taşmasın; öğeler biraz sıklaştırılır. */
+@media (min-width: 901px) and (max-width: 1365px) {
+  .ust { gap: var(--b1); }
+  .ust .menu a, .ust .menu .menu-baglanti { padding: 8px 8px; }
+}
+@media (min-width: 901px) and (max-width: 1180px) {
+  .ust .menu a, .ust .menu .menu-baglanti { padding: 7px 6px; font-size: 13.5px; }
+}
 @media (max-width: 900px) {
   .icerik { padding: var(--b2) var(--b2) 40px; }
   .ust { padding: 0 var(--b2); flex-wrap: wrap; min-height: 56px; gap: var(--b1); }
@@ -735,4 +743,165 @@ body:has(#modal:not(.gizli)) .bildirim-popuplar, body.lightbox-acik .bildirim-po
   .hp-pencere { max-height: calc(100vh - 76px); }
   .hp-liste li { flex-wrap: wrap; }
   .hp-liste li .btn, .hp-alt .btn, .bp-eylem .btn { min-height: 40px; }
+}
+
+/* ---------- 2.3.4: personel bazında kanıt özeti (ana sayfa kartı + /rapor/personel) ---------- */
+.po-kart { padding: 20px; margin-top: var(--b4); }
+.po-baslik { margin-bottom: 12px; }
+.po-filtre { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; padding: 12px 14px; background: var(--yuzey-2); border: 1px solid var(--cizgi); border-radius: var(--yuvarlak); }
+.po-filtre.po-yukleniyor { opacity: .65; pointer-events: none; }
+.po-alan { display: flex; flex-direction: column; gap: 5px; margin: 0; min-width: 0; font-weight: 400; }
+.po-alan > span, .po-alan > legend, .po-tarihler label > span { font-size: 11.5px; font-weight: 700; color: var(--soluk); letter-spacing: .04em; text-transform: uppercase; padding: 0; }
+.po-alan select { margin: 0; min-height: 36px; padding-top: 6px; padding-bottom: 6px; font-size: 14px; min-width: 150px; }
+fieldset.po-alan { border: 0; padding: 0; display: block; }
+/* 2.3.4: legend, span etiketlerle aynı satırda dursun (tarayıcının legend yerleşimi 5 px aşağı itiyordu). */
+fieldset.po-alan > legend { float: left; width: 100%; margin: 0 0 5px; line-height: inherit; }
+fieldset.po-alan > legend + * { clear: left; }
+.po-segment-grup { display: inline-flex; flex-wrap: wrap; gap: 2px; background: var(--yuzey-3); padding: 3px; border-radius: 9px; }
+.po-segment { position: relative; margin: 0; cursor: pointer; font-weight: 400; }
+.po-segment input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.po-segment span { display: inline-flex; align-items: center; min-height: 30px; padding: 4px 11px; border-radius: 7px; font-size: 13px; color: var(--yazi-2); white-space: nowrap; border: 1px solid transparent; transition: background .12s, color .12s; }
+.po-segment:hover span { background: color-mix(in srgb, var(--kart) 60%, transparent); }
+.po-segment input:checked + span { background: var(--kart); color: var(--yazi); font-weight: 650; border-color: var(--cizgi); box-shadow: var(--golge); }
+.po-segment input:focus-visible + span { outline: 3px solid var(--odak); outline-offset: 1px; }
+.po-tarihler { flex-direction: row; gap: 8px; }
+.po-tarihler label { display: flex; flex-direction: column; gap: 5px; margin: 0; }
+.po-tarihler input { margin: 0; min-height: 36px; padding: 5px 9px; }
+.po-uygula:empty { display: none; }
+.po-ozet { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 12px; }
+.po-cip { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 12px; border-radius: 999px; background: var(--yuzey-2); border: 1px solid var(--cizgi); font-size: 13px; color: var(--soluk); }
+.po-cip b { font-size: 16px; color: var(--yazi); font-variant-numeric: tabular-nums; }
+.po-cip.onayli b { color: var(--yesil); } .po-cip.bekleyen b { color: var(--turuncu); }
+.po-donem { margin-left: auto; }
+.po-not { margin: -4px 0 10px; }
+.po-lider { list-style: none; margin: 0 0 16px; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.po-lider-kart { --madalya: #94a3b8; position: relative; padding: 14px 16px 12px; border: 1px solid var(--cizgi); border-radius: var(--yuvarlak); background: linear-gradient(180deg, color-mix(in srgb, var(--madalya) 10%, var(--kart)), var(--kart) 70%); box-shadow: var(--golge); overflow: hidden; min-width: 0; }
+.po-lider-kart::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--madalya); }
+.po-lider-kart.sira-1 { --madalya: #d4a017; } .po-lider-kart.sira-2 { --madalya: #8a97ab; } .po-lider-kart.sira-3 { --madalya: #b8733a; }
+.po-lider-ust { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.po-sira { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--madalya); color: #fff; font-weight: 800; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.po-lider-ad { font-weight: 650; font-size: 15px; color: var(--yazi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.po-lider-sayi { display: flex; align-items: baseline; gap: 6px; margin: 8px 0 10px; }
+.po-lider-sayi b { font-size: 28px; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.po-lider-sayi > span { color: var(--soluk); font-size: 13px; }
+.po-lider-sayi .po-oran { margin-left: auto; font-size: 12px; font-weight: 650; color: var(--yesil); background: var(--yesil-yumusak); padding: 2px 8px; border-radius: 999px; }
+.po-pay { display: flex; height: 7px; border-radius: 999px; overflow: hidden; background: var(--yuzey-3); gap: 1px; }
+.po-pay span { display: block; height: 100%; min-width: 3px; }
+.po-lider-kat { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 0; font-size: 12px; color: var(--soluk); }
+.po-lider-kat span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.po-lider-kat i, .po-kat-nokta { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.po-kat-nokta { margin-right: 5px; vertical-align: 1px; }
+.po-tablo-sarici { box-shadow: none; }
+.po-rapor-tablo .po-tablo-sarici { max-height: 72vh; }
+.tablo.po-tablo { min-width: 0; font-size: 13.5px; overflow: visible; } /* overflow görünür: yapışkan başlık/sütun/toplam sarıcıya göre çalışır */
+.po-tablo th, .po-tablo td { padding: 8px 10px; }
+.po-tablo thead th { vertical-align: bottom; z-index: 2; }
+.po-tablo thead th.po-kat { white-space: nowrap; min-width: 58px; text-transform: none; letter-spacing: .01em; font-size: 12.5px; }
+.po-tablo .po-sayi { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.po-tablo td { max-width: none; }
+.po-tablo .po-ad-sutun { position: sticky; left: 0; z-index: 1; min-width: 140px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; box-shadow: inset -1px 0 0 var(--cizgi); }
+.po-tablo thead th.po-ad-sutun { z-index: 3; }
+.po-tablo tbody th, .po-tablo tfoot th { text-transform: none; letter-spacing: 0; font-size: 13.5px; color: var(--yazi); font-weight: 600; top: auto; background: var(--kart); }
+.po-tablo tbody tr:nth-child(even) th { background: color-mix(in srgb, var(--yuzey-2) 55%, var(--kart)); }
+.po-tablo tbody tr:hover th { background: var(--birincil-yumusak); }
+.po-tablo tbody th a { color: var(--yazi); }
+.po-tablo tbody th a:hover { color: var(--birincil); }
+.po-tablo tbody tr td.po-toplam { background: color-mix(in srgb, var(--yuzey-3) 60%, var(--kart)); }
+.po-tablo .po-onayli { color: var(--yesil); } .po-tablo .po-bekleyen { color: var(--turuncu); }
+.po-tablo thead .po-onayli, .po-tablo thead .po-bekleyen { color: var(--soluk); }
+.po-oran-kucuk { margin-left: 5px; font-size: 11px; color: var(--soluk); }
+.po-hucre a { display: block; color: var(--yazi); font-weight: 600; margin: -8px -10px; padding: 8px 10px; }
+.po-hucre a:hover { text-decoration: underline; color: var(--birincil); }
+.po-sifir { color: var(--soluk); opacity: .45; }
+/* Isı kademesi: açık mavi tonları (koyu temada --birincil açık mavi olduğundan koyu zeminde de okunur); sayı her zaman yazılır. */
+.po-tablo tbody tr td.isi-1 { background: color-mix(in srgb, var(--birincil) 7%, var(--kart)); }
+.po-tablo tbody tr td.isi-2 { background: color-mix(in srgb, var(--birincil) 14%, var(--kart)); }
+.po-tablo tbody tr td.isi-3 { background: color-mix(in srgb, var(--birincil) 22%, var(--kart)); }
+.po-tablo tbody tr td.isi-4 { background: color-mix(in srgb, var(--birincil) 31%, var(--kart)); }
+.po-tablo tbody tr td.isi-5 { background: color-mix(in srgb, var(--birincil) 42%, var(--kart)); }
+.po-tablo tfoot td, .po-tablo tfoot th { position: sticky; bottom: 0; background: var(--yuzey-3); font-weight: 700; border-top: 2px solid var(--cizgi-koyu); border-bottom: 0; }
+.po-tablo tfoot th.po-ad-sutun { z-index: 3; }
+.po-tablo tfoot a { color: var(--yazi); }
+.po-tablo thead th button { all: unset; cursor: pointer; display: inline; }
+.po-baski-etiket { display: none; }
+.po-tablo thead th button:focus-visible { outline: 3px solid var(--odak); outline-offset: 2px; border-radius: 3px; }
+.po-tablo thead th[aria-sort] button { color: var(--yazi); }
+.po-tablo thead th[aria-sort="descending"] button::after { content: " ↓"; }
+.po-tablo thead th[aria-sort="ascending"] button::after { content: " ↑"; }
+.po-mobil { display: none; list-style: none; margin: 0; padding: 0; gap: 10px; }
+.po-mobil-kart { border: 1px solid var(--cizgi); border-radius: var(--yuvarlak); padding: 12px 14px; background: var(--yuzey-2); min-width: 0; }
+.po-mobil-ust { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.po-mobil-ad { font-weight: 650; color: var(--yazi); overflow-wrap: anywhere; min-width: 0; }
+.po-mobil-toplam { white-space: nowrap; color: var(--soluk); font-size: 13px; }
+.po-mobil-toplam b { font-size: 18px; color: var(--yazi); font-variant-numeric: tabular-nums; }
+.po-mobil-durum { font-size: 12.5px; color: var(--soluk); margin: 2px 0 8px; }
+.po-mobil-rozetler { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.po-rozet { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 6px; background: var(--kart); border: 1px solid var(--cizgi); border-left: 3px solid var(--kat-renk, var(--birincil)); color: var(--yazi); font-size: 12.5px; min-height: 32px; }
+.po-rozet b { font-variant-numeric: tabular-nums; }
+.po-alt { margin: 12px 0 0; }
+.rapor-ust .rapor-alt-baslik { color: var(--yazi-2); font-weight: 500; }
+.rapor-ust .rapor-zaman { margin-top: 2px; }
+.rapor-filtre-kart { margin-top: 0; padding: 0; border: 0; box-shadow: none; background: transparent; }
+.rapor-sayfa > .po-ozet { margin-top: 4px; }
+.rapor-suzgec-notu { margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+@media (max-width: 1100px) { .po-lider { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } }
+@media (max-width: 900px) {
+  .po-kart { padding: 14px; }
+  .po-filtre { padding: 10px; gap: 10px; }
+  .po-alan { width: 100%; }
+  .po-alan select { width: 100%; min-height: 40px; }
+  .po-segment-grup { display: flex; width: 100%; }
+  .po-segment { flex: 1 1 30%; }
+  .po-segment span { justify-content: center; width: 100%; min-height: 36px; padding: 4px 8px; }
+  .po-tarihler label { flex: 1 1 0; min-width: 0; }
+  .po-tarihler input { width: 100%; }
+  .po-donem { margin-left: 0; flex-basis: 100%; }
+  .po-lider { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .po-lider-kart { padding: 10px 10px 9px; }
+  .po-lider-ust { gap: 6px; }
+  .po-sira { width: 20px; height: 20px; font-size: 11px; }
+  .po-lider-ad { font-size: 13px; }
+  .po-lider-sayi { flex-wrap: wrap; margin: 6px 0 8px; gap: 4px; }
+  .po-lider-sayi b { font-size: 22px; }
+  .po-lider-sayi .po-oran { margin-left: 0; font-size: 11px; padding: 1px 6px; }
+  .po-lider-kat { display: none; }
+  #personel-ozet .po-masaustu { display: none; }
+  #personel-ozet .po-mobil { display: grid; }
+  .po-tablo .po-ad-sutun { min-width: 110px; max-width: 150px; }
+  .rapor-eylemler { width: 100%; }
+  .rapor-eylemler .btn { flex: 1 1 0; }
+  .rapor-filtre-kart { padding: 0; }
+}
+/* 2.3.4: dar telefonda "İlk 3" kartları alt alta; adlar kısaltılmadan tam görünür. */
+@media (max-width: 480px) {
+  .po-lider { grid-template-columns: minmax(0, 1fr); }
+  .po-lider-ad { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+}
+@media print {
+  :root, :root[data-theme="dark"] { --arka: #fff; --kart: #fff; --yuzey-2: #f5f7fa; --yuzey-3: #e9edf3; --yazi: #000; --yazi-2: #1f2937; --soluk: #4b5563; --cizgi: #cfd6e0; --cizgi-koyu: #9aa5b5; --birincil: #2457d6; --birincil-yumusak: #e8efff; --yesil: #15803d; --yesil-yumusak: #e3f6ea; --turuncu: #c2410c; --golge: none; }
+  @page { size: A4 landscape; margin: 10mm; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { background: #fff; font-size: 11px; }
+  .ust, .menu-dugme, #bildirim-kutu, .bildirim-popuplar, #toast, .degisiklik-serit, .hp-perde, .uyari-serit, .bilgi-serit, .po-filtre, .rapor-filtre-kart, .rapor-eylemler, .po-alt, .po-rapor-tablo .kart-baslik .kucukyazi { display: none !important; }
+  .icerik { padding: 0 !important; max-width: none !important; }
+  .rapor-ust { margin-bottom: 8px; }
+  .rapor-ust h1 { font-size: 18px; }
+  .kart, .po-lider-kart { box-shadow: none; break-inside: avoid; }
+  /* 2.3.4: uzun tablo kartı sayfalara bölünebilir (yoksa ilk sayfa boş kalır); başlık her sayfada tekrarlanır, satır bölünmez. */
+  .kart.po-rapor-tablo { break-inside: auto; }
+  .po-rapor-tablo .kart-baslik { break-after: avoid; }
+  /* 2.3.4: sıralama düğmeleri 2. sayfadan sonra tekrarlanan başlıkta basılmıyordu; baskıda düz metin etiketi gösterilir. */
+  .po-tablo thead th button { display: none !important; }
+  .po-tablo thead th .po-baski-etiket { display: inline; color: var(--yazi-2); }
+  .po-tablo tfoot { display: table-row-group; } /* toplam satırı her sayfada değil, tablonun sonunda bir kez */
+  /* 2.3.4: kâğıtta adlar kısaltılmaz; benzer önekli adlar ayırt edilebilsin. */
+  .po-tablo .po-ad-sutun { max-width: 260px; min-width: 160px; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
+  .po-kart { margin-top: 8px; padding: 8px; }
+  .po-lider { grid-template-columns: repeat(3, 1fr); }
+  .po-tablo-sarici, .po-rapor-tablo .po-tablo-sarici { overflow: visible !important; max-height: none !important; border: 0; }
+  .po-tablo { font-size: 10px; }
+  .po-tablo th, .po-tablo td { padding: 3px 5px; position: static !important; }
+  .po-tablo thead { display: table-header-group; }
+  .po-tablo tr { break-inside: avoid; }
+  .po-tablo a { color: inherit !important; text-decoration: none; }
 }

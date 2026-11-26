@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% import "_personel_ozet.html" as poz %}
+{% block baslik %}Personel raporu — Kanıt Paneli{% endblock %}
+{% block icerik %}
+<div class="rapor-sayfa" id="rapor-personel"{% if yazdir %} data-po-yazdir{% endif %}>
+{% if po %}
+  <div class="sayfa-baslik rapor-ust">
+    <div>
+      <p class="ust-etiket">Rapor</p>
+      <h1>Personel bazında kanıtlar</h1>
+      <p class="rapor-alt-baslik">{{ po.proje_etiketi }} · {{ po.donem.etiket }} · Durum: {{ po.durum_adi }} · Gruplama: {{ po.grup_adi }} · Sütun: {{ po.sutun_adi }}</p>
+      <p class="kucukyazi rapor-zaman">Oluşturma: {{ po.olusturma }} · {{ k.ad or k.kullanici_adi }} · Yalnız silinmemiş kayıtlar sayılır.</p>
+    </div>
+    <div class="baslik-eylemler rapor-eylemler">
+      <a class="btn" href="{{ po.xlsx_url }}" download>Excel'e aktar</a>
+      <a class="btn" href="{{ po.csv_url }}" download>CSV</a>
+      <a class="btn" href="{{ po.yazdir_url }}" data-po-yazdir-dugme>Yazdır</a>
+    </div>
+  </div>
+  <section class="kart po-kart rapor-filtre-kart" aria-label="Süzgeçler">
+    {{ poz.filtre_cubugu(po, url_for('rapor_personel'), rapor=True) }}
+  </section>
+  {{ poz.ozet_cipleri(po) }}
+  {{ poz.ilk3(po) }}
+  <section class="kart po-kart po-rapor-tablo" aria-label="Tablo">
+    <div class="kart-baslik"><div><h2>{{ po.grup_adi }} × {{ po.sutun_adi|lower }}</h2><p class="kucukyazi" style="margin:0">Sütun başlığına tıklayarak sıralayın. Hücre rengi değer büyüdükçe koyulaşır; sayıya tıklayınca o kayıtlar listelenir.</p></div></div>
+    {{ poz.tablo(po, siralanir=True) }}
+  </section>
+{% else %}
+  <div class="bos-durum"><h2>Yetkili proje yok</h2><p>Rapor için en az bir projede okuma yetkiniz olmalı. Süperadminden proje yetkisi isteyin.</p></div>
+{% endif %}
+</div>
+{% endblock %}
+{% block script %}<script src="{{ url_for('static', filename='rapor.js', v=SURUM) }}"></script>{% endblock %}

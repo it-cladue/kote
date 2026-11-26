@@ -16,10 +16,10 @@ from werkzeug.datastructures import MultiDict
 from werkzeug.exceptions import SecurityError
 from functools import wraps
 from PIL import Image, UnidentifiedImageError
-from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari
+from . import db, yetki, kullanicilar, gorsel, bot_yonetim, api, api_anahtarlari, personel_ozeti
 from .settings import AYAR, ROOT
 
-SURUM = '2.3.3'
+SURUM = '2.3.4'
 secret_path = Path(AYAR['BOT_KLASOR']) / 'session.key'
 secret = os.getenv('SESSION_SECRET')
 if not secret:
@@ -417,14 +417,14 @@ ISLEM_ADLARI={'giris':'Giriş yaptı','giris_hata':'Hatalı giriş denemesi','on
  'katalog_proje_kaydet':'Proje tanımını kaydetti','katalog_kategori_kaydet':'Kategori tanımını kaydetti',
  'gyazo_link_guncelle':'Gyazo bağlantısını güncelledi','gyazo_link_yerel_korundu':'Gyazo bağlantısı eklenmedi, yerel görsel korundu',
  'hatirlatma_uret':'Onay bekleyenler için hatırlatma bildirimi üretti',
- 'api_anahtar_olustur':'API anahtarı oluşturdu','api_anahtar_iptal':'API anahtarını iptal etti'}
+ 'api_anahtar_olustur':'API anahtarı oluşturdu','api_anahtar_iptal':'API anahtarını iptal etti','rapor_aktar':'Personel raporunu indirdi'}
 # İşlem Geçmişi tablosu için kısa ad biçimi.
 DENETIM_ADLARI={'giris':'Giriş','giris_hata':'Hatalı giriş','onayla':'Onay','onay_kaldir':'Onay kaldırma','duzenle':'Düzenleme','sil':'Silme','geri_al':'Geri alma','yorum_ekle':'Yorum','soru_yonelt':'Soru','yanit_ekle':'Yanıt','gyazo_istek':'Gyazo isteği','disa_aktar':'Excel çıktısı','dosya_kontrol':'Dosya kontrolü','kullanici_ekle':'Kullanıcı ekleme','kullanici_guncelle':'Kullanıcı güncelleme','kilit_ac':'Kilit açma','sifre_degisti':'Şifre değişimi','cikis':'Çıkış','giris_kilit':'Hesap kilidi','giris_sinir':'IP giriş sınırı','sifre_hata':'Hatalı mevcut parola','csrf_hata':'Geçersiz CSRF gönderimi','arsiv_esle':'Arşiv eşleme','beklenen_proje':'Beklenen proje','yeni_kayit':'Yeni kanıt','bildirim_okundu':'Bildirim okundu','sunucu_hata':'Sunucu hatası','ice_aktar':'İçe aktarım','yetki_kanonik':'Yetki düzeltme',
  'katalog_proje_kaydet':'Proje kaydı','katalog_kategori_kaydet':'Kategori kaydı',
  'telegram_kayit':'Telegram ile kanıt','bot_kayit':'Telegram ile kanıt','telegram_onay':'Telegram: şifreyle giriş','telegram_admin_giris':'Telegram: yönetici girişi','telegram_admin_giris_hata':'Telegram: yönetici parolası hatası','telegram_engel':'Telegram: engellendi','telegram_eski_buton':'Telegram: eski düğme','telegram_yanlis_adim_butonu':'Telegram: yanlış adım düğmesi',
  'bot_onayla':'Bot: kullanıcı onayı','bot_onay_kaldir':'Bot: onay kaldırma','bot_engelle':'Bot: engelleme','bot_engel_kaldir':'Bot: engel kaldırma','bot_tam_sifirla':'Bot: tam sıfırlama','bot_oturum_temizle':'Bot: oturum temizleme','bot_bakim':'Bot: bakım modu','bot_bakim_ac':'Bot: bakım modu açıldı','bot_bakim_kapat':'Bot: bakım modu kapatıldı','bot_kontrol':'Bot: duraklat/sürdür','bot_yedek':'Bot: veritabanı yedeği','bot_inbox_tekrar':'Bot: tekrar deneme','bot_kategori_kaydet':'Bot: kategori kaydı','bot_kategori_sil':'Bot: kategori pasife','bot_kategori_yayinla':'Bot: kategori yayını',
  'gyazo_link_guncelle':'Gyazo bağlantısı','gyazo_link_yerel_korundu':'Gyazo: yerel görsel korundu','hatirlatma_uret':'Hatırlatma bildirimi',
- 'api_anahtar_olustur':'API anahtarı oluşturma','api_anahtar_iptal':'API anahtarı iptali'}
+ 'api_anahtar_olustur':'API anahtarı oluşturma','api_anahtar_iptal':'API anahtarı iptali','rapor_aktar':'Personel raporu çıktısı'}
 
 def islem_adi(code,adlar=None):
     """Sözlükte olmayan kod ham yazılmaz; alt çizgiler boşluğa çevrilir (kod ikinci kez basılmaz)."""
@@ -468,7 +468,135 @@ def ana():
         for key in kpi:kpi[key]+=card[key]
     kpi['acik_soru']=_acik_sorular(allowed)
     bekleyen_baglanti=any(p not in gizli_projeler for p in allowed)
-    return render_template('ana.html',kartlar=cards,durum=durum_bilgisi(),kpi=kpi,son_islemler=_son_islemler(allowed),islem_adlari=ISLEM_ADLARI,hatirlatma_gun=gun,bekleyen_baglanti=bekleyen_baglanti,gizli_proje_var=bool(gizli_projeler))
+    po=_personel_ozet_hazirla(allowed,ana_sayfa=True) if allowed else None
+    return render_template('ana.html',kartlar=cards,durum=durum_bilgisi(),kpi=kpi,son_islemler=_son_islemler(allowed),islem_adlari=ISLEM_ADLARI,hatirlatma_gun=gun,bekleyen_baglanti=bekleyen_baglanti,gizli_proje_var=bool(gizli_projeler),po=po)
+
+# ---------- 2.3.4: personel bazında kanıt özeti (ana sayfa kartı + /rapor/personel + Excel/CSV) ----------
+ANA_OZET_SATIR=10
+
+def _personel_ozet_filtre(allowed):
+    """İstek parametreleri → doğrulanmış filtre. İzinsiz proje 403; diğer geçersiz değerler varsayılana döner (uyarı).
+    Kayıtlar sayfasıyla aynı kural: seçili projelerin hepsinde kt yetkisi yoksa ve ONAYSIZ_GORUNUM=gizle ise durum onaylıya sabitlenir."""
+    try: f,hatalar,uyarilar=personel_ozeti.filtre_coz(request.args,allowed,bugun=datetime.now().date())
+    except PermissionError: abort(403)
+    secili=[f['proje']] if f['proje'] else list(allowed)
+    kt_yok=_kt_yok(secili); gizle=_onaysiz_modu()=='gizle'
+    f['yalniz_onayli']=bool(secili) and gizle and len(kt_yok)==len(secili)
+    if f['yalniz_onayli']: f['durum']='onayli'
+    f['gizli_onaysiz']=gizle and bool(kt_yok)
+    return f,hatalar+uyarilar,_gizli_kayit_sql('',secili)
+
+def _personel_ozet_url(endpoint,f,**ek):
+    a={k:f[k] for k in ('proje','donem','durum','grup','sutun') if f.get(k)}
+    if f.get('donem')=='ozel': a.update(tarih1=f.get('tarih1') or None,tarih2=f.get('tarih2') or None)
+    a.update(ek)
+    return url_for(endpoint,**{k:v for k,v in a.items() if v not in (None,'')})
+
+def _personel_ozet_kayit_url(f,satir=None,sutun=None):
+    """Kayıtlar listesine bağlantı: aynı proje + dönem + durum (+ personel/ekleyen + kategori/tip). Silinenler hariç tutulur."""
+    a=dict(durum=f['durum'],silinmemis='1')
+    if f.get('proje'): a['proje']=f['proje']
+    if f.get('tarih1'): a['tarih1']=f['tarih1']
+    if f.get('tarih2'): a['tarih2']=f['tarih2']
+    if satir is not None:
+        a['ekleyen_ad' if f['grup']=='ekleyen' else 'personel']=satir['deger'] or personel_ozeti.BOS_DEGER
+    if sutun is not None:
+        if f['sutun']=='kategori':
+            if sutun['bos']: return None  # Kayıtlar'da "kategorisi boş" süzgeci yok: hücre bağlantısız
+            a['kategori']=sutun['deger']
+        else: a['tip']=sutun['deger'] or personel_ozeti.BOS_DEGER
+    return url_for('kayitlar',**a)
+
+def _personel_ozet_hazirla(allowed,ana_sayfa=False):
+    f,uyarilar,gizli=_personel_ozet_filtre(allowed)
+    o=personel_ozeti.personel_ozeti(baglanti(),allowed,gizli,f)
+    bilgi=o['sutun_bilgi']
+    if ana_sayfa:
+        # Ana sayfa kartı: sıfır toplamlı sütunlar gizlenir, ilk 10 satır gösterilir.
+        bilgi=[b for b in bilgi if b['toplam']] or bilgi[:6]
+    for b in bilgi:b['url']=_personel_ozet_kayit_url(f,sutun=b) if b['toplam'] else None
+    satirlar=o['satirlar'][:ANA_OZET_SATIR] if ana_sayfa else o['satirlar']
+    for x in satirlar:
+        x['url']=_personel_ozet_kayit_url(f,satir=x)
+        x['url_sutun']={b['ad']:(_personel_ozet_kayit_url(f,satir=x,sutun=b) if x['sutunlar'].get(b['ad']) else None) for b in bilgi}
+        x['paylar']=[dict(ad=b['ad'],renk=b['renk'],n=x['sutunlar'].get(b['ad'],0),oran=round(x['sutunlar'].get(b['ad'],0)*100/x['toplam'],1)) for b in o['sutun_bilgi'] if x['toplam'] and x['sutunlar'].get(b['ad'])]
+    o.update(f=f,uyarilar=uyarilar,gosterilen_sutunlar=bilgi,gosterilen_satirlar=satirlar,toplam_url=_personel_ozet_kayit_url(f),
+             ilk3=satirlar[:3],kalan=max(0,len(o['satirlar'])-len(satirlar)),
+             proje_secenekleri=[p for p in _all_project_info() if p['code'] in allowed],
+             donemler=personel_ozeti.DONEMLER,durumlar=personel_ozeti.DURUMLAR,gruplar=personel_ozeti.GRUPLAR,sutun_secenekleri=personel_ozeti.SUTUNLAR,
+             rapor_url=_personel_ozet_url('rapor_personel',f),xlsx_url=_personel_ozet_url('rapor_personel_xlsx',f),
+             csv_url=_personel_ozet_url('rapor_personel_csv',f),yazdir_url=_personel_ozet_url('rapor_personel',f,yazdir='1'),
+             olusturma=datetime.now().strftime('%d.%m.%Y %H:%M'),durum_adi=personel_ozeti.DURUM_ADLARI.get(f['durum'],''),
+             proje_etiketi=(next((p['label'] for p in _all_project_info() if p['code']==f['proje']),f['proje']) if f['proje'] else 'Tüm yetkili projeler'))
+    for x in o['satirlar']:x.setdefault('url',None)
+    return o
+
+def _personel_ozet_dosya_adi(f,uzanti):
+    return 'rapor-personel-%s-%s-%s.%s' % ((f['proje'] or 'tum').lower(),f['donem'],datetime.now().strftime('%Y-%m-%d'),uzanti)
+
+@app.route('/rapor/personel')
+@giris_gerekli
+def rapor_personel():
+    allowed=_allowed()
+    po=_personel_ozet_hazirla(allowed) if allowed else None
+    return render_template('rapor_personel.html',po=po,yazdir=request.args.get('yazdir')=='1')
+
+@app.route('/rapor/personel.xlsx')
+@giris_gerekli
+def rapor_personel_xlsx():
+    import openpyxl
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+    allowed=_allowed()
+    if not allowed: abort(403)
+    po=_personel_ozet_hazirla(allowed); f=po['f']
+    baslik,satirlar,toplam=personel_ozeti.tablo_satirlari(po)
+    wb=openpyxl.Workbook(); ws=wb.active; ws.title='Özet'
+    ws.append(baslik)
+    for r in satirlar: ws.append(r)
+    ws.append(toplam)
+    koyu=PatternFill('solid',fgColor='1F2937'); acik=PatternFill('solid',fgColor='E8EFFF'); cizgi=Side(style='thin',color='9CA3AF')
+    for cell in ws[1]:
+        cell.font=Font(bold=True,color='FFFFFF'); cell.fill=koyu; cell.alignment=Alignment(horizontal='center',vertical='center',wrap_text=True)
+    son=ws.max_row
+    for cell in ws[son]:
+        cell.font=Font(bold=True); cell.fill=acik; cell.border=Border(top=cizgi)
+    for i,b in enumerate(baslik,1):
+        uzun=max([len(str(b))]+[len(str(r[i-1])) for r in satirlar]+[len(str(toplam[i-1]))])
+        ws.column_dimensions[get_column_letter(i)].width=min(40,max(9,uzun+3))
+    ws.freeze_panes='B2'
+    ws.auto_filter.ref='A1:%s%d' % (get_column_letter(len(baslik)),max(1,son-1))
+    bilgi=wb.create_sheet('Bilgi')
+    for satir in (('Rapor','Personel bazında kanıtlar'),('Proje',po['proje_etiketi']),('Dönem',po['donem']['etiket']),
+                  ('Durum',personel_ozeti.DURUM_ADLARI[f['durum']]),('Gruplama',po['grup_adi']),('Sütunlar',po['sutun_adi']),
+                  ('Kişi',po['kisi_sayisi']),('Kanıt',po['kayit_sayisi']),('Oluşturma',po['olusturma']),('Oluşturan',g.k['kullanici_adi']),
+                  ('Not','Yalnız silinmemiş kayıtlar sayılır.'+(' Onay yetkiniz olmayan projelerde onay bekleyenler sayılmaz.' if f['gizli_onaysiz'] else ''))):
+        bilgi.append([personel_ozeti.guvenli_hucre(v) for v in satir])
+    bilgi.column_dimensions['A'].width=14; bilgi.column_dimensions['B'].width=60
+    for cell in bilgi['A']: cell.font=Font(bold=True)
+    stream=io.BytesIO(); wb.save(stream); stream.seek(0)
+    db.denetim_yaz(baglanti(),g.k['kullanici_adi'],'rapor_aktar',proje=f['proje'] or None,yeni='xlsx:%d' % po['kisi_sayisi'],ip=ip())
+    return send_file(stream,as_attachment=True,download_name=_personel_ozet_dosya_adi(f,'xlsx'),mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+@app.route('/rapor/personel.csv')
+@giris_gerekli
+def rapor_personel_csv():
+    import csv
+    allowed=_allowed()
+    if not allowed: abort(403)
+    po=_personel_ozet_hazirla(allowed); f=po['f']
+    baslik,satirlar,toplam=personel_ozeti.tablo_satirlari(po)
+    out=io.StringIO()
+    # Türkçe Excel'in beklediği biçim: UTF-8 BOM + noktalı virgül ayırıcı + CRLF.
+    w=csv.writer(out,delimiter=';',lineterminator='\r\n',quoting=csv.QUOTE_MINIMAL)
+    w.writerow(baslik)
+    for r in satirlar: w.writerow(r)
+    w.writerow(toplam)
+    db.denetim_yaz(baglanti(),g.k['kullanici_adi'],'rapor_aktar',proje=f['proje'] or None,yeni='csv:%d' % po['kisi_sayisi'],ip=ip())
+    from flask import Response
+    resp=Response(('\ufeff'+out.getvalue()).encode('utf-8'),mimetype='text/csv; charset=utf-8')
+    resp.headers['Content-Disposition']='attachment; filename="%s"' % _personel_ozet_dosya_adi(f,'csv')
+    return resp
 
 SAYFA_BOYLARI=(24,48,96)
 
@@ -521,7 +649,7 @@ def _bekleme_gun(args):
 def _filtre_sql(args,izinli):
     explicit=_explicit_projects(args,izinli)
     selected=explicit or list(izinli)
-    if not selected: return '1=0',[],dict(proje=[],proje_etkin=[],durum=args.get('durum','bekleyen'),kategori='',q='',ekleyen='',tarih1='',tarih2='',tarihsiz=False,bekleme=0,kt_yok=[],gizli_onaysiz=False,yalniz_onayli=False)
+    if not selected: return '1=0',[],dict(proje=[],proje_etkin=[],durum=args.get('durum','bekleyen'),kategori='',q='',ekleyen='',tarih1='',tarih2='',tarihsiz=False,bekleme=0,kt_yok=[],gizli_onaysiz=False,yalniz_onayli=False,personel='',ekleyen_ad='',tip='',silinmemis=False)
     where=['proje IN (%s)' % ','.join('?'*len(selected))]; par=list(selected)
     gizle=_onaysiz_modu()=='gizle'; kt_yok=_kt_yok(selected); yalniz_onayli=gizle and len(kt_yok)==len(selected)
     state=args.get('durum','bekleyen')
@@ -535,18 +663,27 @@ def _filtre_sql(args,izinli):
     bekleme=0 if yalniz_onayli else _bekleme_gun(args)  # onaylıya sabitlenen listede 'gündür bekleyen' süzgeci anlamsız: yok sayılır
     if bekleme: where.append(_GECIKEN_SQL); par.append(bekleme)
     cat=_kategori_kanonik(args.get('kategori','').strip()[:120],selected)
-    if cat: where.append('kategori COLLATE UNICODE_NOCASE=?'); par.append(cat)
+    if cat: where.append("TRIM(COALESCE(kategori,'')) COLLATE UNICODE_NOCASE=?"); par.append(cat)  # 2.3.4: baş/son boşluklu eski kategoriler de eşleşir
     q=args.get('q','').strip()[:200]
     if q:
         where.append('(personel LIKE ? OR uye_id LIKE ? OR ana_uye_id LIKE ? OR lead_id LIKE ? OR link LIKE ? OR aciklama LIKE ? OR ekleyen_ad LIKE ? OR kategori LIKE ?)'); par += ['%'+q+'%']*8
     by=args.get('ekleyen','').strip()[:100]
     if by: where.append('(ekleyen_ad LIKE ? OR ekleyen_id=?)'); par += ['%'+by+'%',by]
+    # 2.3.4: personel raporundaki hücre bağlantıları için tam eşleşen süzgeçler ('__bos__' = boş değer) ve "silinenler hariç".
+    tam={}
+    for name,kolon in (('personel',"TRIM(COALESCE(personel,''))"),('ekleyen_ad',"TRIM(COALESCE(ekleyen_ad,''))"),('tip',"TRIM(COALESCE(tip,'')) COLLATE UNICODE_NOCASE")):
+        v=args.get(name,'').strip()[:200]
+        if v: where.append(kolon+'=?'); par.append('' if v==personel_ozeti.BOS_DEGER else v)
+        tam[name]=v
+    silinmemis=args.get('silinmemis')=='1' and state in ('hepsi','onayli','bekleyen')
+    if silinmemis: where.append('silindi=0')
     dates={}
     undated=args.get('tarihsiz')=='1'
     if undated:
         if args.get('tarih1') or args.get('tarih2'): abort(400,'Tarihsiz filtre tarih aralığıyla birleştirilemez.')
         where.append("(tarih IS NULL OR tarih='')")
-    for name,op,suffix in [('tarih1','>=',' 00:00:00'),('tarih2','<=',' 23:59:59')]:
+    # 2.3.4: başlangıç 'YYYY-AA-GG' ile karşılaştırılır; eski Excel kayıtlarının saatsiz tarihi de başlangıç gününe dahil olur.
+    for name,op,suffix in [('tarih1','>=',''),('tarih2','<=',' 23:59:59')]:
         v=args.get(name,'').strip()
         if v:
             try: datetime.strptime(v,'%Y-%m-%d')
@@ -555,7 +692,7 @@ def _filtre_sql(args,izinli):
         dates[name]=v
     if dates.get('tarih1') and dates.get('tarih2') and dates['tarih1']>dates['tarih2']:abort(400)
     return ' AND '.join(where),par,dict(proje=explicit,proje_etkin=selected,durum=state,kategori=cat,q=q,ekleyen=by,tarihsiz=undated,bekleme=bekleme,
-                                      kt_yok=kt_yok,gizli_onaysiz=gizle and bool(kt_yok),yalniz_onayli=yalniz_onayli,**dates)
+                                      kt_yok=kt_yok,gizli_onaysiz=gizle and bool(kt_yok),yalniz_onayli=yalniz_onayli,silinmemis=silinmemis,**tam,**dates)
 
 def kayit_izin(r,eylem):
     return yetki.izin(g.yk,r['proje'],eylem)
@@ -657,7 +794,7 @@ def kayitlar():
         onayli_tum=c.execute(f'SELECT COUNT(*) FROM kayitlar WHERE {w_tum} AND kt=1 AND silindi=0',p_tum).fetchone()[0]
         if listelenen and not onayli_tum: onaysiz_uyari='Aradığınız ID için onaylı kanıt yok; %d onaysız kayıt listelendi.' % listelenen
         elif onayli_tum and f['durum'] in ('bekleyen','silinen'): onayli_notu=onayli_tum
-    return render_template('kayitlar.html',kayitlar=records,toplam=total,sayfa=page,sayfa_sayisi=pages,f=f,izinli=allowed,kategoriler=cats,gorunum=view,sayac=counts,sayfa_boyu=size,sayfa_boylari=SAYFA_BOYLARI,toplu_kt=toplu_kt,uyari=uyari,acik_kayit=acik or None,acik_yorum=(yorum if acik and yorum else None),onaysiz_uyari=onaysiz_uyari,onayli_notu=onayli_notu,hatirlatma_gun=_hatirlatma_gun(),damga=_degisiklik_damgasi() or '',filtre_aktif=bool(f.get('q') or f.get('kategori') or f.get('ekleyen') or f.get('tarih1') or f.get('tarih2') or f.get('tarihsiz') or f.get('proje') or f.get('bekleme')))
+    return render_template('kayitlar.html',kayitlar=records,toplam=total,sayfa=page,sayfa_sayisi=pages,f=f,izinli=allowed,kategoriler=cats,gorunum=view,sayac=counts,sayfa_boyu=size,sayfa_boylari=SAYFA_BOYLARI,toplu_kt=toplu_kt,uyari=uyari,acik_kayit=acik or None,acik_yorum=(yorum if acik and yorum else None),onaysiz_uyari=onaysiz_uyari,onayli_notu=onayli_notu,hatirlatma_gun=_hatirlatma_gun(),damga=_degisiklik_damgasi() or '',filtre_aktif=bool(f.get('q') or f.get('kategori') or f.get('ekleyen') or f.get('tarih1') or f.get('tarih2') or f.get('tarihsiz') or f.get('proje') or f.get('bekleme') or f.get('personel') or f.get('ekleyen_ad') or f.get('tip') or f.get('silinmemis')),bos_deger=personel_ozeti.BOS_DEGER)
 
 @app.route('/kayit/<int:kid>')
 @giris_gerekli

@@ -10,7 +10,7 @@
   <div class="baslik-eylemler">{% if toplam %}<a class="btn" href="{{ export_url }}" title="Şu anki proje, durum ve filtre seçimini Excel olarak indirir">Excel (bu görünüm)</a>{% else %}<span class="btn" aria-disabled="true" title="Bu görünümde kayıt olmadığı için indirilecek bir şey yok">Excel (bu görünüm)</span>{% endif %}</div>
 </section>
 <form class="kayit-filtre" method="get" id="filtre-form" aria-label="Kayıt filtreleri" data-otomatik>
-  <input type="hidden" name="gorunum" value="{{ gorunum }}"><input type="hidden" name="durum" value="{{ f.durum }}"><input type="hidden" name="boy" value="{{ sayfa_boyu }}">
+  <input type="hidden" name="gorunum" value="{{ gorunum }}"><input type="hidden" name="durum" value="{{ f.durum }}"><input type="hidden" name="boy" value="{{ sayfa_boyu }}">{% for ad in ('personel','ekleyen_ad','tip') %}{% if f[ad] %}<input type="hidden" name="{{ ad }}" value="{{ f[ad] }}">{% endif %}{% endfor %}{% if f.silinmemis %}<input type="hidden" name="silinmemis" value="1">{% endif %}
   <div class="filtre-projeler" role="group" aria-label="Proje seçimi">
     <span class="filtre-etiket">Proje</span>
     <button type="button" class="proje-cip tumu {{ 'aktif' if not f.proje }}" id="filtre-tumu" aria-pressed="{{ 'true' if not f.proje else 'false' }}" title="Tüm yetkili projeler">Tümü</button>
@@ -49,6 +49,7 @@
   {% if onaysiz_uyari %}<div class="hata onaysiz-uyari" role="alert" id="onaysiz-uyari">{{ onaysiz_uyari }} Bu kayıtlar raporlamada kullanılmaz; takım liderinin onayını bekleyin.</div>{% endif %}
   {% if onayli_notu %}<div class="bilgi onaysiz-uyari" role="status" id="onayli-notu">Bu sekmede onaylı kanıt yok; <a href="{{ url_degistir(durum='onayli', s=1, ac='') }}">Onaylı sekmesinde {{ onayli_notu }} onaylı kayıt var</a>.</div>{% endif %}
   <div class="sonuc-satir">
+    {% if f.personel or f.ekleyen_ad or f.tip or f.silinmemis %}<p class="rapor-suzgec-notu kucukyazi" id="rapor-suzgec-notu">Rapordan gelen süzgeç:{% for ad, etiket in [('personel','Personel'),('ekleyen_ad','Ekleyen'),('tip','Tip')] %}{% if f[ad] %} <span class="etiket-ince">{{ etiket }}: {{ '(boş)' if f[ad] == bos_deger else f[ad] }}</span>{% endif %}{% endfor %}{% if f.silinmemis %} <span class="etiket-ince">Silinenler hariç</span>{% endif %} <a href="{{ url_degistir(personel='', ekleyen_ad='', tip='', silinmemis='', ac='') }}" class="arama-temizle">kaldır</a></p>{% endif %}
     <p class="sonuc-ozeti"><b>{{ toplam }}</b> kayıt{% if f.bekleme %} · {% if f.durum == 'bekleyen' %}en az {{ f.bekleme }} gündür bekleyen{% else %}ilk görülmeden bu yana en az {{ f.bekleme }} gün{% endif %} <a href="{{ url_degistir(bekleme='', s=1, ac='') }}" class="arama-temizle" title="Bekleme süresi filtresini kaldır">kaldır</a>{% endif %}{% if sayfa_sayisi > 1 %} · sayfa {{ sayfa }} / {{ sayfa_sayisi }}{% endif %}{% if f.durum == 'bekleyen' and toplam %} · inceleme bekliyor{% endif %}
       {% if f.q %}<span class="arama-rozet" id="arama-rozet">Arama: <b>{{ f.q }}</b> <a href="{{ url_degistir(q='', s=1, ac='') }}" class="arama-temizle" title="Arama sözcüğünü kaldır, diğer filtreler kalsın">Aramayı temizle</a></span>{% endif %}
       {% if toplu_kt and gorunum == 'kart' and kayitlar %}<label class="sec-hepsi-alan"><input type="checkbox" id="sec-hepsi" aria-label="Sayfadaki tüm kayıtları seç"> Sayfadakileri seç</label>{% endif %}</p>

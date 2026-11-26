@@ -1,0 +1,121 @@
+{# 2.3.4: personel bazında kanıt özeti — ana sayfa kartı ve /rapor/personel sayfasının ortak parçaları. #}
+
+{% macro filtre_cubugu(po, action, rapor=False) -%}
+{% set f = po.f %}
+<form class="po-filtre" method="get" action="{{ action }}" data-po-form{% if not rapor %} data-po-otomatik{% endif %} aria-label="Personel özeti süzgeçleri">
+  <label class="po-alan"><span>Proje</span>
+    <select name="proje" data-po-degisim>
+      <option value="">Tüm projeler</option>
+      {% for p in po.proje_secenekleri %}<option value="{{ p.code }}" {{ 'selected' if f.proje == p.code }}>{{ p.code }}{% if p.label and p.label != p.code %} — {{ p.label }}{% endif %}</option>{% endfor %}
+    </select>
+  </label>
+  <fieldset class="po-alan po-segmentler"><legend>Dönem</legend>
+    <div class="po-segment-grup">
+    {% for kod, ad in po.donemler if rapor or kod != 'ozel' %}<label class="po-segment"><input type="radio" name="donem" value="{{ kod }}" data-po-degisim {{ 'checked' if f.donem == kod }}><span>{{ ad }}</span></label>{% endfor %}
+    </div>
+  </fieldset>
+  {% if rapor %}
+  <div class="po-alan po-tarihler" data-po-tarihler {% if f.donem != 'ozel' %}hidden{% endif %}>
+    <label><span>Başlangıç</span><input type="date" name="tarih1" value="{{ f.tarih1 if f.donem == 'ozel' else '' }}"></label>
+    <label><span>Bitiş</span><input type="date" name="tarih2" value="{{ f.tarih2 if f.donem == 'ozel' else '' }}"></label>
+  </div>
+  {% endif %}
+  <label class="po-alan"><span>Durum</span>
+    <select name="durum" data-po-degisim {% if f.yalniz_onayli %}disabled title="Onay yetkiniz olmayan projelerde yalnız onaylı kayıtlar sayılır"{% endif %}>
+      {% for kod, ad in po.durumlar %}<option value="{{ kod }}" {{ 'selected' if f.durum == kod }}>{{ ad }}</option>{% endfor %}
+    </select>
+    {% if f.yalniz_onayli %}<input type="hidden" name="durum" value="onayli">{% endif %}
+  </label>
+  <fieldset class="po-alan po-segmentler"><legend>Grupla</legend>
+    <div class="po-segment-grup">{% for kod, ad in po.gruplar %}<label class="po-segment"><input type="radio" name="grup" value="{{ kod }}" data-po-degisim {{ 'checked' if f.grup == kod }}><span>{{ ad }}</span></label>{% endfor %}</div>
+  </fieldset>
+  {% if rapor %}
+  <fieldset class="po-alan po-segmentler"><legend>Sütun</legend>
+    <div class="po-segment-grup">{% for kod, ad in po.sutun_secenekleri %}<label class="po-segment"><input type="radio" name="sutun" value="{{ kod }}" data-po-degisim {{ 'checked' if f.sutun == kod }}><span>{{ ad }}</span></label>{% endfor %}</div>
+  </fieldset>
+  {% elif f.sutun != 'kategori' %}<input type="hidden" name="sutun" value="{{ f.sutun }}">{% endif %}
+  <div class="po-alan po-uygula">{% if rapor %}<button class="btn birincil" type="submit">Uygula</button>{% else %}<noscript><button class="btn" type="submit">Uygula</button></noscript>{% endif %}</div>
+</form>
+{%- endmacro %}
+
+{% macro ozet_cipleri(po) -%}
+<div class="po-ozet" role="list" aria-label="Özet sayılar">
+  <span class="po-cip" role="listitem"><b>{{ po.kisi_sayisi }}</b> kişi</span>
+  <span class="po-cip" role="listitem"><b>{{ po.kayit_sayisi }}</b> kanıt</span>
+  <span class="po-cip onayli" role="listitem"><b>{{ po.toplam.onayli }}</b> onaylı</span>
+  <span class="po-cip bekleyen" role="listitem"><b>{{ po.toplam.bekleyen }}</b> bekleyen</span>
+  <span class="po-donem kucukyazi">{{ po.donem.etiket }}{% if po.f.proje %} · {{ po.f.proje }}{% endif %}{% if po.f.durum != 'hepsi' %} · {{ 'Onaylı' if po.f.durum == 'onayli' else 'Bekleyen' }}{% endif %}</span>
+</div>
+{% if po.f.gizli_onaysiz %}<p class="kucukyazi po-not">Onay yetkiniz olmayan projelerde onay bekleyen kayıtlar sayılmaz.</p>{% endif %}
+{% for u in po.uyarilar %}<p class="filtre-notu po-not" role="status">{{ u }}</p>{% endfor %}
+{%- endmacro %}
+
+{% macro pay_cubugu(x) -%}
+<div class="po-pay" role="img" aria-label="{% for p in x.paylar %}{{ p.ad }} {{ p.n }}{{ ', ' if not loop.last }}{% endfor %}">{% for p in x.paylar %}<span style="width:{{ p.oran }}%;background:{{ p.renk }}" title="{{ p.ad }}: {{ p.n }} (%{{ p.oran|round|int }})"></span>{% endfor %}</div>
+{%- endmacro %}
+
+{% macro ilk3(po) -%}
+{% if po.ilk3 %}
+<ol class="po-lider" aria-label="En çok kanıt ekleyen ilk 3">
+{% for x in po.ilk3 %}
+  <li class="po-lider-kart sira-{{ loop.index }}">
+    <div class="po-lider-ust"><span class="po-sira" aria-hidden="true">{{ loop.index }}</span><a class="po-lider-ad" href="{{ x.url }}" title="{{ x.personel }}">{{ x.personel }}</a></div>
+    <div class="po-lider-sayi"><b>{{ x.toplam }}</b><span>kanıt</span><span class="po-oran" title="Onaylı oranı">%{{ x.onay_orani }} onaylı</span></div>
+    {{ pay_cubugu(x) }}
+    <p class="po-lider-kat">{% for p in (x.paylar|sort(attribute='n', reverse=True))[:3] %}<span><i style="background:{{ p.renk }}" aria-hidden="true"></i>{{ p.ad }} {{ p.n }}</span>{% endfor %}</p>
+  </li>
+{% endfor %}
+</ol>
+{% endif %}
+{%- endmacro %}
+
+{% macro tablo(po, siralanir=False) -%}
+{# 2.3.4: Chromium form düğmelerini sayfa başında tekrarlanan <thead> içinde basmıyor; baskıda düğme yerine düz metin etiketi gösterilir (stil.css @media print). #}
+{% set cols = po.gosterilen_sutunlar %}
+<div class="po-tablo-sarici tablo-sarici" tabindex="0" role="region" aria-label="Personel × {{ po.sutun_adi|lower }} tablosu">
+<table class="tablo po-tablo" {% if siralanir %}data-po-sirala{% endif %}>
+  <thead><tr>
+    <th scope="col" class="po-ad-sutun" data-tur="metin">{% if siralanir %}<button type="button" data-po-sirala-dugme>{{ po.grup_adi }}</button><span class="po-baski-etiket" aria-hidden="true">{{ po.grup_adi }}</span>{% else %}{{ po.grup_adi }}{% endif %}</th>
+    {% for ad, baslik in [('toplam','Toplam'),('onayli','Onaylı'),('bekleyen','Bekleyen')] %}<th scope="col" class="po-sayi po-{{ ad }}" data-tur="sayi" {% if siralanir and ad == 'toplam' %}aria-sort="descending"{% endif %}>{% if siralanir %}<button type="button" data-po-sirala-dugme>{{ baslik }}</button><span class="po-baski-etiket" aria-hidden="true">{{ baslik }}</span>{% else %}{{ baslik }}{% endif %}</th>{% endfor %}
+    {% for b in cols %}<th scope="col" class="po-sayi po-kat" data-tur="sayi" title="{{ b.ad }}"><span class="po-kat-nokta" style="background:{{ b.renk }}" aria-hidden="true"></span>{% if siralanir %}<button type="button" data-po-sirala-dugme>{{ b.ad }}</button><span class="po-baski-etiket" aria-hidden="true">{{ b.ad }}</span>{% else %}{{ b.ad }}{% endif %}</th>{% endfor %}
+  </tr></thead>
+  <tbody>
+  {% for x in po.gosterilen_satirlar %}
+    <tr>
+      <th scope="row" class="po-ad-sutun" data-deger="{{ x.personel }}"><a href="{{ x.url }}" title="{{ x.personel }} — kayıtları aç">{{ x.personel }}</a></th>
+      <td class="po-sayi po-toplam" data-deger="{{ x.toplam }}"><b>{{ x.toplam }}</b></td>
+      <td class="po-sayi po-onayli" data-deger="{{ x.onayli }}">{{ x.onayli }}<small class="po-oran-kucuk">%{{ x.onay_orani }}</small></td>
+      <td class="po-sayi po-bekleyen" data-deger="{{ x.bekleyen }}">{{ x.bekleyen }}</td>
+      {% for b in cols %}{% set n = x.sutunlar.get(b.ad, 0) %}{% set u = x.url_sutun.get(b.ad) %}<td class="po-sayi po-hucre isi-{{ x.isi.get(b.ad, 0) }}" data-deger="{{ n }}">{% if n and u %}<a href="{{ u }}" title="{{ x.personel }} · {{ b.ad }}: {{ n }} kayıt">{{ n }}</a>{% elif n %}{{ n }}{% else %}<span class="po-sifir">0</span>{% endif %}</td>{% endfor %}
+    </tr>
+  {% else %}
+    <tr><td colspan="{{ 4 + cols|length }}"><div class="bos-tablo">Bu dönemde ve seçimde kanıt yok. Dönemi genişletmeyi deneyin.</div></td></tr>
+  {% endfor %}
+  </tbody>
+  {% if po.gosterilen_satirlar %}
+  <tfoot><tr>
+    <th scope="row" class="po-ad-sutun">Toplam{% if po.kalan %} <small>(tüm {{ po.kisi_sayisi }} kişi)</small>{% endif %}</th>
+    <td class="po-sayi"><a href="{{ po.toplam_url }}"><b>{{ po.toplam.toplam }}</b></a></td>
+    <td class="po-sayi">{{ po.toplam.onayli }}<small class="po-oran-kucuk">%{{ po.toplam.onay_orani }}</small></td>
+    <td class="po-sayi">{{ po.toplam.bekleyen }}</td>
+    {% for b in cols %}{% set n = po.toplam.sutunlar.get(b.ad, 0) %}<td class="po-sayi">{% if n and b.url %}<a href="{{ b.url }}">{{ n }}</a>{% else %}{{ n }}{% endif %}</td>{% endfor %}
+  </tr></tfoot>
+  {% endif %}
+</table>
+</div>
+{%- endmacro %}
+
+{% macro mobil_kartlar(po) -%}
+<ul class="po-mobil" aria-label="Kişi bazında özet">
+{% for x in po.gosterilen_satirlar %}
+  <li class="po-mobil-kart">
+    <div class="po-mobil-ust"><a href="{{ x.url }}" class="po-mobil-ad">{{ x.personel }}</a><span class="po-mobil-toplam"><b>{{ x.toplam }}</b> kanıt</span></div>
+    <div class="po-mobil-durum"><span class="yesil">{{ x.onayli }} onaylı</span> · <span class="turuncu">{{ x.bekleyen }} bekleyen</span> · %{{ x.onay_orani }}</div>
+    {{ pay_cubugu(x) }}
+    <div class="po-mobil-rozetler">{% for b in po.gosterilen_sutunlar %}{% set n = x.sutunlar.get(b.ad, 0) %}{% if n %}{% set u = x.url_sutun.get(b.ad) %}{% if u %}<a class="po-rozet" href="{{ u }}" style="--kat-renk:{{ b.renk }}">{{ b.ad }} <b>{{ n }}</b></a>{% else %}<span class="po-rozet" style="--kat-renk:{{ b.renk }}">{{ b.ad }} <b>{{ n }}</b></span>{% endif %}{% endif %}{% endfor %}</div>
+  </li>
+{% else %}
+  <li class="bos-tablo">Bu dönemde ve seçimde kanıt yok.</li>
+{% endfor %}
+</ul>
+{%- endmacro %}

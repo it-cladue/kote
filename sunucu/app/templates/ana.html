@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_personel_ozet.html" as poz %}
 {% block baslik %}Ana sayfa — Kanıt Paneli{% endblock %}
 {% block icerik %}
 <section class="hero" aria-labelledby="hero-baslik">
@@ -46,6 +47,19 @@
 {% endfor %}
 </div>
 
+{% if po %}
+{# 2.3.4: personel bazında kanıtlar #}
+<section class="kart po-kart" id="personel-ozet" aria-labelledby="personel-ozet-baslik">
+  <div class="kart-baslik po-baslik"><div><p class="ust-etiket">Rapor</p><h2 id="personel-ozet-baslik">Personel bazında kanıtlar</h2></div><a class="btn kucuk" href="{{ po.rapor_url }}">Tüm tablo ve rapor <span aria-hidden="true">→</span></a></div>
+  {{ poz.filtre_cubugu(po, url_for('ana') ~ '#personel-ozet') }}
+  {{ poz.ozet_cipleri(po) }}
+  {{ poz.ilk3(po) }}
+  <div class="po-masaustu">{{ poz.tablo(po) }}</div>
+  {{ poz.mobil_kartlar(po) }}
+  <p class="po-alt kucukyazi">{% if po.kalan %}İlk {{ po.gosterilen_satirlar|length }} kişi gösteriliyor; {{ po.kalan }} kişi daha var. {% endif %}Sayıya tıklayınca o kayıtlar listelenir. <a class="metin-baglanti" href="{{ po.rapor_url }}">Tüm tablo ve rapor <span aria-hidden="true">→</span></a></p>
+</section>
+{% endif %}
+
 <div class="ana-alt-izgara">
   <section class="kart" aria-labelledby="son-islemler-baslik">
     <div class="kart-baslik"><div><p class="ust-etiket">İzlenebilirlik</p><h2 id="son-islemler-baslik">Son işlemler</h2></div><a class="btn kucuk" href="{{ url_for('denetim') }}">Tüm geçmiş</a></div>
@@ -74,3 +88,4 @@
   </section>
 </div>
 {% endblock %}
+{% block script %}<script src="{{ url_for('static', filename='rapor.js', v=SURUM) }}"></script>{% endblock %}

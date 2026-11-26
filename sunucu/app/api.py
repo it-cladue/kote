@@ -251,7 +251,7 @@ def _tarih_suzgeci(kosul, par):
             raise _Red(400, 'Tarihsiz süzgeç tarih aralığıyla birlikte kullanılamaz.')
         kosul.append("(tarih IS NULL OR tarih='')")
     if t1:
-        kosul.append('tarih >= ?'); par.append(t1 + ' 00:00:00')
+        kosul.append('tarih >= ?'); par.append(t1)  # 2.3.4: saatsiz eski Excel tarihi de başlangıç gününe dahil
     if t2:
         kosul.append('tarih <= ?'); par.append(t2 + ' 23:59:59')
     return dict(tarih1=t1, tarih2=t2), uyari
@@ -350,6 +350,34 @@ def ozet():
                  projeler=projeler, kategori_tip=capraz, ekleyenler=ekleyenler)
     if uyari:
         sonuc['uyari'] = uyari
+    return jsonify(sonuc)
+
+
+@bp.route('/personel-ozet')
+def personel_ozet():
+    """2.3.4: personel (veya ekleyen) × kategori (veya tip) sayım tablosu; panelin /rapor/personel sayfasıyla aynı işlev."""
+    from . import personel_ozeti as po
+    projeler, _, yalniz = _kapsam()
+    secili = _secili_projeler()
+    if len(secili) > 1:
+        raise _Red(400, 'proje tek bir proje kodu olmalı (boş = kapsamdaki tüm projeler).')
+    args = {k: request.args.get(k, '') for k in ('donem', 'durum', 'grup', 'sutun', 'tarih1', 'tarih2')}
+    args['proje'] = secili[0] if secili else ''
+    try:
+        f, hatalar, uyarilar = po.filtre_coz(args, projeler, bugun=datetime.now().date())
+    except PermissionError:
+        raise _Red(403, 'Bu anahtarın kapsamı dışındaki proje istendi.')
+    if hatalar:
+        raise _Red(400, ' '.join(hatalar))
+    if yalniz:
+        if f['durum'] != 'onayli' and (request.args.get('durum') or '').strip():
+            uyarilar.insert(0, 'Bu anahtar yalnız onaylı kayıtları görür; durum süzgeci yok sayıldı.')
+        f['durum'] = 'onayli'
+    ozet_ = po.personel_ozeti(_panel().baglanti(), projeler, None, f)
+    g.api_satir = ozet_['kisi_sayisi']
+    sonuc = dict(ok=True, **po.api_gorunumu(ozet_, f))
+    if uyarilar:
+        sonuc['uyari'] = ' '.join(uyarilar)
     return jsonify(sonuc)
 
 
