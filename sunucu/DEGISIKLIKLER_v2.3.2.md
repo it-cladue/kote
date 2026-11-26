@@ -10,6 +10,15 @@
 - `gyazo-onbellekle` ve gece planı artık Gyazo + Snappark + Teamzone görsellerini kopyalar; raporda tür bazlı sayaçlar. Yeni ayar `DIS_GORSEL_PROXY` (varsayılan `GYAZO_PROXY` ile aynı; 0 = kapalı).
 - Kayıt ayrıntısında yeni `link_kaynak` alanı; yeni aktarımlarda Snappark kimliği doğru okunur (mevcut kayıtlar değişmez).
 
+## Gyazo arızasında hızlı geçiş (26 Kasım)
+
+Sunucuda `gyazo-onbellekle` denemesinde Gyazo kaynağı çoğu görsele HTTP 503 verdi (Gyazo arızası; yalnız Cloudflare önbelleğindeki görseller açıldı) ve her bağlantıda yeniden deneme beklemesi komutu dakikalarca uzatıyordu.
+
+- Aynı servisten art arda 10 HTTP 5xx gelince komut **arıza moduna** geçer: kalan bağlantılar bekleme ve yeniden deneme olmadan hızla "açılamayan" olarak işaretlenir, günlüğe "muhtemelen Gyazo arızası" uyarısı düşer, sonuçta `ariza` listesi yer alır. Açılamayanlar bir sonraki çalıştırmada (gece planı) yeniden denenir; kalıcı kayıp yoktur.
+- Geçici hatada yeniden deneme beklemesi 5 sn → 1 sn.
+- HTTP 503 açıklaması: "Gyazo yanıt vermiyor (HTTP 503: Gyazo arızası ya da silinmiş görsel; sonraki çalıştırmada yeniden denenir)". Ön kontrolde var olmayan kimlik için 503/404 normal sayılır.
+- `t.gyazo.com` hem Gyazo hem Teamzone için izinli ana makine (Teamzone bağlantıları buraya yönlendiriyor; önceden "izinli olmayan ana makine" ile reddediliyordu).
+
 ## API anahtarları: dış sistemler için salt okunur erişim
 
 - Yönetim → **API anahtarları** (yalnız süperadmin): ad, proje kapsamı (tümü ya da seçim), yalnız onaylı kayıtlar (varsayılan açık), SQL sorgu izni ve görsel indirme izni (varsayılan kapalı), isteğe bağlı son kullanma tarihi. Anahtar (`kp_…`) bir kez gösterilir; sunucuda yalnız özeti saklanır. İptal, son kullanım zamanı/IP, istek sayısı ve son 50 istek sayfada görünür; oluşturma/iptal İşlem Geçmişi'ne yazılır.
