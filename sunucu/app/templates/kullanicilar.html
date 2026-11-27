@@ -59,8 +59,7 @@
   </tr>
   <tr id="duzenle-{{ u.kullanici_adi }}" hidden><td colspan="5">
     {% if not u.duzenlenebilir %}
-    <p class="salt-okunur-not bilgi">{{ u.rol_adi }} hesabını yalnız <b>sahip</b> düzenleyebilir (rol, şifre, pasife alma). Kendi şifrenizi üst menüdeki "Şifre" bağlantısından değiştirirsiniz.</p>
-    <div class="form-eylemler"><button type="button" class="btn" data-ac="duzenle-{{ u.kullanici_adi }}">Kapat</button></div>
+    <p class="salt-okunur-not bilgi">{{ u.rol_adi }} hesabını yalnız <b>sahip</b> düzenleyebilir (rol, şifre, pasife alma); iki adımlı doğrulama zorunluluğu aşağıdan değiştirilebilir. Kendi şifrenizi üst menüdeki "Şifre" bağlantısından değiştirirsiniz.</p>
     {% else %}
     <form method="post" autocomplete="off" class="kullanici-duzenle-govde" aria-label="{{ u.kullanici_adi }} hesabını düzenle" data-kullanici-form data-hedef="{{ u.kullanici_adi }}" data-eski-rol="{{ p.rol }}" data-eski-aktif="{{ 1 if u.aktif else 0 }}">
       <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="islem" value="guncelle"><input type="hidden" name="ad" value="{{ u.kullanici_adi }}"><input type="hidden" name="expected_version" value="{{ u.hesap_surumu }}">
@@ -101,6 +100,7 @@
           <option value="politika" {{ 'selected' if u.iki_adim_hesap == 'politika' }}>Politikaya göre (şu an: {{ iki_adim_politika_adi }})</option>
         </select></label>
       <button class="btn kucuk">Zorunluluğu kaydet</button></form>
+    {% if not u.duzenlenebilir %}<div class="form-eylemler"><button type="button" class="btn" data-ac="duzenle-{{ u.kullanici_adi }}">Kapat</button></div>{% endif %}
   </td></tr>
   {% else %}<tr><td colspan="5"><div class="bos-tablo">Henüz kullanıcı yok.</div></td></tr>{% endfor %}
   </tbody></table></div>

@@ -134,6 +134,17 @@ def test_yeni_kullanici_formu_kutu_isaretli_ve_metin(web):
     assert 'yeni hesaplar varsayılan olarak zorunlu; hesap ayarı politikadan önce gelir' in html
 
 
+def test_kutu_degeri_1_disinda_dolu_gelse_de_isaretli_sayilir(web):
+    """Elle yapılmış bir formda kutu value="on" gönderirse de hesap zorunlu açılır; yalnız "0"/"hayir" ya da boş değer kaldırır."""
+    c, a = web
+    login(c)
+    for ad, deger, beklenen in (('on.kisi', 'on', 1), ('evet.kisi', 'evet', 1), ('bos.kisi', '', 0), ('hayir.kisi', 'hayir', 0), ('sifir.kisi', '0', 0)):
+        r = c.post('/yonetim/kullanicilar', data={'csrf': csrf(c), 'islem': 'ekle', 'ad': ad, 'gorunen_ad': ad, 'sifre': PW, 'rol': 'admin',
+                                                 'projeler': 'OF', 'iki_adim_alan': '1', 'iki_adim_zorunlu': deger})
+        assert r.status_code == 302, (ad, r.data[:300])
+        assert kullanicilar.bul(a, ad)['iki_adim_zorunlu'] == beklenen, (ad, deger)
+
+
 @pytest.mark.parametrize('alan', [True, False], ids=['kutu-isaretli', 'alan-yok-eski-form'])
 def test_varsayilan_form_zorunlu_kapali_politikada_ilk_giriste_kurulum(web, alan):
     c, a = web
@@ -259,6 +270,10 @@ def test_superadmin_ve_sahip_herkesinkini_kaldirir(web, saat):
     for ad in ('testadmin', 'ikinci', 'sahip2', 'okur'):
         assert 'name="islem" value="iki_adim_zorunlu"' in satir_formu(html, ad), ad
     assert 'yalnız <b>sahip</b> düzenleyebilir' in satir_formu(html, 'sahip2')
+    # düzenlenemeyen satırda not, zorunluluk formunun aşağıda olduğunu söyler ve Kapat düğmesi formun altındadır
+    sahip_satiri = satir_formu(html, 'sahip2')
+    assert 'zorunluluğu aşağıdan değiştirilebilir' in sahip_satiri
+    assert sahip_satiri.index('name="islem" value="iki_adim_zorunlu"') < sahip_satiri.index('>Kapat</button>')
     for ad in ('ikinci', 'sahip2', 'okur', 'testadmin'):  # başka süperadmin, sahip, proje kullanıcısı, kendisi
         assert zorunluluk(c, a, ad, '0').status_code == 302, ad
         assert kullanicilar.bul(a, ad)['iki_adim_zorunlu'] == 0, ad
@@ -365,6 +380,7 @@ def test_cli_2fa_zorunlu_ve_durum_sutunu(web, monkeypatch, capsys):
     assert re.search(r'okur\s+zorunlu-bekliyor\s+zorunlu\b', out) and re.search(r'testadmin\s+yok\s+zorunlu değil', out)
     veri = json.loads(calistir('2fa-durum', '--json'))
     assert {h['kullanici']: h['hesap_ayari'] for h in veri['hesaplar']} == {'okur': 'zorunlu', 'testadmin': 'zorunlu değil'}
+    assert {h['kullanici']: h['hesap_ayari_kod'] for h in veri['hesaplar']} == {'okur': 'zorunlu', 'testadmin': 'degil'}
     calistir('2fa-zorunlu', 'okur', 'politika')
     assert kullanicilar.bul(a, 'okur')['iki_adim_zorunlu'] is None
     assert re.search(r'okur\s+yok\s+politikaya göre', calistir('2fa-durum'))

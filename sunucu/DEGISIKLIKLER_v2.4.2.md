@@ -36,7 +36,10 @@ Kısaca: **hesap ayarı politikadan önce gelir**; genel politika yalnız "Polit
 kullanıcıları, diğer süperadminler, sahip ve kendi hesapları. (Süperadmin, sahibin satırında başka bir şeyi düzenleyemese de
 bu seçim orada da vardır.) Başka hiçbir rol değiştiremez; kullanıcı kendi zorunluluğunu "2FA" ya da "Şifre" sayfasından
 kaldıramaz. Her değişiklik İşlem Geçmişi'ne "Kullanıcı güncelleme" olarak, kimin yaptığı ve "2FA zorunluluğu: zorunlu →
-zorunlu değil" gibi eski → yeni değerle yazılır.
+zorunlu değil" gibi eski → yeni değerle yazılır. Bir ayrıntı: kendi hesabı "Zorunlu" olup henüz kurmamış bir süperadmin ya da
+sahip girişte önce kurulum sayfasına yönlenir; kendi zorunluluğunu kurulumdan önce kaldıramaz. Gerekirse başka bir süperadmin/sahip
+Kullanıcılar sayfasından ya da sunucudan `2fa-zorunlu AD hayir` kaldırır. `2fa-durum --json` çıktısında etiketin yanında
+`hesap_ayari_kod` (`zorunlu` / `degil` / `politika`) alanı da vardır.
 
 ### Kullanıcılar sayfası
 

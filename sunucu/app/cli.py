@@ -217,7 +217,7 @@ def _iki_adim_durum(c,args):
         satirlar.append(dict(kullanici=u['kullanici_adi'],aktif=bool(u['aktif']),durum=iki_adim.durum_etiketi(u,pol),
                              kurulum=u.get('iki_adim_tarih'),kalan_kurtarma=iki_adim.kalan_kurtarma(c,u['kullanici_adi']) if iki_adim.acik_mi(u) else 0,
                              guvenilen_cihaz=len(iki_adim.cihazlar(c,u['kullanici_adi'])),
-                             hesap_ayari=iki_adim.HESAP_AYAR_ADLARI[iki_adim.hesap_ayari(u)]))
+                             hesap_ayari=iki_adim.HESAP_AYAR_ADLARI[iki_adim.hesap_ayari(u)],hesap_ayari_kod=iki_adim.hesap_ayari(u)))
     if args.json:
         print(json.dumps(dict(politika=pol,guven_gun=gun,hesaplar=satirlar),ensure_ascii=False,indent=2));return
     print('Politika (IKI_ADIM_ZORUNLU):',{'kapali':'kapalı (isteğe bağlı)','yonetici':'yöneticilere zorunlu','hepsi':'herkese zorunlu'}[pol])

@@ -1750,7 +1750,7 @@ def yonetim_kullanicilar():
                 # 2.4.2: formdan açılan hesap varsayılan olarak 2FA zorunludur (kutu işaretli → 1, genel politika ne olursa olsun).
                 # Kutu kaldırılırsa 0 = zorunlu değil; bu sayfa zaten yalnız süperadmin/sahibe açık. Alan işareti (iki_adim_alan)
                 # olmayan eski/önbellekteki form da 1 kaydeder.
-                zorunlu=0 if request.form.get('iki_adim_alan')=='1' and request.form.get('iki_adim_zorunlu')!='1' else 1
+                zorunlu=0 if request.form.get('iki_adim_alan')=='1' and (request.form.get('iki_adim_zorunlu') or '0').strip() in ('0','hayir') else 1
                 kullanicilar.ekle(AYAR,ad,rol,password,gorunen or ad,actor,ip=ip(),iki_adim_zorunlu=zorunlu)
                 _gecici_sifre_sakla(ad,password,uretildi)
                 mesaj='Hesap açıldı: '+ad+'. İlk girişte değiştirilecek şifre aşağıdaki kutuda.'
