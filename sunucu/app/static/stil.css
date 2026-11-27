@@ -1057,3 +1057,6 @@ pre.api-kod code { background: none; color: inherit; padding: 0; font-size: inhe
   .ust, .bilgi-serit, .uyari-serit, .sayfa-baslik .baslik-eylemler, .form-eylemler, .kurulum-kart, .iki-adim-izgara { display: none !important; }
   .kurtarma-kart { border: 0; }
 }
+
+/* 2.4.2: masaüstündeki 2FA sütununda rozet (açık / zorunlu, bekliyor) kelime ortasından bölünmez; sütun telefonda zaten gizli. */
+.iki-adim-hucre .durum-etiket { white-space: nowrap; }
