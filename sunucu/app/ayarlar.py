@@ -91,7 +91,11 @@ KAYIT = [
          '"Kapalı": isteyen kendi açar. "Yöneticiler": sahip, süperadmin ve onay (kt) yetkisi olan herkes. "Herkes": bütün panel '
          'kullanıcıları. Zorunlu olup henüz kurmamış kişi giriş yapabilir ama kurulumu bitirene kadar yalnız kurulum sayfasını görür '
          '(bekleme süresi yok; siz de kurmadıysanız kaydettiğiniz anda kurulum sayfasına yönlendirilirsiniz). Kimin kurmadığı '
-         'Kullanıcılar sayfasındaki "2FA" sütununda görünür. API anahtarları ve Telegram botu etkilenmez.',
+         'Kullanıcılar sayfasındaki "2FA" sütununda görünür. API anahtarları ve Telegram botu etkilenmez. '
+         '2.4.2: bu ayar yalnız kendi ayarı "Politikaya göre" olan hesaplara uygulanır (2.4.2 öncesinden kalan hesaplar ya da '
+         'Düzenle formunda böyle seçilenler). Kullanıcılar sayfasındaki "Yeni kullanıcı" formundan açılan hesaplar varsayılan '
+         'olarak zorunludur (kutu işaretli = zorunlu); kutuyu kaldırmak ya da sonradan "Zorunlu değil" seçmek yalnız süperadmin '
+         've sahibe açıktır. Hesabın kendi ayarı (Zorunlu / Zorunlu değil) bu ayardan önce gelir.',
          'secim', 'kapali', secenekler=[('kapali', 'Kapalı (isteğe bağlı)'), ('yonetici', 'Yöneticiler (sahip, süperadmin, onay yetkilileri)'),
                                          ('hepsi', 'Herkes')], okuyan='Panel (her istek)'),
     Ayar('IKI_ADIM_GUVEN_GUN', 'Güvenlik', '"Bu cihazda sorma" süresi (gün)',

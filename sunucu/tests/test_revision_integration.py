@@ -49,7 +49,7 @@ def test_form_creates_project_bound_admin_and_only_superadmin_can_mutate_catalog
     conn=db.baglan(config['DB']);assert katalog.get_project(conn,'ZZ')['aktif'];conn.close()
     assert not yetki.izin(parsed,'ZZ','oku')
     assert client.post('/yonetim/katalog',data={'csrf':csrf(client),'islem':'proje_kaydet','code':'ZZ','label':'Eski form','color':'#112233','active':'1'}).status_code==409
-    kullanicilar.guncelle(config,'newadmin',sifre_degistir=0)
+    kullanicilar.guncelle(config,'newadmin',sifre_degistir=0,iki_adim_zorunlu=0)  # 2.4.2: formdan açılan hesap 2FA zorunlu; burada yalnız yetki sınanır
     client.post('/cikis',data={'csrf':csrf(client)});login(client,'newadmin')
     assert client.post('/yonetim/katalog',data={'csrf':csrf(client),'islem':'proje_kaydet','code':'EVIL'}).status_code==403
 

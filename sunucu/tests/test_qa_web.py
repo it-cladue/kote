@@ -53,7 +53,7 @@ def test_kullanici_cikisi_admin_formunu_dusurmez_eski_cerez_yine_reddedilir(web)
     u0 = hesap(a, 'ayse'); assert u0['hesap_surumu'] == 2 and u0['session_version'] == 2  # ekle(1) + guncelle(+1), ikisi birlikte
     html = c.get('/yonetim/kullanicilar').data.decode()
     ev = sayfadaki_surum(html, 'ayse'); assert ev == u0['hesap_surumu']
-    assert html.count('name="ad" value="ayse"><input type="hidden" name="expected_version" value="%d"' % ev) == 2  # guncelle + sifre formları aynı sayacı taşır
+    assert html.count('name="ad" value="ayse"><input type="hidden" name="expected_version" value="%d"' % ev) == 3  # guncelle + sifre + 2FA zorunluluğu (2.4.2) formları aynı sayacı taşır
     # Kullanıcı iki cihazda girer; giriş sürümü artırmaz. Cihaz 1 çıkış yapar.
     cihaz1 = ikinci_istemci(c, 'ayse'); cihaz2 = ikinci_istemci(c, 'ayse')
     assert hesap(a, 'ayse')['session_version'] == 2

@@ -78,6 +78,9 @@ sayfasına yönlenirsiniz; kendi kurulum sayfanız her zaman açıktır, yani po
 Kimin kurmadığı **Kullanıcılar** sayfasındaki yeni **2FA** sütununda görünür: `açık` / `yok` / `zorunlu, bekliyor`; listenin
 üstünde "Henüz kurmayan: …" satırı ve geçerli politika yazar.
 
+> 2.4.2 ile: Kullanıcılar formundan açılan yeni hesaplar varsayılan olarak zorunludur; zorunluluğu hesap başına yalnız süperadmin ve
+> sahip kaldırır, politika yalnız "Politikaya göre" hesaplara uygulanır — ayrıntı `DEGISIKLIKLER_v2.4.2.md`.
+
 ### Sıfırlama ve güvenilen cihazları iptal
 
 Kullanıcılar → hesabın **Düzenle** satırı → **İki adımlı doğrulama** bölümü (yalnız sahip görür ve yapar):

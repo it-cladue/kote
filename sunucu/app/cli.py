@@ -76,6 +76,8 @@ def main():
     ia.add_argument('ad',help='Kullanıcı adı');ia.add_argument('--kim',default='sunucu-cli',metavar='AD',help="İşlem Geçmişi'ne yazılacak kullanıcı adı (varsayılan sunucu-cli)")
     iad=_alt(sub,'2fa-durum','İki adımlı doğrulama durumu (2.4.1): politika, güven süresi ve her hesabın durumu (açık / yok / zorunlu-bekliyor)')
     iad.add_argument('--json',action='store_true',help='JSON olarak yaz')
+    iaz=_alt(sub,'2fa-zorunlu','Hesap başına iki adımlı doğrulama zorunluluğu (2.4.2): evet = zorunlu, hayir = zorunlu değil, politika = genel politikaya göre (IKI_ADIM_ZORUNLU)')
+    iaz.add_argument('ad',help='Kullanıcı adı');iaz.add_argument('secim',choices=('evet','hayir','politika'),metavar='SECIM',help='evet | hayir | politika')
     ay=_alt(sub,'ayar','Çalışma ayarları (panelde Yönetim → Çalışma ayarları ile aynı): listele, değiştir, varsayılana döndür. Öncelik: veritabanı > .env > varsayılan')
     ay.add_argument('ad',nargs='?',metavar='AD',help='Ayar adı, ör. BEKLEYEN_OZET_SAAT')
     ay.add_argument('deger',nargs='?',metavar='DEGER',help='Yeni değer (boş değer için "")')
@@ -194,6 +196,7 @@ def main():
         elif args.command=='veritabani-kur': print('Veritabanı hazır:',AYAR['DB'])
         elif args.command=='2fa-sifirla': _iki_adim_sifirla(c,args)
         elif args.command=='2fa-durum': _iki_adim_durum(c,args)
+        elif args.command=='2fa-zorunlu': _iki_adim_zorunlu(c,args)
     finally:c.close()
 
 def _iki_adim_sifirla(c,args):
@@ -202,7 +205,7 @@ def _iki_adim_sifirla(c,args):
     try:
         onceki,cihaz=iki_adim.sifirla(c,ad,args.kim)
     except ValueError as e: raise SystemExit('Hata: '+str(e))
-    if onceki: print('İki adımlı doğrulama sıfırlandı:',ad,'(%d güvenilen cihaz kaldırıldı; açık oturumlar kapandı). Politika zorunlu kılıyorsa bir sonraki girişte yeniden kurar.' % cihaz)
+    if onceki: print('İki adımlı doğrulama sıfırlandı:',ad,'(%d güvenilen cihaz kaldırıldı; açık oturumlar kapandı). Hesap ayarı ya da politika zorunlu kılıyorsa bir sonraki girişte yeniden kurar.' % cihaz)
     else: print('Bu hesapta iki adımlı doğrulama zaten kapalıydı:',ad,'(kalan kayıtlar temizlendi; açık oturumlar kapandı).')
 
 def _iki_adim_durum(c,args):
@@ -213,15 +216,30 @@ def _iki_adim_durum(c,args):
         u=dict(r)
         satirlar.append(dict(kullanici=u['kullanici_adi'],aktif=bool(u['aktif']),durum=iki_adim.durum_etiketi(u,pol),
                              kurulum=u.get('iki_adim_tarih'),kalan_kurtarma=iki_adim.kalan_kurtarma(c,u['kullanici_adi']) if iki_adim.acik_mi(u) else 0,
-                             guvenilen_cihaz=len(iki_adim.cihazlar(c,u['kullanici_adi']))))
+                             guvenilen_cihaz=len(iki_adim.cihazlar(c,u['kullanici_adi'])),
+                             hesap_ayari=iki_adim.HESAP_AYAR_ADLARI[iki_adim.hesap_ayari(u)]))
     if args.json:
         print(json.dumps(dict(politika=pol,guven_gun=gun,hesaplar=satirlar),ensure_ascii=False,indent=2));return
     print('Politika (IKI_ADIM_ZORUNLU):',{'kapali':'kapalı (isteğe bağlı)','yonetici':'yöneticilere zorunlu','hepsi':'herkese zorunlu'}[pol])
     print('Güvenilen cihaz süresi (IKI_ADIM_GUVEN_GUN):',('%d gün' % gun) if gun else 'kapalı')
     adlar={'acik':'açık','yok':'yok','zorunlu_bekliyor':'zorunlu-bekliyor'}
+    print('  %-24s %-17s %-16s' % ('KULLANICI','DURUM','HESAP AYARI'))
     for s in satirlar:
         ek=(' · kurtarma %d · cihaz %d · kurulum %s' % (s['kalan_kurtarma'],s['guvenilen_cihaz'],s['kurulum'] or '-')) if s['durum']=='acik' else ''
-        print('  %-24s %-17s%s%s' % (s['kullanici'],adlar[s['durum']],'' if s['aktif'] else ' (pasif)',ek))
+        print('  %-24s %-17s %-16s%s%s' % (s['kullanici'],adlar[s['durum']],s['hesap_ayari'],'' if s['aktif'] else ' (pasif)',ek))
+    print('Hesap ayarı politikadan önce gelir; değiştirmek için: python -m app.cli 2fa-zorunlu <kullanıcı> evet|hayir|politika')
+
+def _iki_adim_zorunlu(c,args):
+    """2.4.2: hesap başına zorunluluk; İşlem Geçmişi'ne 'sunucu-cli' olarak yazılır. Açık oturum düşmez."""
+    from . import iki_adim, kullanicilar
+    ad=str(args.ad or '').strip().lower()
+    deger={'evet':1,'hayir':0,'politika':None}[args.secim]
+    try:
+        u=kullanicilar.guncelle(AYAR,ad,islem_yapan='sunucu-cli',iki_adim_zorunlu=deger)
+    except ValueError as e: raise SystemExit('Hata: '+str(e))
+    etkin='zorunlu' if iki_adim.zorunlu_mu(u,conn=c) else 'zorunlu değil'
+    print('2FA zorunluluğu kaydedildi:',ad,'→',iki_adim.HESAP_AYAR_ADLARI[iki_adim.hesap_ayari(u)],
+          '(şu an etkin: %s%s)' % (etkin,'; kurulu' if iki_adim.acik_mi(u) else ''))
 
 def _erisim_izin(c,args):
     """stdout: okunur durum. Kendini panelden dışarıda bırakan sahip için: sunucuda (SSH) liste gösterilir, adres eklenir ya da temizlenir."""

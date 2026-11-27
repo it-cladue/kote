@@ -1,18 +1,25 @@
 /* 2.4.1: iki adımlı doğrulama uçtan uca tarayıcı senaryosu (tests/test_v241_iki_adim.py çalıştırır; Node + Playwright yoksa atlanır).
    Kurulum sayfasındaki anahtar sayfadan okunur, kod bu betikte aynı algoritmayla (RFC 6238, HMAC-SHA1) hesaplanır.
-   Ortam: PANEL_URL, EKRAN_KLASORU (ekran görüntüleri; varsayılan /tmp/kanit-ekran/p241). Hesaplar: testadmin (sahip), okur. */
+   Ortam: PANEL_URL, EKRAN_KLASORU (ekran görüntüleri; varsayılan /tmp/kanit-ekran/p241), EKRAN_KLASORU_242 (2.4.2 adımları;
+   varsayılan /tmp/kanit-ekran/p242). Hesaplar: testadmin (sahip), okur (hesap ayarı yok = politikaya göre).
+   2.4.2: politika 'kapali' iken formdan açılan hesap (kutu varsayılan işaretli) ilk girişte kuruluma zorlanır; sahip
+   "Zorunlu değil" seçince bir sonraki istekte ana sayfa açılır. Kutu kaldırılarak açılan hesap zorunlu değildir. */
 'use strict';
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { chromium } = require('playwright');
 
 const PANEL = process.env.PANEL_URL;
 const EKRAN = process.env.EKRAN_KLASORU || '/tmp/kanit-ekran/p241';
+const EKRAN242 = process.env.EKRAN_KLASORU_242 || '/tmp/kanit-ekran/p242';
 const SIFRE = 'Test-Password-123!';
+fs.mkdirSync(EKRAN242, { recursive: true });
 
 function adim(m) { process.stdout.write('ADIM ' + m + '\n'); }
 function dogrula(kosul, mesaj) { if (!kosul) throw new Error('DOĞRULAMA: ' + mesaj); }
 async function ekran(page, ad) { await page.screenshot({ path: path.join(EKRAN, ad + '.png'), fullPage: true }); }
+async function ekran242(page, ad) { await page.screenshot({ path: path.join(EKRAN242, ad + '.png'), fullPage: true }); }
 
 function base32(s) {
   const harfler = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -178,6 +185,7 @@ async function cikisYap(page) {
     await page.goto(PANEL + '/yonetim/kullanicilar');
     dogrula((await page.getAttribute('#kullanici-testadmin td.iki-adim-hucre', 'data-iki-adim')) === 'acik', 'testadmin: açık');
     dogrula((await page.getAttribute('#kullanici-okur td.iki-adim-hucre', 'data-iki-adim')) === 'zorunlu_bekliyor', 'okur: zorunlu-bekliyor');
+    dogrula((await page.getAttribute('#kullanici-okur td.iki-adim-hucre [data-iki-adim-hesap]', 'data-iki-adim-hesap')) === 'politika', 'okur: hesap ayarı politikaya göre (2.4.2)');
     dogrula((await page.textContent('#iki-adim-bekleyen')).includes('okur'), 'henüz kurmayanlar listesi');
     await ekran(page, '10-kullanicilar-2fa-sutunu');
     adim('Kullanıcılar sayfası telefonda (390 px): 2FA durumu Durum hücresinde, tablo sığıyor');
@@ -214,10 +222,89 @@ async function cikisYap(page) {
     await ekran(op, '12-zorunlu-kurulum-telefon');
     await okurBaglam.close();
 
-    adim('politikayı geri al');
+    adim('politikayı geri al (kapalı)');
     await page.goto(PANEL + '/yonetim/ayarlar');
     await page.selectOption('#deger-IKI_ADIM_ZORUNLU', 'kapali');
     await Promise.all([page.waitForNavigation(), page.click('#ayar-IKI_ADIM_ZORUNLU form.ay-form button')]);
+
+    adim('2.4.2: politika kapalı; formdan yeni kullanıcı, 2FA kutusu varsayılan işaretli → zorunlu');
+    await page.goto(PANEL + '/yonetim/kullanicilar#yeni-kullanici');
+    dogrula(await page.isChecked('#yeni-kullanici input[name="iki_adim_zorunlu"]'), 'yeni kullanıcı formunda 2FA kutusu işaretli');
+    dogrula((await page.textContent('#yeni-iki-adim-not')).includes('kaldırmak yalnız süperadmin ve sahibe açıktır'), 'kutunun altındaki açıklama');
+    dogrula((await page.textContent('#kullanici-listesi-baslik + p')).includes('yeni hesaplar varsayılan olarak zorunlu; hesap ayarı politikadan önce gelir'), 'başlıkta 2.4.2 notu');
+    await page.fill('#yeni-kullanici input[name="ad"]', 'yeni_kisi');
+    await page.fill('#yeni-kullanici input[name="gorunen_ad"]', 'Yeni Kişi');
+    await page.check('#yeni-kullanici input[name="projeler"][value="OF"]');
+    await page.$eval('#yeni-kullanici', (e) => e.scrollIntoView());
+    await page.screenshot({ path: path.join(EKRAN242, '01-yeni-kullanici-2fa-kutusu-isaretli.png') });
+    await Promise.all([page.waitForNavigation(), page.click('#yeni-kullanici button.birincil')]);
+    const geciciSifre = (await page.textContent('#gecici-sifre-deger')).trim();
+    dogrula(geciciSifre.length >= 12, 'geçici şifre gösterildi');
+    dogrula((await page.getAttribute('#kullanici-yeni_kisi td.iki-adim-hucre', 'data-iki-adim')) === 'zorunlu_bekliyor', 'yeni_kisi: zorunlu, bekliyor');
+    dogrula((await page.getAttribute('#kullanici-yeni_kisi td.iki-adim-hucre [data-iki-adim-hesap]', 'data-iki-adim-hesap')) === 'zorunlu', 'yeni_kisi: hesap ayarı zorunlu');
+    dogrula((await page.textContent('#kullanici-yeni_kisi td.iki-adim-hucre')).includes('hesap ayarı: zorunlu'), 'hesap ayarı notu');
+    dogrula((await page.getAttribute('#kullanici-okur td.iki-adim-hucre', 'data-iki-adim')) === 'yok', 'okur (politikaya göre) kapalı politikada: yok');
+    dogrula((await page.textContent('#iki-adim-bekleyen')).includes('yeni_kisi'), 'yeni_kisi "Henüz kurmayan" listesinde');
+    await ekran242(page, '02-kullanicilar-hesap-ayari-zorunlu');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    dogrula((await page.textContent('#kullanici-yeni_kisi [data-iki-adim-telefon]')).includes('zorunlu, bekliyor'), 'telefonda: zorunlu, bekliyor');
+    dogrula((await page.textContent('#kullanici-yeni_kisi [data-iki-adim-telefon]')).includes('hesap ayarı: zorunlu'), 'telefonda hesap ayarı notu');
+    dogrula(await telefonSigiyor(page), 'kullanıcılar sayfası 390 px\'te yatay kaymıyor (2.4.2)');
+    await ekran242(page, '03-kullanicilar-hesap-ayari-telefon');
+    await page.setViewportSize({ width: 1280, height: 900 });
+
+    adim('2.4.2: yeni kullanıcı geçici şifreyle girer → şifre değiştirir → zorunlu kurulum sayfası');
+    const yeniBaglam = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'tr-TR' });
+    const yp = await yeniBaglam.newPage();
+    izle(yp);
+    await yp.goto(PANEL + '/giris');
+    await yp.fill('input[name="kullanici"]', 'yeni_kisi');
+    await yp.fill('input[name="sifre"]', geciciSifre);
+    await Promise.all([yp.waitForNavigation(), yp.click('button[type="submit"]')]);
+    if (!yp.url().endsWith('/sifre')) await yp.goto(PANEL + '/');
+    dogrula(yp.url().endsWith('/sifre'), 'ilk girişte şifre değiştirme sayfası: ' + yp.url());
+    await yp.fill('#sifre-eski', geciciSifre);
+    await yp.fill('#sifre-yeni', 'Yeni-Kisi-Parola-42!');
+    await yp.fill('#sifre-yeni2', 'Yeni-Kisi-Parola-42!');
+    await Promise.all([yp.waitForNavigation(), yp.click('form:has(#sifre-yeni) button[type="submit"]')]);
+    await yp.goto(PANEL + '/kayitlar');
+    dogrula(yp.url().endsWith('/profil/iki-adim'), 'şifre değişince yalnız kurulum sayfası: ' + yp.url());
+    dogrula(await yp.isVisible('#iki-adim-zorunlu') && !(await yp.$('#ana-menu')), 'zorunlu açıklaması, menü yok');
+    dogrula(await telefonSigiyor(yp), 'kurulum sayfası telefonda sığıyor');
+    await ekran242(yp, '04-yeni-kullanici-zorunlu-kurulum-telefon');
+
+    adim('2.4.2: sahip "Zorunlu değil" seçer → yeni_kisi bir sonraki istekte ana sayfayı açar');
+    await page.goto(PANEL + '/yonetim/kullanicilar');
+    await page.click('td.islem-hucre button[data-ac="duzenle-yeni_kisi"]');
+    const secici = '#duzenle-yeni_kisi form[data-iki-adim-zorunluluk] select[name="iki_adim_zorunlu"]';
+    dogrula((await page.$eval(secici, (e) => e.value)) === '1', 'zorunluluk formunda "Zorunlu" seçili');
+    dogrula((await page.textContent(secici + ' option[value="politika"]')).includes('Politikaya göre (şu an: isteğe bağlı)'), 'politika seçeneği metni');
+    await page.selectOption(secici, '0');
+    await page.$eval(secici, (e) => e.scrollIntoView({ block: 'center' }));
+    await page.screenshot({ path: path.join(EKRAN242, '05-zorunlulugu-kaldir.png') });
+    await Promise.all([page.waitForNavigation(), page.click('#duzenle-yeni_kisi form[data-iki-adim-zorunluluk] button')]);
+    dogrula((await page.getAttribute('#kullanici-yeni_kisi td.iki-adim-hucre', 'data-iki-adim')) === 'yok', 'yeni_kisi: yok');
+    dogrula((await page.getAttribute('#kullanici-yeni_kisi td.iki-adim-hucre [data-iki-adim-hesap]', 'data-iki-adim-hesap')) === 'degil', 'yeni_kisi: hesap ayarı zorunlu değil');
+    const bekleyen = await page.$('#iki-adim-bekleyen');
+    dogrula(!bekleyen || !(await bekleyen.textContent()).includes('yeni_kisi'), 'yeni_kisi "Henüz kurmayan" listesinden çıktı');
+    await ekran242(page, '06-kullanicilar-zorunlu-degil');
+    await yp.goto(PANEL + '/');
+    dogrula(new URL(yp.url()).pathname === '/', 'açık oturum bir sonraki istekte ana sayfayı açtı: ' + yp.url());
+    dogrula(!(await yp.$('#iki-adim-zorunlu')) && (await yp.$('#ana-menu')) !== null, 'menü var, zorunlu kurulum uyarısı yok');
+    await ekran242(yp, '07-zorunlu-degil-ana-sayfa-telefon');
+    await yeniBaglam.close();
+
+    adim('2.4.2: kutu kaldırılarak açılan hesap: yok + hesap ayarı zorunlu değil');
+    await page.goto(PANEL + '/yonetim/kullanicilar#yeni-kullanici');
+    await page.fill('#yeni-kullanici input[name="ad"]', 'serbest_kisi');
+    await page.check('#yeni-kullanici input[name="projeler"][value="OF"]');
+    await page.uncheck('#yeni-kullanici input[name="iki_adim_zorunlu"]');
+    await Promise.all([page.waitForNavigation(), page.click('#yeni-kullanici button.birincil')]);
+    dogrula((await page.getAttribute('#kullanici-serbest_kisi td.iki-adim-hucre', 'data-iki-adim')) === 'yok', 'serbest_kisi: yok');
+    dogrula((await page.getAttribute('#kullanici-serbest_kisi td.iki-adim-hucre [data-iki-adim-hesap]', 'data-iki-adim-hesap')) === 'degil', 'serbest_kisi: hesap ayarı zorunlu değil');
+    dogrula((await page.textContent('#kullanici-serbest_kisi td.iki-adim-hucre')).includes('hesap ayarı: zorunlu değil'), 'serbest_kisi notu');
+    await ekran242(page, '08-kutusuz-hesap');
 
     dogrula(hatalar.length === 0, 'sayfa ya da konsol hatası yok: ' + hatalar.join(' | '));
     process.stdout.write('TAMAM\n');

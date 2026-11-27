@@ -1040,6 +1040,9 @@ pre.api-kod code { background: none; color: inherit; padding: 0; font-size: inhe
 .iki-adim-izgara .form-iki { grid-template-columns: 1fr; }
 .iki-adim-hucre small { display: block; color: var(--soluk); }
 .iki-adim-telefon { display: none; }
+/* 2.4.2: hesap başına 2FA zorunluluğu politikadan farklıysa küçük not */
+.iki-adim-hucre small.iki-adim-hesap { font-size: 12px; }
+.iki-adim-telefon small.iki-adim-hesap { margin-left: 6px; }
 .durum-etiket.uyari-etiket { background: var(--sari-yumusak); color: var(--sari); }
 .iki-adim-yonetim { border-top: 1px dashed var(--cizgi); margin-top: 12px; padding-top: 10px; }
 .iki-adim-yonetim form { margin: 6px 0; }

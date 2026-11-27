@@ -163,7 +163,42 @@ def yonetici_mi(kullanici):
     return bool(yk['admin'] or any('kt' in eylemler for eylemler in yk['projeler'].values()))
 
 
+HESAP_AYARLARI = ('politika', 'zorunlu', 'degil')
+HESAP_AYAR_ADLARI = {'politika': 'politikaya göre', 'zorunlu': 'zorunlu', 'degil': 'zorunlu değil'}
+POLITIKA_ADLARI = {'kapali': 'isteğe bağlı', 'yonetici': 'yöneticilere zorunlu', 'hepsi': 'herkese zorunlu'}
+
+
+def hesap_ayari(kullanici):
+    """2.4.2: hesabın kendi zorunluluk ayarı: 'zorunlu' (1) | 'degil' (0) | 'politika' (NULL / sütun yok)."""
+    deger = (kullanici or {}).get('iki_adim_zorunlu')
+    if deger is None or deger == '':
+        return 'politika'
+    try:
+        return 'zorunlu' if int(deger) else 'degil'
+    except (TypeError, ValueError):
+        return 'politika'
+
+
+def hesap_ayari_degeri(metin):
+    """Form / CLI girdisini sütun değerine çevirir: 'zorunlu'/'evet'/'1' → 1, 'degil'/'hayir'/'0' → 0,
+    'politika'/'' → None. Tanınmayan girdi ValueError."""
+    m = str('' if metin is None else metin).strip().lower()
+    if m in ('', 'politika', 'null', 'none'):
+        return None
+    if m in ('1', 'zorunlu', 'evet', 'on', 'true'):
+        return 1
+    if m in ('0', 'degil', 'değil', 'hayir', 'hayır', 'off', 'false'):
+        return 0
+    raise ValueError('İki adımlı doğrulama zorunluluğu için geçersiz değer: zorunlu, zorunlu değil ya da politikaya göre seçin.')
+
+
 def zorunlu_mu(kullanici, pol=None, conn=None):
+    """Etkin zorunluluk: önce hesabın kendi ayarı (2.4.2), o 'politikaya göre' ise genel politika."""
+    ayar = hesap_ayari(kullanici)
+    if ayar == 'zorunlu':
+        return True
+    if ayar == 'degil':
+        return False
     pol = pol or politika(conn)
     if pol == 'hepsi':
         return True
@@ -265,7 +300,7 @@ def kapat(conn, ad, kim=None, ip=None):
 
 def sifirla(conn, ad, kim, ip=None):
     """Sahip ya da sunucu (CLI) sıfırlaması: anahtar, kurtarma kodları ve güvenilen cihazlar silinir, açık oturumlar kapanır.
-    Kullanıcı bir sonraki girişte (politika zorunlu kılıyorsa) yeniden kurar. Dönüş: (önceden açık mıydı, silinen cihaz)."""
+    Kullanıcı bir sonraki girişte (hesap ayarı ya da politika zorunlu kılıyorsa) yeniden kurar. Dönüş: (önceden açık mıydı, silinen cihaz)."""
     with db.transaction(conn):
         u = _kullanici(conn, ad)
         if not u:

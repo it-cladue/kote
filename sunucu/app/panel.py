@@ -251,6 +251,7 @@ def before():
     session.setdefault('csrf',secrets.token_hex(24))
     # 2.4.1: politika iki adımlı doğrulamayı zorunlu kılıyor ve hesap henüz kurmadıysa yalnız kurulum sayfası açılır
     # (geçici şifre önce değiştirilir). Sahip kendi kurulum sayfasına her zaman ulaşır; acil durumda sunucuda 2fa-sifirla.
+    # 2.4.2: zorunlu_mu önce hesabın kendi ayarına (iki_adim_zorunlu 1/0) bakar; g.k her istekte veritabanından okunur.
     g.iki_adim_kilit=bool(g.k and not g.k['sifre_degistir'] and not iki_adim.acik_mi(g.k) and iki_adim.zorunlu_mu(g.k,conn=baglanti()))
     # /sifre yalnız geçici şifre değişimi için serbest; o durumda bu kilit zaten devrede değil, kurulum bekleyen hesap /sifre'yi açamaz.
     if g.iki_adim_kilit and (request.endpoint not in IKI_ADIM_SERBEST or request.endpoint=='sifre_degistir'):
@@ -1735,8 +1736,8 @@ def yonetim_kullanicilar():
             expected=request.form.get('expected_version',request.form.get('sv','-1'))
             actor=g.k['kullanici_adi']
             gorunen=db.metin_temizle(request.form.get('gorunen_ad') or '',120).strip()
-            hedef=kullanicilar.bul(AYAR,ad) if op in ('guncelle','yetki','sifre','pasif','sahip_ata','iki_adim_sifirla','iki_adim_cihazlar') else None
-            if op in ('guncelle','yetki','sifre','pasif','iki_adim_sifirla','iki_adim_cihazlar') and not hedef:raise ValueError('Hesap bulunamadı.')
+            hedef=kullanicilar.bul(AYAR,ad) if op in ('guncelle','yetki','sifre','pasif','sahip_ata','iki_adim_sifirla','iki_adim_cihazlar','iki_adim_zorunlu') else None
+            if op in ('guncelle','yetki','sifre','pasif','iki_adim_sifirla','iki_adim_cihazlar','iki_adim_zorunlu') and not hedef:raise ValueError('Hesap bulunamadı.')
             if op=='ekle':
                 rol=_role_from_form()
                 # 2.4.0: süperadmin/sahip hesabı yalnız sahip açar ve yazılı onay ister (yeni kullanıcı adını yazma).
@@ -1746,7 +1747,11 @@ def yonetim_kullanicilar():
                 password=request.form.get('sifre') or secrets.token_urlsafe(15)
                 if not uretildi and kullanicilar.parola_politikasi(ad,password):raise ValueError(kullanicilar.parola_politikasi(ad,password))
                 # Hesap ilk girişte şifre değiştirmek zorunda açılır (kullanicilar.ekle → sifre_degistir=1).
-                kullanicilar.ekle(AYAR,ad,rol,password,gorunen or ad,actor,ip=ip())
+                # 2.4.2: formdan açılan hesap varsayılan olarak 2FA zorunludur (kutu işaretli → 1, genel politika ne olursa olsun).
+                # Kutu kaldırılırsa 0 = zorunlu değil; bu sayfa zaten yalnız süperadmin/sahibe açık. Alan işareti (iki_adim_alan)
+                # olmayan eski/önbellekteki form da 1 kaydeder.
+                zorunlu=0 if request.form.get('iki_adim_alan')=='1' and request.form.get('iki_adim_zorunlu')!='1' else 1
+                kullanicilar.ekle(AYAR,ad,rol,password,gorunen or ad,actor,ip=ip(),iki_adim_zorunlu=zorunlu)
                 _gecici_sifre_sakla(ad,password,uretildi)
                 mesaj='Hesap açıldı: '+ad+'. İlk girişte değiştirilecek şifre aşağıdaki kutuda.'
             elif op=='guncelle':
@@ -1785,6 +1790,15 @@ def yonetim_kullanicilar():
                 u=kullanicilar.sahip_ata(AYAR,ad,actor,ip())
                 if ad==actor:session['sv']=u['session_version']  # kendini atayan oturumda kalır
                 mesaj=ad+' artık sahip. API anahtarları ve Erişim sınırı sayfaları yalnız sahibe açıktır.'
+            elif op=='iki_adim_zorunlu':
+                # 2.4.2: hesap başına 2FA zorunluluğu (Zorunlu / Zorunlu değil / Politikaya göre). Yalnız süperadmin ve sahip
+                # değiştirir; bunlar HER hesap için değiştirebilir (diğer süperadminler, sahip, kendi hesapları dahil).
+                # Satırın diğer düzenleme kısıtları burada uygulanmaz. Açık oturum düşmez.
+                if not (g.yk.get('admin') or g.yk.get('sahip')):raise kullanicilar.Yasak('İki adımlı doğrulama zorunluluğunu yalnız süperadmin ve sahip değiştirebilir.')
+                deger=iki_adim.hesap_ayari_degeri(request.form.get('iki_adim_zorunlu'))
+                u=kullanicilar.guncelle(AYAR,ad,expected_version=expected if expected not in (None,'','-1') else None,islem_yapan=actor,ip=ip(),iki_adim_zorunlu=deger)
+                mesaj='%s: iki adımlı doğrulama zorunluluğu → %s (şu an %s).' % (ad,iki_adim.HESAP_AYAR_ADLARI[iki_adim.hesap_ayari(u)],
+                      'zorunlu' if iki_adim.zorunlu_mu(u,conn=baglanti()) else 'zorunlu değil')
             elif op in ('iki_adim_sifirla','iki_adim_cihazlar'):
                 # 2.4.1: iki adımlı doğrulamayı sıfırlama / güvenilen cihazları iptal yalnız sahipte (telefon kaybı vb.).
                 if not g.yk.get('sahip'):raise kullanicilar.Yasak('İki adımlı doğrulamayı sıfırlamayı ve güvenilen cihazları iptal etmeyi yalnız sahip yapabilir.')
@@ -1808,7 +1822,8 @@ def yonetim_kullanicilar():
     for user in kullanicilar.hepsi(AYAR):
         parsed=yetki.coz(user['yetki']);rol=yetki.rol_kodu(user['yetki'])
         safe={k:v for k,v in user.items() if k not in ('sifre_hash','iki_adim_sir')}
-        safe.update(iki_adim=iki_adim.durum_etiketi(user,pol),iki_adim_cihaz=cihaz_sayilari.get(user['kullanici_adi'],0))
+        safe.update(iki_adim=iki_adim.durum_etiketi(user,pol),iki_adim_cihaz=cihaz_sayilari.get(user['kullanici_adi'],0),
+                    iki_adim_hesap=iki_adim.hesap_ayari(user))
         safe.update(ozet=yetki.ozet(user['yetki']),rol=rol,rol_adi=yetki.ROL_ADLARI[rol],
                     duzenlenebilir=ben_sahip or rol=='proje',
                     parsed_yetkiler=dict(rol={'sahip':'sahip','superadmin':'superadmin'}.get(rol,'admin'),
@@ -1818,7 +1833,7 @@ def yonetim_kullanicilar():
     sahip_var=kullanicilar.aktif_sahip_var(AYAR)
     return render_template('kullanicilar.html',kullanicilar=users,mesaj=mesaj,tum_projeler=projeler(),gecici_sifre=gecici,
                            ben_sahip=ben_sahip,sahip_var=sahip_var,sahip_adaylari=[u for u in users if u['aktif']],
-                           iki_adim_politika=pol,iki_adim_bekleyen=[u['kullanici_adi'] for u in users if u['aktif'] and u['iki_adim']=='zorunlu_bekliyor']),durum
+                           iki_adim_politika=pol,iki_adim_politika_adi=iki_adim.POLITIKA_ADLARI[pol],iki_adim_bekleyen=[u['kullanici_adi'] for u in users if u['aktif'] and u['iki_adim']=='zorunlu_bekliyor']),durum
 
 
 @app.route('/yonetim/api-anahtarlari',methods=['GET','POST'])

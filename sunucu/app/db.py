@@ -181,9 +181,11 @@ def _ready(conn):
         # 2.3.3: hatirlatma_isaret tablosu (2 saat hatırlatmasının kime hangi kayıt için gittiği; core_schema_25).
         # 2.4.0 (B1): api_anahtarlari.izinli_ipler sütunu (anahtar başına IP listesi; core_schema_240_erisim).
         # 2.4.1: iki adımlı doğrulama sütunları ve iki_adim_kurtarma / iki_adim_cihazlar tabloları (core_schema_241_iki_adim).
+        # 2.4.2: hesap başına iki adımlı doğrulama zorunluluğu, panel_kullanicilari.iki_adim_zorunlu (core_schema_242_iki_adim_hesap).
         return (ayar_al(conn, 'core_schema_23') == '1' and ayar_al(conn, 'core_schema_24') == '1'
                 and ayar_al(conn, 'core_schema_25') == '1' and ayar_al(conn, 'core_schema_240_erisim') == '1'
-                and ayar_al(conn, 'core_schema_241_iki_adim') == '1')
+                and ayar_al(conn, 'core_schema_241_iki_adim') == '1'
+                and ayar_al(conn, 'core_schema_242_iki_adim_hesap') == '1')
     except sqlite3.OperationalError:
         return False
 
@@ -225,6 +227,8 @@ def baglan(yol):
             # 2.4.1: iki adımlı doğrulama; mevcut hesaplarda kapalı (0) başlar, kullanıcı kurana kadar giriş değişmez.
             _add_columns(conn, 'panel_kullanicilari', [('iki_adim_acik','INTEGER DEFAULT 0'),('iki_adim_sir','TEXT'),
                                                         ('iki_adim_son_sayac','INTEGER DEFAULT 0'),('iki_adim_tarih','TEXT')])
+            # 2.4.2: hesap başına zorunluluk. NULL = politikaya göre (mevcut hesaplar böyle kalır), 1 = zorunlu, 0 = zorunlu değil.
+            _add_columns(conn, 'panel_kullanicilari', [('iki_adim_zorunlu','INTEGER')])
             from . import katalog, donusum_isleri, yetki
             katalog.ensure_schema(conn)
             donusum_isleri.ensure_schema(conn)
@@ -233,6 +237,7 @@ def baglan(yol):
             ayar_yaz(conn, 'core_schema_25', '1')
             ayar_yaz(conn, 'core_schema_240_erisim', '1')
             ayar_yaz(conn, 'core_schema_241_iki_adim', '1')
+            ayar_yaz(conn, 'core_schema_242_iki_adim_hesap', '1')
         return conn
     except BaseException:
         conn.close()

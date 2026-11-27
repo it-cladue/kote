@@ -41,7 +41,24 @@ def _canonical(conn, role):
     return yetki.kanonikle(role, codes)
 
 
-def ekle(ayar, ad, yetki_metni, sifre, gorunen_ad=None, olusturan=None, ip=None):
+def _iki_adim_zorunlu_dogrula(deger):
+    """2.4.2: hesap başına zorunluluk yalnız None (politikaya göre), 0 (zorunlu değil) ya da 1 (zorunlu) olabilir."""
+    if deger is None:
+        return None
+    if deger in (0, 1, False, True) and not isinstance(deger, str):
+        return int(deger)
+    raise ValueError('İki adımlı doğrulama zorunluluğu için geçersiz değer.')
+
+
+def iki_adim_zorunlu_adi(deger):
+    return {None: 'politikaya göre', 1: 'zorunlu', 0: 'zorunlu değil'}.get(deger, 'politikaya göre')
+
+
+def ekle(ayar, ad, yetki_metni, sifre, gorunen_ad=None, olusturan=None, ip=None, iki_adim_zorunlu=None):
+    """iki_adim_zorunlu (2.4.2): None = politikaya göre (CLI / ilk kurulum / doğrudan çağrılar), 0 = zorunlu değil,
+    1 = zorunlu. Kullanıcılar sayfasındaki form varsayılan olarak 1 gönderir (kutu işaretli); 0 yalnız süperadmin/sahip
+    kutuyu kaldırınca gelir."""
+    iki_adim_zorunlu = _iki_adim_zorunlu_dogrula(iki_adim_zorunlu)
     ad = (ad or '').strip().lower()
     if not re.fullmatch(r'[a-z0-9_.]{1,40}', ad):
         raise ValueError('Kullanıcı adı a-z, rakam, nokta/alt çizgi olmalı.')
@@ -52,10 +69,12 @@ def ekle(ayar, ad, yetki_metni, sifre, gorunen_ad=None, olusturan=None, ip=None)
         role = _canonical(conn, yetki_metni)
         if conn.execute('SELECT 1 FROM panel_kullanicilari WHERE kullanici_adi=?', (ad,)).fetchone():
             raise ValueError('Bu kullanıcı adı zaten var.')
-        conn.execute('INSERT INTO panel_kullanicilari(kullanici_adi,ad,sifre_hash,yetki,olusturma,sifre_degistir) VALUES(?,?,?,?,?,1)',
-                     (ad, (gorunen_ad or ad)[:120], hash_value, role, db.simdi()))
+        conn.execute('INSERT INTO panel_kullanicilari(kullanici_adi,ad,sifre_hash,yetki,olusturma,sifre_degistir,iki_adim_zorunlu) VALUES(?,?,?,?,?,1,?)',
+                     (ad, (gorunen_ad or ad)[:120], hash_value, role, db.simdi(), iki_adim_zorunlu))
         db.denetim_yaz(conn, olusturan or 'sunucu-cli', 'kullanici_ekle', anahtar=ad, ip=ip,
-                       yeni={'ad': gorunen_ad or ad, 'yetki': role, 'aktif': 1}, hedef_turu='hesap', hedef_id=ad)
+                       yeni={'ad': gorunen_ad or ad, 'yetki': role, 'aktif': 1, 'iki_adim_zorunlu': iki_adim_zorunlu},
+                       hedef_turu='hesap', hedef_id=ad,
+                       aciklama='2FA zorunluluğu: ' + iki_adim_zorunlu_adi(iki_adim_zorunlu))
         db.degisti(conn)
 
 
@@ -69,9 +88,11 @@ def guncelle(ayar, ad, expected_version=None, islem_yapan=None, ip=None, **alanl
         if len(alanlar['sifre'] or '') < 8:
             raise ValueError('Parola en az 8 karakter olmalı.')
         alanlar['sifre_hash'] = generate_password_hash(alanlar.pop('sifre'))
-    allowed = {'sifre_hash', 'yetki', 'aktif', 'sifre_degistir', 'ad'}
+    allowed = {'sifre_hash', 'yetki', 'aktif', 'sifre_degistir', 'ad', 'iki_adim_zorunlu'}
     if any(k not in allowed for k in alanlar):
         raise ValueError('Geçersiz hesap alanı.')
+    if 'iki_adim_zorunlu' in alanlar:
+        alanlar['iki_adim_zorunlu'] = _iki_adim_zorunlu_dogrula(alanlar['iki_adim_zorunlu'])
     with connection(ayar) as conn, db.transaction(conn):
         user = conn.execute('SELECT * FROM panel_kullanicilari WHERE kullanici_adi=?', (ad,)).fetchone()
         if not user:
@@ -96,19 +117,27 @@ def guncelle(ayar, ad, expected_version=None, islem_yapan=None, ip=None, **alanl
         if was_sahip and not will_sahip and aktif_sahip_sayisi(conn) <= 1:
             raise ValueError('Son sahip hesabı kapatılamaz veya rolü düşürülemez. Önce başka bir hesabı sahip yapın.')
         changed = {key: value for key, value in alanlar.items() if user[key] != value}
+        # 2.4.2: yalnız 2FA zorunluluğu gönderildiyse (ayrı küçük form / CLI) açık oturum düşmez ve giriş kilidi elenmez;
+        # bir sonraki istekte kurulum kilidi yeni değere göre çalışır.
+        yalniz_2fa = set(alanlar) == {'iki_adim_zorunlu'}
         # "Kaydet" kilidi de açar: hiçbir alan değişmese bile kilitli ya da hatalı giriş sayacı dolu hesap sıfırlanır (Kullanıcılar sayfası etiketi bunu söyler).
-        kilit_acilir = bool(user['kilit_bitis']) or (user['hatali_giris'] or 0) > 0
+        kilit_acilir = not yalniz_2fa and (bool(user['kilit_bitis']) or (user['hatali_giris'] or 0) > 0)
         if changed:
             sets = ','.join(key + '=?' for key in changed)
-            conn.execute('UPDATE panel_kullanicilari SET ' + sets + ',session_version=session_version+1,hesap_surumu=hesap_surumu+1,hatali_giris=0,kilit_bitis=NULL WHERE kullanici_adi=?',
+            ek = ',hesap_surumu=hesap_surumu+1' if yalniz_2fa else ',session_version=session_version+1,hesap_surumu=hesap_surumu+1,hatali_giris=0,kilit_bitis=NULL'
+            conn.execute('UPDATE panel_kullanicilari SET ' + sets + ek + ' WHERE kullanici_adi=?',
                          (*changed.values(), ad))
             public_keys = [key for key in changed if key != 'sifre_hash']
             before = {key: user[key] for key in public_keys}
             after = {key: changed[key] for key in public_keys}
             if password_changed:
                 after['parola_degisti'] = True
+            aciklama = None
+            if 'iki_adim_zorunlu' in changed:
+                aciklama = '2FA zorunluluğu: %s → %s' % (iki_adim_zorunlu_adi(user['iki_adim_zorunlu']),
+                                                        iki_adim_zorunlu_adi(changed['iki_adim_zorunlu']))
             db.denetim_yaz(conn, islem_yapan or ad, 'kullanici_guncelle', anahtar=ad, ip=ip,
-                           eski=before, yeni=after, hedef_turu='hesap', hedef_id=ad)
+                           eski=before, yeni=after, hedef_turu='hesap', hedef_id=ad, aciklama=aciklama)
             # 2.4.1: parola, rol ya da etkinlik değişince iki adımlı doğrulamanın güvenilen cihazları da geçersiz olur.
             if {'sifre_hash', 'yetki', 'aktif'} & set(changed):
                 _guvenilen_cihazlari_kaldir(conn, ad, islem_yapan or ad, ip,

@@ -816,3 +816,6 @@ def test_tarayicida_kurulum_kodla_giris_guvenilen_cihaz(web):
         except Exception:
             pass
     assert kullanicilar.bul(a, 'testadmin')['iki_adim_acik'] == 1
+    # 2.4.2 adımları: formdan açılan hesap zorunlu açıldı, sahip kaldırdı; kutusuz açılan hesap baştan zorunlu değil
+    assert kullanicilar.bul(a, 'yeni_kisi')['iki_adim_zorunlu'] == 0 and kullanicilar.bul(a, 'serbest_kisi')['iki_adim_zorunlu'] == 0
+    assert kullanicilar.bul(a, 'okur')['iki_adim_zorunlu'] is None
